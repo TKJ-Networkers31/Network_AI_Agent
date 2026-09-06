@@ -1,4 +1,4 @@
-from  tools.ssh_tols import ssh_execute
+from tools.ssh.client import ssh_execute
 
 
 result = ssh_execute(
@@ -6,4 +6,7 @@ result = ssh_execute(
     "/interface print"
 )
 
-print(result["output"])
+if result["success"]:
+    print(result["output"])
+else:
+    print(f"Gagal: {result['error']}")

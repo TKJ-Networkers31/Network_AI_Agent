@@ -1,8 +1,10 @@
 from agent.engine import (
     run,
     MODEL,
+    SYSTEM_PROMPT,
 )
 
+from agent.memory import ConversationMemory
 from agent.ui import UI
 
 
@@ -10,6 +12,10 @@ def main():
 
     UI.banner(
         MODEL
+    )
+
+    memory = ConversationMemory(
+        system_prompt=SYSTEM_PROMPT
     )
 
     while True:
@@ -39,10 +45,25 @@ def main():
             print("Bye.")
             break
 
+        if user_input.lower() in (
+            "reset",
+            "clear",
+            "lupa"
+        ):
+
+            memory.reset()
+
+            print(
+                "  ✓ Riwayat percakapan telah direset."
+            )
+
+            continue
+
         try:
 
             run(
-                user_input
+                user_input,
+                memory
             )
 
         except Exception as exc:

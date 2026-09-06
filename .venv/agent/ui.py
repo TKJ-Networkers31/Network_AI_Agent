@@ -144,3 +144,17 @@ class UI:
         )
 
         print()
+
+        @staticmethod
+        def confirm(tool_name, arguments):
+
+            print()
+            print("  ⚠ KONFIRMASI DIPERLUKAN")
+            print(f"  Tool   : {tool_name}")
+            print(f"  Args   : {arguments}")
+
+            answer = input(
+                "  Lanjutkan? (y/n): "
+            ).strip().lower()
+
+            return answer in ("y", "yes")

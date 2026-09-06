@@ -3,9 +3,17 @@ import time
 import requests
 
 from agent.ui import UI, Timer
+from agent.logger import (
+    log_llm_request,
+    log_llm_response,
+    log_tool_call,
+    log_tool_result,
+    log_error,
+)
 from tools.registry import (
     TOOL_MAP,
     TOOL_CATEGORY,
+    DANGEROUS_TOOLS,
     execute_tool,
 )
 
@@ -51,6 +59,16 @@ Jika ingin menentukan fungsi interface, gunakan data
 aktual seperti IP address, routing, DHCP, neighbor,
 NAT, dan connectivity.
 
+Jika kamu tidak yakin nama device yang valid, gunakan
+tool 'list_devices' terlebih dahulu.
+
+Kamu memiliki riwayat percakapan sebelumnya dalam sesi
+ini. Gunakan konteks tersebut jika relevan, tapi jika
+data observasi sebelumnya kemungkinan sudah usang
+(misalnya status interface atau resource yang bisa
+berubah), panggil tool lagi untuk data terbaru alih-alih
+mengasumsikan data lama masih berlaku.
+
 Jawablah secara natural.
 
 Untuk hasil teknis, gunakan tabel jika memang membuat
@@ -74,16 +92,19 @@ def build_tools():
             "function": {
                 "name": "ping",
                 "description":
-                    "Melakukan ping dari komputer agent "
-                    "ke target jaringan.",
+                    "Melakukan ping ICMP dari komputer agent "
+                    "ke target jaringan (hostname atau IP).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "target": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Hostname atau IP address tujuan."
                         },
                         "count": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "Jumlah paket ping.",
+                            "default": 4
                         }
                     },
                     "required": [
@@ -130,6 +151,21 @@ def build_tools():
                     "required": [
                         "target"
                     ]
+                }
+            }
+        },
+
+        {
+            "type": "function",
+            "function": {
+                "name": "list_devices",
+                "description":
+                    "Menampilkan semua perangkat jaringan "
+                    "yang terdaftar di inventory.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
                 }
             }
         },
@@ -200,7 +236,27 @@ def build_tools():
             "function": {
                 "name": "get_resources",
                 "description":
-                    "Mengambil resource MikroTik.",
+                    "Mengambil resource (CPU, memory, uptime) MikroTik.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "device_name": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "device_name"
+                    ]
+                }
+            }
+        },
+
+        {
+            "type": "function",
+            "function": {
+                "name": "get_identity",
+                "description":
+                    "Mengambil identity/nama sistem MikroTik.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -220,7 +276,7 @@ def build_tools():
             "function": {
                 "name": "get_firewall",
                 "description":
-                    "Mengambil firewall filter MikroTik.",
+                    "Mengambil firewall filter rules MikroTik.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -240,7 +296,7 @@ def build_tools():
             "function": {
                 "name": "get_nat",
                 "description":
-                    "Mengambil NAT MikroTik.",
+                    "Mengambil aturan NAT MikroTik.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -280,7 +336,27 @@ def build_tools():
             "function": {
                 "name": "get_dhcp_client",
                 "description":
-                    "Mengambil DHCP client MikroTik.",
+                    "Mengambil konfigurasi DHCP client MikroTik.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "device_name": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "device_name"
+                    ]
+                }
+            }
+        },
+
+        {
+            "type": "function",
+            "function": {
+                "name": "get_dhcp_server",
+                "description":
+                    "Mengambil konfigurasi DHCP server MikroTik.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -300,7 +376,7 @@ def build_tools():
             "function": {
                 "name": "get_neighbors",
                 "description":
-                    "Mengambil neighbor discovery MikroTik.",
+                    "Mengambil hasil neighbor discovery (MNDP/CDP) MikroTik.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -334,40 +410,51 @@ def build_tools():
                 }
             }
         },
+
         {
             "type": "function",
             "function": {
-                "name": "list_devices",
-                "description": "Menampilkan semua perangkat jaringan yang terdaftar di inventory.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "ping",
-                "description": "Melakukan ping ICMP ke sebuah hostname atau IP address.",
+                "name": "snmp_get_system_info",
+                "description":
+                    "Mengambil info sistem via SNMP: CPU load, "
+                    "memory usage, uptime, nama sistem. Lebih "
+                    "ringan daripada SSH untuk monitoring rutin.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "target": {
-                            "type": "string",
-                            "description": "Hostname atau IP address tujuan."
-                        },
-                        "count": {
-                            "type": "integer",
-                            "description": "Jumlah paket ping.",
-                            "default": 4
+                        "device_name": {
+                            "type": "string"
                         }
                     },
-                    "required": ["target"]
+                    "required": [
+                        "device_name"
+                    ]
                 }
             }
-        }
+        },
+
+        {
+            "type": "function",
+            "function": {
+                "name": "snmp_get_interface_traffic",
+                "description":
+                    "Mengambil traffic tiap interface via SNMP: "
+                    "status up/down, bytes in/out. Cocok untuk "
+                    "monitoring bandwidth per-interface.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "device_name": {
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "device_name"
+                    ]
+                }
+            }
+        },
+
     ]
 
 
@@ -383,27 +470,50 @@ def call_ollama(messages):
         "stream": False,
     }
 
-    return requests.post(
-        OLLAMA_URL,
-        json=payload,
-        timeout=300
-    ).json()
+    log_llm_request(
+        MODEL,
+        messages
+    )
+
+    try:
+
+        response = requests.post(
+            OLLAMA_URL,
+            json=payload,
+            timeout=300
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        log_llm_response(
+            data
+        )
+
+        return data
+
+    except requests.exceptions.RequestException as exc:
+
+        log_error(
+            "call_ollama",
+            exc
+        )
+
+        return {
+            "error": (
+                f"Tidak bisa menghubungi Ollama di {OLLAMA_URL}: {exc}"
+            )
+        }
 
 
-def run(user_input):
+def run(user_input, memory):
 
     start = time.perf_counter()
 
-    messages = [
-        {
-            "role": "system",
-            "content": SYSTEM_PROMPT
-        },
-        {
-            "role": "user",
-            "content": user_input
-        }
-    ]
+    memory.add_user(
+        user_input
+    )
 
     tool_count = 0
     tool_names = []
@@ -419,10 +529,21 @@ def run(user_input):
     analysis_timer.start()
 
     response = call_ollama(
-        messages
+        memory.get_messages()
     )
 
     analysis_timer.stop()
+
+    if "error" in response:
+
+        UI.error(
+            response["error"]
+        )
+
+        return (
+            f"Terjadi error saat menghubungi model: "
+            f"{response['error']}"
+        )
 
     # ========================================================
     # AGENT LOOP
@@ -435,7 +556,7 @@ def run(user_input):
             {}
         )
 
-        messages.append(
+        memory.add_message(
             message
         )
 
@@ -525,6 +646,35 @@ def run(user_input):
                 "tool"
             )
 
+            # ----------------------------------------------
+            # KONFIRMASI UNTUK TOOL BERBAHAYA
+            # ----------------------------------------------
+
+            if name in DANGEROUS_TOOLS:
+
+                approved = UI.confirm(
+                    name,
+                    arguments
+                )
+
+                if not approved:
+
+                    UI.tool(
+                        name,
+                        category,
+                        status=False
+                    )
+
+                    memory.add_tool_result(
+                        json.dumps({
+                            "success": False,
+                            "error": "Dibatalkan oleh user."
+                        })
+                    )
+
+                    tool_count += 1
+                    continue
+
             UI.tool(
                 name,
                 category
@@ -532,6 +682,16 @@ def run(user_input):
 
             tool_names.append(
                 name
+            )
+
+            device_name = arguments.get(
+                "device_name"
+            )
+
+            log_tool_call(
+                name,
+                arguments,
+                device_name
             )
 
             # ----------------------------------------------
@@ -551,22 +711,23 @@ def run(user_input):
 
             tool_timer.stop()
 
+            log_tool_result(
+                name,
+                result
+            )
+
             tool_count += 1
 
             # ----------------------------------------------
             # TOOL RESULT
             # ----------------------------------------------
 
-            messages.append({
-
-                "role": "tool",
-
-                "content": json.dumps(
+            memory.add_tool_result(
+                json.dumps(
                     result,
                     ensure_ascii=False
                 )
-
-            })
+            )
 
         # ====================================================
         # DECISION / FINALIZATION
@@ -579,7 +740,18 @@ def run(user_input):
         decision_timer.start()
 
         response = call_ollama(
-            messages
+            memory.get_messages()
         )
 
         decision_timer.stop()
+
+        if "error" in response:
+
+            UI.error(
+                response["error"]
+            )
+
+            return (
+                f"Terjadi error saat menghubungi model: "
+                f"{response['error']}"
+            )
