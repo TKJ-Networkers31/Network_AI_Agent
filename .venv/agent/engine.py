@@ -22,7 +22,7 @@ OLLAMA_URL = (
     "http://localhost:11434/api/chat"
 )
 
-MODEL = "qwen3:1.7b"
+MODEL = "qwen3:4b"
 
 MAX_TOOL_CALLS = 10
 
@@ -80,6 +80,22 @@ Jangan memaksakan tabel pada semua jawaban.
 
 Jika pengguna hanya ingin ngobrol, jawab seperti
 asisten biasa dan jangan menggunakan tools.
+
+Kamu memiliki akses ke web_search dan web_fetch untuk
+mencari informasi di internet.
+
+Gunakan web_search hanya jika pertanyaan membutuhkan
+informasi terkini, berita, atau fakta yang mungkin
+berubah dari waktu ke waktu.
+
+Jangan gunakan web_search untuk pertanyaan yang bisa
+kamu jawab dari pengetahuan umum.
+
+Setelah web_search, gunakan web_fetch hanya jika snippet
+hasil pencarian belum cukup menjawab pertanyaan.
+
+Selalu sebutkan sumber (url) ketika menjawab berdasarkan
+hasil pencarian internet.
 """
 
 
@@ -451,6 +467,52 @@ def build_tools():
                     "required": [
                         "device_name"
                     ]
+                }
+            }
+        },
+                {
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description":
+                    "Mencari informasi terkini di internet. "
+                    "Gunakan untuk pertanyaan tentang fakta yang "
+                    "berubah-ubah, berita, atau hal di luar "
+                    "pengetahuanmu.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Kata kunci pencarian."
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "Jumlah hasil (default 5).",
+                            "default": 5
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "web_fetch",
+                "description":
+                    "Mengambil isi teks dari sebuah URL. Gunakan "
+                    "setelah web_search jika butuh detail lebih "
+                    "dalam dari salah satu hasil pencarian.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "URL halaman yang ingin dibaca."
+                        }
+                    },
+                    "required": ["url"]
                 }
             }
         },

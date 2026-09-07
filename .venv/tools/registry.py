@@ -6,6 +6,11 @@ from tools.network.diagnostics import (
 
 from tools.inventory import list_devices
 
+from tools.snmp.monitor import (
+    get_system_info as snmp_get_system_info,
+    get_interface_traffic as snmp_get_interface_traffic,
+)
+
 from tools.mikrotik.routeros import (
     get_interfaces,
     get_ip_addresses,
@@ -21,6 +26,10 @@ from tools.mikrotik.routeros import (
     get_arp,
 )
 
+from tools.web.search import (
+    web_search,
+    web_fetch,
+)
 
 TOOL_CATEGORY = {
     "ping": "network",
@@ -41,7 +50,21 @@ TOOL_CATEGORY = {
     "get_nat": "mikrotik",
     "get_neighbors": "mikrotik",
     "get_arp": "mikrotik",
+
+    "snmp_get_system_info": "snmp",
+    "snmp_get_interface_traffic": "snmp",
+
+    "web_search": "web",
+    "web_fetch": "web",
 }
+
+
+# Semua tool saat ini adalah "print" (read-only) sehingga aman.
+# Set ini disiapkan untuk masa depan: begitu kamu menambahkan tool
+# yang bisa MENGUBAH konfigurasi (add/remove/set/disable/enable dsb),
+# daftarkan nama tool-nya di sini agar engine.py meminta konfirmasi
+# manual dari user sebelum tool tersebut dieksekusi.
+DANGEROUS_TOOLS = set()
 
 
 TOOL_MAP = {
@@ -63,6 +86,12 @@ TOOL_MAP = {
     "get_nat": get_nat,
     "get_neighbors": get_neighbors,
     "get_arp": get_arp,
+
+    "snmp_get_system_info": snmp_get_system_info,
+    "snmp_get_interface_traffic": snmp_get_interface_traffic,
+
+    "web_search": web_search,
+    "web_fetch": web_fetch,
 }
 
 
