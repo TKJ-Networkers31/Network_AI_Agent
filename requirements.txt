@@ -1,0 +1,7 @@
+requests
+paramiko
+pyyaml
+python-dotenv
+pysnmp
+ddgs
+beautifulsoup4
