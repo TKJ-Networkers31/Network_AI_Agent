@@ -49,12 +49,22 @@ class ConversationMemory:
             message
         )
 
-    def add_tool_result(self, content):
+    def add_tool_result(self, content, tool_call_id=None):
+        """
+        tool_call_id wajib diisi kalau provider yang dipakai
+        adalah API eksternal (OpenAI/Groq/dsb) — mereka strict
+        soal ini. Ollama lebih longgar, tapi tetap aman diisi.
+        """
 
-        self.history.append({
+        message = {
             "role": "tool",
             "content": content
-        })
+        }
+
+        if tool_call_id:
+            message["tool_call_id"] = tool_call_id
+
+        self.history.append(message)
 
     def get_messages(self):
         """

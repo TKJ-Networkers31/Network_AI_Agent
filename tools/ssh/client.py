@@ -1,5 +1,6 @@
 import os
 import time
+import threading
 from pathlib import Path
 
 import paramiko
@@ -21,6 +22,22 @@ INVENTORY_FILE = (
 
 MAX_RETRIES = 2
 RETRY_DELAY = 2  # detik
+
+# -----------------------------------------------------------------
+# Connection pool: satu SSHClient dipertahankan per device selama
+# proses agent hidup, alih-alih connect+close di setiap tool call.
+# Ini menghilangkan overhead handshake SSH (bisa ratusan ms - detik
+# per call) untuk perangkat yang sama dipanggil berkali-kali dalam
+# satu sesi atau satu giliran (misal beberapa tool MikroTik
+# sekaligus).
+#
+# Lock per-device mencegah 2 tool call ke device yang sama memakai
+# channel yang sama secara bersamaan (paramiko tidak thread-safe
+# untuk exec_command paralel pada client yang sama).
+# -----------------------------------------------------------------
+
+_pool_lock = threading.Lock()
+_connections = {}  # device_name -> {"client": SSHClient|None, "lock": Lock}
 
 
 def load_inventory():
@@ -50,6 +67,73 @@ def resolve_device_name(device_name, devices):
             return key
 
     return None
+
+
+def _get_pool_entry(device_name):
+
+    with _pool_lock:
+
+        entry = _connections.setdefault(
+            device_name,
+            {"client": None, "lock": threading.Lock()}
+        )
+
+        return entry
+
+
+def _is_alive(client):
+
+    if client is None:
+        return False
+
+    transport = client.get_transport()
+
+    return bool(transport) and transport.is_active()
+
+
+def _open_connection(device, password):
+
+    client = paramiko.SSHClient()
+
+    client.set_missing_host_key_policy(
+        paramiko.AutoAddPolicy()
+    )
+
+    client.connect(
+        hostname=device["host"],
+        port=device.get("port", 22),
+        username=device["username"],
+        password=password,
+        look_for_keys=False,
+        allow_agent=False,
+        timeout=10,
+        banner_timeout=10,
+        auth_timeout=10
+    )
+
+    return client
+
+
+def close_all_connections():
+    """
+    Menutup semua koneksi SSH yang sedang di-pool. Panggil ini
+    (opsional) saat agent shutdown agar tidak meninggalkan koneksi
+    menggantung di perangkat.
+    """
+
+    with _pool_lock:
+
+        for entry in _connections.values():
+
+            client = entry.get("client")
+
+            if client:
+                try:
+                    client.close()
+                except Exception:
+                    pass
+
+        _connections.clear()
 
 
 def ssh_execute(
@@ -100,85 +184,91 @@ def ssh_execute(
             )
         }
 
-    last_error = None
+    entry = _get_pool_entry(device_name)
 
-    for attempt in range(1, MAX_RETRIES + 2):
+    with entry["lock"]:
 
-        client = paramiko.SSHClient()
+        last_error = None
 
-        client.set_missing_host_key_policy(
-            paramiko.AutoAddPolicy()
-        )
+        for attempt in range(1, MAX_RETRIES + 2):
 
-        try:
+            try:
 
-            client.connect(
-                hostname=device["host"],
-                port=device.get("port", 22),
-                username=device["username"],
-                password=password,
-                look_for_keys=False,
-                allow_agent=False,
-                timeout=10,
-                banner_timeout=10,
-                auth_timeout=10
-            )
+                if not _is_alive(entry["client"]):
 
-            stdin, stdout, stderr = (
-                client.exec_command(
-                    command,
-                    timeout=30
+                    entry["client"] = _open_connection(
+                        device,
+                        password
+                    )
+
+                    logger.info(
+                        f"SSH CONNECT | device={device_name} | "
+                        f"koneksi baru dibuat (pool)."
+                    )
+
+                client = entry["client"]
+
+                stdin, stdout, stderr = (
+                    client.exec_command(
+                        command,
+                        timeout=30
+                    )
                 )
-            )
 
-            output = stdout.read().decode(
-                errors="replace"
-            ).strip()
+                output = stdout.read().decode(
+                    errors="replace"
+                ).strip()
 
-            error = stderr.read().decode(
-                errors="replace"
-            ).strip()
+                error = stderr.read().decode(
+                    errors="replace"
+                ).strip()
 
-            # RouterOS kadang mengembalikan pesan error di stderr
-            # walau returncode tetap 0, jadi kita perlakukan
-            # sebagai kegagalan logis.
-            success = not bool(error)
+                # RouterOS kadang mengembalikan pesan error di stderr
+                # walau returncode tetap 0, jadi kita perlakukan
+                # sebagai kegagalan logis.
+                success = not bool(error)
 
-            return {
-                "success": success,
-                "device": device_name,
-                "host": device["host"],
-                "command": command,
-                "output": output,
-                "error": error
-            }
+                return {
+                    "success": success,
+                    "device": device_name,
+                    "host": device["host"],
+                    "command": command,
+                    "output": output,
+                    "error": error
+                }
 
-        except Exception as exc:
+            except Exception as exc:
 
-            last_error = str(exc)
+                last_error = str(exc)
 
-            logger.warning(
-                f"SSH attempt {attempt} gagal untuk "
-                f"device={device_name} command='{command}': {last_error}"
-            )
+                logger.warning(
+                    f"SSH attempt {attempt} gagal untuk "
+                    f"device={device_name} command='{command}': {last_error}"
+                )
 
-            if attempt <= MAX_RETRIES:
-                time.sleep(RETRY_DELAY)
-                continue
+                # Koneksi kemungkinan rusak, buang supaya dibuat
+                # ulang di percobaan berikutnya.
+                try:
+                    if entry["client"]:
+                        entry["client"].close()
+                except Exception:
+                    pass
 
-        finally:
+                entry["client"] = None
 
-            client.close()
+                if attempt <= MAX_RETRIES:
+                    time.sleep(RETRY_DELAY)
+                    continue
 
-    log_error(
-        f"ssh_execute({device_name}, {command})",
-        last_error
-    )
-
-    return {
-        "success": False,
-        "device": device_name,
-        "error": (
-            f"Gagal setelah {MAX_RETRIES + 1} percobaan: {last_error}"
+        log_error(
+            f"ssh_execute({device_name}, {command})",
+            last_error
         )
-    }
+
+        return {
+            "success": False,
+            "device": device_name,
+            "error": (
+                f"Gagal setelah {MAX_RETRIES + 1} percobaan: {last_error}"
+            )
+        }

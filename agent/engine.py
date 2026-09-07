@@ -1,11 +1,8 @@
 import json
 import time
-import requests
 
 from agent.ui import UI, Timer
 from agent.logger import (
-    log_llm_request,
-    log_llm_response,
     log_tool_call,
     log_tool_result,
     log_error,
@@ -16,13 +13,8 @@ from tools.registry import (
     DANGEROUS_TOOLS,
     execute_tool,
 )
+from agent.providers import call_model
 
-
-OLLAMA_URL = (
-    "http://localhost:11434/api/chat"
-)
-
-MODEL = "qwen3:4b"
 
 MAX_TOOL_CALLS = 10
 
@@ -96,6 +88,20 @@ hasil pencarian belum cukup menjawab pertanyaan.
 
 Selalu sebutkan sumber (url) ketika menjawab berdasarkan
 hasil pencarian internet.
+
+Kamu memiliki long-term memory yang tersimpan lintas sesi
+lewat tool 'remember', 'recall', dan 'forget'.
+
+Gunakan 'remember' jika user memberi informasi yang jelas
+sebaiknya diingat untuk sesi mendatang, seperti preferensi,
+threshold monitoring, atau konfigurasi standar.
+
+Gunakan 'recall' jika user menanyakan sesuatu yang mungkin
+pernah disimpan sebelumnya dan tidak ada di riwayat
+percakapan saat ini.
+
+Jangan gunakan 'remember' untuk hal sepele atau sementara
+yang tidak perlu diingat lintas sesi.
 """
 
 
@@ -517,56 +523,73 @@ def build_tools():
             }
         },
 
+        {
+            "type": "function",
+            "function": {
+                "name": "remember",
+                "description":
+                    "Simpan fakta penting yang harus diingat "
+                    "lintas sesi, misalnya preferensi user, "
+                    "threshold monitoring, atau konfigurasi "
+                    "standar yang disebutkan user.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "Nama singkat fakta, misal 'threshold_cpu_r1'."
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": "Isi fakta yang ingin diingat."
+                        }
+                    },
+                    "required": ["key", "value"]
+                }
+            }
+        },
+
+        {
+            "type": "function",
+            "function": {
+                "name": "recall",
+                "description":
+                    "Cari fakta yang pernah disimpan sebelumnya "
+                    "berdasarkan kata kunci.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+
+        {
+            "type": "function",
+            "function": {
+                "name": "forget",
+                "description":
+                    "Hapus fakta yang tersimpan berdasarkan key-nya.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string"
+                        }
+                    },
+                    "required": ["key"]
+                }
+            }
+        },
+
     ]
 
 
 TOOLS = build_tools()
-
-
-def call_ollama(messages):
-
-    payload = {
-        "model": MODEL,
-        "messages": messages,
-        "tools": TOOLS,
-        "stream": False,
-    }
-
-    log_llm_request(
-        MODEL,
-        messages
-    )
-
-    try:
-
-        response = requests.post(
-            OLLAMA_URL,
-            json=payload,
-            timeout=300
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-        log_llm_response(
-            data
-        )
-
-        return data
-
-    except requests.exceptions.RequestException as exc:
-
-        log_error(
-            "call_ollama",
-            exc
-        )
-
-        return {
-            "error": (
-                f"Tidak bisa menghubungi Ollama di {OLLAMA_URL}: {exc}"
-            )
-        }
 
 
 def run(user_input, memory):
@@ -590,8 +613,9 @@ def run(user_input, memory):
 
     analysis_timer.start()
 
-    response = call_ollama(
-        memory.get_messages()
+    response = call_model(
+        memory.get_messages(),
+        TOOLS
     )
 
     analysis_timer.stop()
@@ -731,7 +755,8 @@ def run(user_input, memory):
                         json.dumps({
                             "success": False,
                             "error": "Dibatalkan oleh user."
-                        })
+                        }),
+                        tool_call_id=call.get("id")
                     )
 
                     tool_count += 1
@@ -788,7 +813,8 @@ def run(user_input, memory):
                 json.dumps(
                     result,
                     ensure_ascii=False
-                )
+                ),
+                tool_call_id=call.get("id")
             )
 
         # ====================================================
@@ -801,8 +827,9 @@ def run(user_input, memory):
 
         decision_timer.start()
 
-        response = call_ollama(
-            memory.get_messages()
+        response = call_model(
+            memory.get_messages(),
+            TOOLS
         )
 
         decision_timer.stop()

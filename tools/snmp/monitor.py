@@ -1,34 +1,49 @@
-from tools.snmp.client import snmp_get, snmp_walk
+from tools.snmp.client import snmp_batch
 from tools.snmp import oids as O
 
 
 def get_system_info(device_name):
 
-    base_result = snmp_get(
+    batch = snmp_batch(
         device_name,
-        O.SYSTEM_OIDS
+        gets={
+            "system": O.SYSTEM_OIDS,
+        },
+        walks={
+            "cpu": O.CPU_LOAD_BASE_OID,
+            "mem_descr": O.STORAGE_DESCR_BASE_OID,
+            "mem_size": O.STORAGE_SIZE_BASE_OID,
+            "mem_used": O.STORAGE_USED_BASE_OID,
+        }
     )
 
-    if not base_result.get("success"):
+    if not batch.get("success"):
 
         return {
-            **base_result,
+            **batch,
             "tool": "get_system_info",
             "category": "snmp",
         }
 
-    values = base_result["values"]
+    results = batch["results"]
+    system_entry = results["system"]
 
-    cpu_walk = snmp_walk(
-        device_name,
-        O.CPU_LOAD_BASE_OID
-    )
+    if system_entry["error"]:
+
+        return {
+            "success": False,
+            "tool": "get_system_info",
+            "category": "snmp",
+            "error": system_entry["error"],
+        }
+
+    values = system_entry["value"] or {}
 
     cpu_cores = []
 
-    if cpu_walk.get("success"):
+    if not results["cpu"]["error"]:
 
-        for _, value in cpu_walk["values"]:
+        for _, value in (results["cpu"]["value"] or []):
 
             try:
                 cpu_cores.append(int(value))
@@ -40,8 +55,10 @@ def get_system_info(device_name):
         if cpu_cores else None
     )
 
-    memory_info = _get_memory_usage(
-        device_name
+    memory_info = _extract_memory_usage(
+        results["mem_descr"],
+        results["mem_size"],
+        results["mem_used"],
     )
 
     return {
@@ -58,27 +75,23 @@ def get_system_info(device_name):
     }
 
 
-def _get_memory_usage(device_name):
+def _extract_memory_usage(descr_entry, size_entry, used_entry):
 
-    descr_walk = snmp_walk(device_name, O.STORAGE_DESCR_BASE_OID)
-    size_walk = snmp_walk(device_name, O.STORAGE_SIZE_BASE_OID)
-    used_walk = snmp_walk(device_name, O.STORAGE_USED_BASE_OID)
-
-    if not (
-        descr_walk.get("success")
-        and size_walk.get("success")
-        and used_walk.get("success")
-    ):
+    if descr_entry["error"] or size_entry["error"] or used_entry["error"]:
         return None
+
+    descr_walk = descr_entry["value"] or []
+    size_walk = size_entry["value"] or []
+    used_walk = used_entry["value"] or []
 
     for (
         (_, descr_val),
         (_, size_val),
         (_, used_val)
     ) in zip(
-        descr_walk["values"],
-        size_walk["values"],
-        used_walk["values"],
+        descr_walk,
+        size_walk,
+        used_walk,
     ):
 
         if (
@@ -107,46 +120,67 @@ def _get_memory_usage(device_name):
 
 def get_interface_traffic(device_name):
 
-    descr_walk = snmp_walk(
+    batch = snmp_batch(
         device_name,
-        O.IF_DESCR_BASE_OID
+        walks={
+            "descr": O.IF_DESCR_BASE_OID,
+            "status": O.IF_OPER_STATUS_BASE_OID,
+            "in": O.IF_IN_OCTETS_BASE_OID,
+            "out": O.IF_OUT_OCTETS_BASE_OID,
+        }
     )
 
-    if not descr_walk.get("success"):
+    if not batch.get("success"):
 
         return {
-            **descr_walk,
+            **batch,
             "tool": "get_interface_traffic",
             "category": "snmp",
         }
 
-    status_walk = snmp_walk(device_name, O.IF_OPER_STATUS_BASE_OID)
-    in_walk = snmp_walk(device_name, O.IF_IN_OCTETS_BASE_OID)
-    out_walk = snmp_walk(device_name, O.IF_OUT_OCTETS_BASE_OID)
+    results = batch["results"]
+    descr_entry = results["descr"]
+
+    if descr_entry["error"]:
+
+        return {
+            "success": False,
+            "tool": "get_interface_traffic",
+            "category": "snmp",
+            "error": descr_entry["error"],
+        }
+
+    descr_walk = descr_entry["value"] or []
+
+    status_walk = (
+        results["status"]["value"] or []
+        if not results["status"]["error"] else []
+    )
+
+    in_walk = (
+        results["in"]["value"] or []
+        if not results["in"]["error"] else []
+    )
+
+    out_walk = (
+        results["out"]["value"] or []
+        if not results["out"]["error"] else []
+    )
 
     interfaces = []
 
-    for i, (_, descr_val) in enumerate(descr_walk["values"]):
+    for i, (_, descr_val) in enumerate(descr_walk):
 
         status_val = (
-            status_walk["values"][i][1]
-            if status_walk.get("success")
-            and i < len(status_walk["values"])
-            else None
+            status_walk[i][1] if i < len(status_walk) else None
         )
 
         in_val = (
-            in_walk["values"][i][1]
-            if in_walk.get("success")
-            and i < len(in_walk["values"])
-            else None
+            in_walk[i][1] if i < len(in_walk) else None
         )
 
         out_val = (
-            out_walk["values"][i][1]
-            if out_walk.get("success")
-            and i < len(out_walk["values"])
-            else None
+            out_walk[i][1] if i < len(out_walk) else None
         )
 
         interfaces.append({

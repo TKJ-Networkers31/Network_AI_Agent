@@ -145,16 +145,19 @@ class UI:
 
         print()
 
-        @staticmethod
-        def confirm(tool_name, arguments):
+    # FIX: sebelumnya nested di dalam summary() sehingga UI.confirm()
+    # tidak pernah bisa dipanggil (AttributeError begitu ada tool
+    # masuk DANGEROUS_TOOLS). Sekarang sejajar sebagai method class.
+    @staticmethod
+    def confirm(tool_name, arguments):
 
-            print()
-            print("  ⚠ KONFIRMASI DIPERLUKAN")
-            print(f"  Tool   : {tool_name}")
-            print(f"  Args   : {arguments}")
+        print()
+        print("  ⚠ KONFIRMASI DIPERLUKAN")
+        print(f"  Tool   : {tool_name}")
+        print(f"  Args   : {arguments}")
 
-            answer = input(
-                "  Lanjutkan? (y/n): "
-            ).strip().lower()
+        answer = input(
+            "  Lanjutkan? (y/n): "
+        ).strip().lower()
 
-            return answer in ("y", "yes")
+        return answer in ("y", "yes")
