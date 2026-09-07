@@ -21,6 +21,14 @@ load_dotenv(BASE_DIR / ".env")
 #                       format OpenAI (OpenAI, Groq, OpenRouter,
 #                       Together, DeepSeek, Mistral, dsb).
 #
+# PENTING: "type" di sini HARUS persis "ollama" atau "openai",
+# karena call_model() di bawah mencocokkan string ini secara
+# exact match untuk memilih handler yang dipakai. Kalau kamu
+# tulis label bebas (mis. "Open Router") di sini, call_model()
+# tidak akan mengenalinya dan selalu return error
+# "Tipe provider '...' tidak dikenal." — ini penyebab error
+# yang kamu alami.
+#
 # Tinggal tambah entry baru di sini kalau mau daftarkan API lain.
 # ============================================================
 
@@ -42,9 +50,9 @@ PROVIDERS = {
 
     "Nemotron 3.5 Lightning": {
         "label": "Open Router: Nemotron 3.5 Lightning",
-        "type": "Open Router",
+        "type": "openai",
         "model": "nvidia/nemotron-3.5-lightning:free",
-        "base_url": "https://openrouter.ai/api/v1/chat/completions",
+        "base_url": "https://openrouter.ai/api/v1",
         "api_key_env": "OPENROUTER_API",
     },
 
@@ -184,6 +192,12 @@ def _call_openai_compatible(config, messages, tools):
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
+        # OpenRouter merekomendasikan header ini (opsional untuk
+        # OpenAI/Groq/dll, tapi tidak berbahaya dikirim ke semua
+        # provider kompatibel-OpenAI). Membantu OpenRouter
+        # mengidentifikasi aplikasi kamu di dashboard mereka.
+        "HTTP-Referer": "http://localhost",
+        "X-Title": "Network AI Agent",
     }
 
     payload = {
@@ -217,10 +231,19 @@ def _call_openai_compatible(config, messages, tools):
 
     except requests.exceptions.RequestException as exc:
 
-        log_error("call_openai_compatible", exc)
+  
+        detail = str(exc)
+
+        if getattr(exc, "response", None) is not None:
+            try:
+                detail = f"{detail} | body: {exc.response.text[:500]}"
+            except Exception:
+                pass
+
+        log_error("call_openai_compatible", detail)
 
         return {
             "error": (
-                f"Tidak bisa menghubungi {config['base_url']}: {exc}"
+                f"Tidak bisa menghubungi {config['base_url']}: {detail}"
             )
         }
