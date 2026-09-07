@@ -4,11 +4,11 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-from agent.long_term_memory import remember_fact, recall_facts
-from agent.logger import log_error, log_llm_request, log_llm_response
+from agent.memory_store.long_term import remember_fact, recall_facts
+from agent.core.logger import log_error, log_llm_request, log_llm_response
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+BASE_DIR = Path(__file__).resolve().parents[2]
 
 load_dotenv(BASE_DIR / ".env")
 
@@ -62,7 +62,11 @@ PROVIDERS = {
 
 }
 
-DEFAULT_PROVIDER_KEY = "ollama-qwen3-4b"
+# FIX SYNC: sebelumnya default ke qwen3:4b, padahal hasil audit
+# hardware (ThinkPad X270, i7-7500U, 8GB DDR4, CPU-only) sudah
+# menyimpulkan qwen3:1.7b sebagai model yang paling pas. Default
+# provider disamakan dengan kesimpulan itu.
+DEFAULT_PROVIDER_KEY = "ollama-qwen3-1.7b"
 ACTIVE_MODEL_FACT_KEY = "active_model_provider"
 
 
@@ -116,8 +120,14 @@ def get_active_provider():
 def call_model(messages, tools):
     """
     Memanggil provider yang sedang aktif. Selalu mengembalikan
-    bentuk seragam {"message": {...}} atau {"error": "..."}
-    supaya agent/engine.py tidak perlu tahu bedanya provider.
+    bentuk seragam {"message": {...}, "usage": {...}|None} atau
+    {"error": "..."} supaya agent/engine.py tidak perlu tahu
+    bedanya provider.
+
+    'usage' ditambahkan supaya token tracker (agent/token_tracker.py)
+    bisa mencatat pemakaian token tiap request, baik dari Ollama
+    (prompt_eval_count/eval_count) maupun dari provider eksternal
+    (field 'usage' standar OpenAI-compatible).
     """
 
     key, config = get_active_provider()
@@ -182,6 +192,31 @@ def _normalize_message(message):
     return message
 
 
+def _extract_ollama_usage(data):
+    """
+    Ollama tidak punya field 'usage' seperti OpenAI, tapi
+    melaporkan prompt_eval_count dan eval_count di root response.
+    Disamakan bentuknya ke {"prompt_tokens", "completion_tokens",
+    "total_tokens"} biar konsisten dipakai TokenTracker terlepas
+    dari provider mana pun.
+    """
+
+    prompt_tokens = data.get("prompt_eval_count")
+    completion_tokens = data.get("eval_count")
+
+    if prompt_tokens is None and completion_tokens is None:
+        return None
+
+    prompt_tokens = prompt_tokens or 0
+    completion_tokens = completion_tokens or 0
+
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+    }
+
+
 def _call_ollama(config, messages, tools):
 
     payload = {
@@ -208,7 +243,8 @@ def _call_ollama(config, messages, tools):
         )
 
         return {
-            "message": message
+            "message": message,
+            "usage": _extract_ollama_usage(data),
         }
 
     except requests.exceptions.RequestException as exc:
@@ -276,7 +312,12 @@ def _call_openai_compatible(config, messages, tools):
         )
 
         return {
-            "message": message
+            "message": message,
+            # Provider OpenAI-compatible (termasuk OpenRouter)
+            # sudah melaporkan usage dalam bentuk
+            # {"prompt_tokens", "completion_tokens", "total_tokens"}
+            # jadi tinggal diteruskan apa adanya.
+            "usage": data.get("usage"),
         }
 
     except requests.exceptions.RequestException as exc:
@@ -295,4 +336,82 @@ def _call_openai_compatible(config, messages, tools):
             "error": (
                 f"Tidak bisa menghubungi {config['base_url']}: {detail}"
             )
+        }
+
+
+def get_openrouter_credits(config):
+    """
+    Ambil sisa saldo/kredit dari OpenRouter.
+
+    PENTING: ini endpoint TERPISAH dari chat/completions
+    (https://openrouter.ai/api/v1/credits), karena info saldo
+    memang tidak disisipkan di response chat biasa. Hanya berlaku
+    untuk provider dengan base_url openrouter.ai — untuk provider
+    OpenAI-compatible lain (Groq, dsb), endpoint & format saldo
+    beda-beda dan belum didukung di sini.
+
+    Return:
+      {"success": True, "total_credits":.., "total_usage":..,
+       "remaining":..}
+      atau
+      {"success": False, "error": "..."}
+    """
+
+    api_key = os.getenv(config["api_key_env"])
+
+    if not api_key:
+
+        return {
+            "success": False,
+            "error": f"{config['api_key_env']} belum diset di .env."
+        }
+
+    if "openrouter.ai" not in config.get("base_url", ""):
+
+        return {
+            "success": False,
+            "error": (
+                "Provider aktif bukan OpenRouter — cek saldo "
+                "hanya didukung untuk provider OpenRouter saat ini."
+            )
+        }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+    }
+
+    try:
+
+        response = requests.get(
+            "https://openrouter.ai/api/v1/credits",
+            headers=headers,
+            timeout=15
+        )
+
+        response.raise_for_status()
+
+        data = response.json().get("data", {})
+
+        total_credits = data.get("total_credits")
+        total_usage = data.get("total_usage")
+
+        remaining = None
+
+        if total_credits is not None and total_usage is not None:
+            remaining = round(total_credits - total_usage, 4)
+
+        return {
+            "success": True,
+            "total_credits": total_credits,
+            "total_usage": total_usage,
+            "remaining": remaining,
+        }
+
+    except requests.exceptions.RequestException as exc:
+
+        log_error("get_openrouter_credits", exc)
+
+        return {
+            "success": False,
+            "error": str(exc)
         }

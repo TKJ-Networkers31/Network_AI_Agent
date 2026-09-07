@@ -1,4 +1,4 @@
-from agent.long_term_memory import (
+from agent.memory_store.long_term import (
     remember_fact,
     recall_facts,
     forget_fact,

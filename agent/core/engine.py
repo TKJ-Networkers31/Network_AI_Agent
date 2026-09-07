@@ -1,8 +1,8 @@
 import json
 import time
 
-from agent.ui import UI, Timer
-from agent.logger import (
+from agent.core.ui import UI, Timer
+from agent.core.logger import (
     log_tool_call,
     log_tool_result,
     log_error,
@@ -13,8 +13,8 @@ from tools.registry import (
     DANGEROUS_TOOLS,
     execute_tool,
 )
-from agent.providers import call_model
-from agent.auto_memory import extract_and_save_facts_async
+from agent.core.providers import call_model
+from agent.memory_store.auto_extract import extract_and_save_facts_async
 
 
 MAX_TOOL_CALLS = 10
@@ -61,6 +61,13 @@ data observasi sebelumnya kemungkinan sudah usang
 (misalnya status interface atau resource yang bisa
 berubah), panggil tool lagi untuk data terbaru alih-alih
 mengasumsikan data lama masih berlaku.
+
+Kamu juga akan diberi tahu waktu saat ini (tanggal dan
+jam) di bagian akhir system prompt setiap giliran. Selalu
+gunakan itu sebagai acuan "sekarang", bukan asumsi dari
+pengetahuanmu sendiri, terutama untuk pertanyaan tentang
+tanggal, hari, atau apakah suatu event ada di masa lalu
+atau masa depan.
 
 Jawablah secara natural.
 
@@ -110,6 +117,12 @@ tidak perlu selalu memanggil 'remember' secara eksplisit
 untuk fakta yang jelas penting — tapi tetap gunakan tool itu
 kalau user secara eksplisit minta diingatkan ("simpan di
 memori", "ingat ya", dsb) supaya konfirmasinya langsung.
+
+Kamu memiliki tool 'detect_objects' untuk mendeteksi objek dari
+webcam. Gunakan hanya jika user secara eksplisit minta kamu
+"lihat", "deteksi", atau "cek apa yang ada di kamera/webcam" -
+jangan pakai tool ini untuk permintaan yang tidak berhubungan
+dengan visual/kamera.
 """
 
 
@@ -593,11 +606,53 @@ def build_tools():
                 }
             }
         },
+                {
+            "type": "function",
+            "function": {
+                "name": "detect_objects",
+                "description":
+                    "Mengambil satu frame dari webcam dan "
+                    "mendeteksi objek di dalamnya menggunakan "
+                    "YOLO. Gunakan saat user minta melihat/deteksi "
+                    "apa yang ada di depan kamera/webcam. Webcam "
+                    "hanya aktif sesaat saat tool ini dipanggil.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "camera_index": {
+                            "type": "integer",
+                            "description": "Index webcam (0 = default/utama).",
+                            "default": 0
+                        },
+                        "save_snapshot": {
+                            "type": "boolean",
+                            "description": "Simpan gambar hasil deteksi ke disk.",
+                            "default": True
+                        }
+                    },
+                    "required": []
+                }
+            }
+        },
 
     ]
 
 
 TOOLS = build_tools()
+
+
+def _track_usage(memory, response):
+    """
+    Catat token usage dari satu respons LLM ke token tracker milik
+    sesi ini. Dipanggil setelah SETIAP call_model() yang sukses
+    (bukan yang error), karena satu giliran user bisa memicu
+    beberapa kali call_model() kalau ada tool call berantai.
+    """
+
+    usage = response.get("usage")
+
+    if usage:
+        memory.token_tracker.add(usage)
 
 
 def run(user_input, memory):
@@ -638,6 +693,8 @@ def run(user_input, memory):
             f"Terjadi error saat menghubungi model: "
             f"{response['error']}"
         )
+
+    _track_usage(memory, response)
 
     # ========================================================
     # AGENT LOOP
@@ -681,7 +738,8 @@ def run(user_input, memory):
 
             UI.summary(
                 total,
-                tool_count
+                tool_count,
+                memory.token_tracker.summary_line()
             )
 
             # Ekstraksi fakta otomatis jalan di background thread,
@@ -859,3 +917,5 @@ def run(user_input, memory):
                 f"Terjadi error saat menghubungi model: "
                 f"{response['error']}"
             )
+
+        _track_usage(memory, response)

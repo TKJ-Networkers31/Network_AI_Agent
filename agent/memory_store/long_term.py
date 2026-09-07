@@ -4,7 +4,7 @@ from pathlib import Path
 from contextlib import closing
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = BASE_DIR / "data"
 DB_FILE = DATA_DIR / "long_term_memory.db"
 

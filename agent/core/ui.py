@@ -91,6 +91,7 @@ class UI:
         print("  Mode  : Interactive")
         print()
         print("  Ketik 'exit' untuk keluar.")
+        print("  Ketik 'token' untuk cek pemakaian & sisa saldo API.")
         print()
 
     @staticmethod
@@ -131,10 +132,12 @@ class UI:
     @staticmethod
     def summary(
         total_time,
-        tool_count
+        tool_count,
+        token_line=None
     ):
 
         print()
+
         print(
             f"  Tools digunakan : {tool_count}"
         )
@@ -143,11 +146,16 @@ class UI:
             f"  Total waktu     : {total_time:.2f}s"
         )
 
+        # Baris token opsional — cuma tampil kalau token_line
+        # tidak None (misal provider aktif tidak melaporkan usage
+        # sama sekali).
+        if token_line:
+            print(
+                f"  {token_line}"
+            )
+
         print()
 
-    # FIX: sebelumnya nested di dalam summary() sehingga UI.confirm()
-    # tidak pernah bisa dipanggil (AttributeError begitu ada tool
-    # masuk DANGEROUS_TOOLS). Sekarang sejajar sebagai method class.
     @staticmethod
     def confirm(tool_name, arguments):
 

@@ -1,4 +1,6 @@
-from agent.logger import logger
+from agent.core.logger import logger
+from agent.utils.time_utils import time_context_block
+from agent.utils.token_tracker import TokenTracker
 
 
 class ConversationMemory:
@@ -24,12 +26,19 @@ class ConversationMemory:
 
         self.history = []
 
+        # Token tracker dipasang di sini (bukan objek terpisah yang
+        # harus di-passing manual ke run()) supaya lifecycle-nya
+        # otomatis ikut satu sesi percakapan - ke-reset bareng
+        # riwayat saat user ketik 'reset'/'clear'/'lupa'.
+        self.token_tracker = TokenTracker()
+
     def reset(self):
 
         self.history = []
+        self.token_tracker.reset()
 
         logger.info(
-            "MEMORY RESET | riwayat percakapan dikosongkan."
+            "MEMORY RESET | riwayat percakapan & token tracker dikosongkan."
         )
 
     def add_user(self, content):
@@ -75,11 +84,17 @@ class ConversationMemory:
 
         self._trim()
 
+        # Waktu saat ini disisipkan FRESH di setiap panggilan
+        # (bukan disimpan statis di self.system_prompt), supaya
+        # kalau sesi dibiarkan terbuka lama, model tetap tahu jam/
+        # tanggal yang benar-benar sekarang.
+        system_content = self.system_prompt + time_context_block()
+
         return (
             [
                 {
                     "role": "system",
-                    "content": self.system_prompt
+                    "content": system_content
                 }
             ]
             + self.history

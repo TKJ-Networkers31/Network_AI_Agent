@@ -37,6 +37,8 @@ from tools.memory.store import (
     forget,
 )
 
+from tools.vision.detector import detect_objects
+
 TOOL_CATEGORY = {
     "ping": "network",
     "nslookup": "network",
@@ -66,6 +68,8 @@ TOOL_CATEGORY = {
     "remember": "memory",
     "recall": "memory",
     "forget": "memory",
+
+    "detect_objects": "vision",
 }
 
 
@@ -106,6 +110,8 @@ TOOL_MAP = {
     "remember": remember,
     "recall": recall,
     "forget": forget,
+
+    "detect_objects": detect_objects,
 }
 
 

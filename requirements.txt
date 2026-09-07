@@ -5,3 +5,12 @@ python-dotenv
 pysnmp
 ddgs
 beautifulsoup4
+tzdata
+sounddevice
+webrtcvad
+numpy
+soundfile
+kokoro-onnx
+faster-whisper
+ultralytics
+opencv-python

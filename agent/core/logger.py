@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+BASE_DIR = Path(__file__).resolve().parents[2]
 LOG_DIR = BASE_DIR / "logs"
 LOG_FILE = LOG_DIR / "agent.log"
 

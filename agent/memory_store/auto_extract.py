@@ -1,9 +1,9 @@
 import json
 import threading
 
-from agent.providers import call_model
-from agent.long_term_memory import remember_fact
-from agent.logger import log_error, logger
+from agent.core.providers import call_model
+from agent.memory_store.long_term import remember_fact
+from agent.core.logger import log_error, logger
 
 
 EXTRACTION_PROMPT = """

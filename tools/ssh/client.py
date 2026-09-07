@@ -7,7 +7,7 @@ import paramiko
 import yaml
 from dotenv import load_dotenv
 
-from agent.logger import logger, log_error
+from agent.core.logger import logger, log_error
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
