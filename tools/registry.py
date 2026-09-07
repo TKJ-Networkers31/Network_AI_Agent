@@ -31,6 +31,12 @@ from tools.web.search import (
     web_fetch,
 )
 
+from tools.memory.store import (
+    remember,
+    recall,
+    forget,
+)
+
 TOOL_CATEGORY = {
     "ping": "network",
     "nslookup": "network",
@@ -56,10 +62,14 @@ TOOL_CATEGORY = {
 
     "web_search": "web",
     "web_fetch": "web",
+
+    "remember": "memory",
+    "recall": "memory",
+    "forget": "memory",
 }
 
 
-# Semua tool saat ini adalah "print" (read-only) sehingga aman.
+# Semua tool "print"/read-only + memory dianggap aman.
 # Set ini disiapkan untuk masa depan: begitu kamu menambahkan tool
 # yang bisa MENGUBAH konfigurasi (add/remove/set/disable/enable dsb),
 # daftarkan nama tool-nya di sini agar engine.py meminta konfirmasi
@@ -92,6 +102,10 @@ TOOL_MAP = {
 
     "web_search": web_search,
     "web_fetch": web_fetch,
+
+    "remember": remember,
+    "recall": recall,
+    "forget": forget,
 }
 
 

@@ -14,6 +14,7 @@ from tools.registry import (
     execute_tool,
 )
 from agent.providers import call_model
+from agent.auto_memory import extract_and_save_facts_async
 
 
 MAX_TOOL_CALLS = 10
@@ -102,6 +103,13 @@ percakapan saat ini.
 
 Jangan gunakan 'remember' untuk hal sepele atau sementara
 yang tidak perlu diingat lintas sesi.
+
+Selain itu, ada juga proses ekstraksi memori otomatis yang
+berjalan di belakang layar setelah kamu menjawab, jadi kamu
+tidak perlu selalu memanggil 'remember' secara eksplisit
+untuk fakta yang jelas penting — tapi tetap gunakan tool itu
+kalau user secara eksplisit minta diingatkan ("simpan di
+memori", "ingat ya", dsb) supaya konfirmasinya langsung.
 """
 
 
@@ -476,7 +484,7 @@ def build_tools():
                 }
             }
         },
-                {
+        {
             "type": "function",
             "function": {
                 "name": "web_search",
@@ -674,6 +682,13 @@ def run(user_input, memory):
             UI.summary(
                 total,
                 tool_count
+            )
+
+            # Ekstraksi fakta otomatis jalan di background thread,
+            # tidak menunda respons yang sudah ditampilkan ke user.
+            extract_and_save_facts_async(
+                user_input,
+                answer
             )
 
             return answer

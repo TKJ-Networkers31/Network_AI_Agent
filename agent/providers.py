@@ -23,11 +23,7 @@ load_dotenv(BASE_DIR / ".env")
 #
 # PENTING: "type" di sini HARUS persis "ollama" atau "openai",
 # karena call_model() di bawah mencocokkan string ini secara
-# exact match untuk memilih handler yang dipakai. Kalau kamu
-# tulis label bebas (mis. "Open Router") di sini, call_model()
-# tidak akan mengenalinya dan selalu return error
-# "Tipe provider '...' tidak dikenal." — ini penyebab error
-# yang kamu alami.
+# exact match untuk memilih handler yang dipakai.
 #
 # Tinggal tambah entry baru di sini kalau mau daftarkan API lain.
 # ============================================================
@@ -52,6 +48,14 @@ PROVIDERS = {
         "label": "Open Router: Nemotron 3.5 Lightning",
         "type": "openai",
         "model": "nvidia/nemotron-3.5-lightning:free",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API",
+    },
+
+    "Nemotron 3 Super": {
+        "label": "Open Router: Nemotron 3 Super",
+        "type": "openai",
+        "model": "nvidia/nemotron-3-super-120b-a12b:free",
         "base_url": "https://openrouter.ai/api/v1",
         "api_key_env": "OPENROUTER_API",
     },
@@ -139,6 +143,45 @@ def call_model(messages, tools):
     return result
 
 
+def _normalize_message(message):
+    """
+    Memastikan message yang diterima dari provider selalu punya
+    struktur minimal yang valid sebelum disimpan ke conversation
+    history.
+
+    Kenapa ini perlu: beberapa provider (terutama model gratis
+    di OpenRouter) kadang membalas HTTP 200 OK tapi field
+    'message'-nya kosong/rusak (gak ada 'role', content null,
+    tool_calls kosong) — biasanya karena rate limit atau error
+    internal provider yang tidak dilaporkan sebagai HTTP error.
+
+    Kalau dict rusak ini dibiarkan lolos dan disimpan ke history
+    oleh agent/memory.py, request BERIKUTNYA ke provider manapun
+    akan gagal dengan error semacam "missing field `role`",
+    karena history yang dikirim ulang sudah mengandung entry
+    tanpa role yang valid. Jadi normalisasi ini mencegah satu
+    respons buruk meracuni seluruh sisa sesi.
+    """
+
+    if not isinstance(message, dict):
+        message = {}
+
+    if "role" not in message or not message.get("role"):
+        message["role"] = "assistant"
+
+    has_content = bool(message.get("content"))
+    has_tool_calls = bool(message.get("tool_calls"))
+
+    if not has_content and not has_tool_calls:
+        message["content"] = (
+            "(Provider mengembalikan respons kosong atau tidak valid. "
+            "Kemungkinan model sedang rate-limited/bermasalah — "
+            "coba lagi atau ganti model dengan mengetik 'model'.)"
+        )
+
+    return message
+
+
 def _call_ollama(config, messages, tools):
 
     payload = {
@@ -160,8 +203,12 @@ def _call_ollama(config, messages, tools):
 
         data = response.json()
 
+        message = _normalize_message(
+            data.get("message", {})
+        )
+
         return {
-            "message": data.get("message", {})
+            "message": message
         }
 
     except requests.exceptions.RequestException as exc:
@@ -221,17 +268,19 @@ def _call_openai_compatible(config, messages, tools):
 
         data = response.json()
 
-        choice = (
-            data.get("choices", [{}])[0]
+        choices = data.get("choices") or [{}]
+        choice = choices[0] if choices else {}
+
+        message = _normalize_message(
+            choice.get("message") or {}
         )
 
         return {
-            "message": choice.get("message", {})
+            "message": message
         }
 
     except requests.exceptions.RequestException as exc:
 
-  
         detail = str(exc)
 
         if getattr(exc, "response", None) is not None:
