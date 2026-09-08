@@ -13,11 +13,12 @@ from tools.registry import (
     DANGEROUS_TOOLS,
     execute_tool,
 )
-from agent.core.providers import call_model
+from agent.core.providers import call_model, EMPTY_RESPONSE_MARKER
 from agent.memory_store.auto_extract import extract_and_save_facts_async
 
 
 MAX_TOOL_CALLS = 10
+MAX_EMPTY_RESPONSE_RETRIES = 1
 
 
 SYSTEM_PROMPT = """
@@ -118,11 +119,27 @@ untuk fakta yang jelas penting — tapi tetap gunakan tool itu
 kalau user secara eksplisit minta diingatkan ("simpan di
 memori", "ingat ya", dsb) supaya konfirmasinya langsung.
 
-Kamu memiliki tool 'detect_objects' untuk mendeteksi objek dari
-webcam. Gunakan hanya jika user secara eksplisit minta kamu
-"lihat", "deteksi", atau "cek apa yang ada di kamera/webcam" -
-jangan pakai tool ini untuk permintaan yang tidak berhubungan
-dengan visual/kamera.
+Kamu memiliki dua tool visual:
+- 'detect_objects': cepat, mendeteksi kategori umum (orang, gelas,
+  laptop, dll - 80 kelas COCO) dengan live tracking beberapa detik,
+  menampilkan window preview ke user.
+- 'recognize_object': lebih lambat tapi bisa mengenali benda
+  spesifik yang ditunjukkan user (router, pulpen, dompet, dsb),
+  cukup satu foto saja. Pakai ini kalau user menunjukkan benda
+  tertentu dan tanya "ini apa?".
+
+Gunakan salah satu HANYA jika user secara eksplisit minta kamu
+melihat/mengenali sesuatu lewat kamera/webcam.
+
+Kadang pesan user akan menyertakan baris tambahan berformat
+"[Konteks visual otomatis dari webcam saat pesan ini diucapkan:
+...]" di akhir pesan - ini BUKAN tulisan user, melainkan hasil
+deteksi objek otomatis dari webcam yang disisipkan sistem karena
+mode sensor gabungan sedang aktif. Perlakukan sebagai fakta
+observasi visual real-time yang relevan dengan apa yang sedang
+dibicarakan user, dan gunakan HANYA jika memang relevan menjawab
+pertanyaannya - jangan disebutkan kalau tidak nyambung dengan
+konteks percakapan.
 """
 
 
@@ -606,16 +623,20 @@ def build_tools():
                 }
             }
         },
-                {
+
+        {
             "type": "function",
             "function": {
                 "name": "detect_objects",
                 "description":
-                    "Mengambil satu frame dari webcam dan "
-                    "mendeteksi objek di dalamnya menggunakan "
-                    "YOLO. Gunakan saat user minta melihat/deteksi "
-                    "apa yang ada di depan kamera/webcam. Webcam "
-                    "hanya aktif sesaat saat tool ini dipanggil.",
+                    "Membuka webcam dan melacak objek di depannya "
+                    "selama beberapa detik, menampilkan window "
+                    "live preview dengan bounding box supaya user "
+                    "bisa melihat langsung apa yang terdeteksi. "
+                    "Deteksi terbatas pada 80 kategori umum (COCO) "
+                    "seperti orang, gelas, laptop, dll. Gunakan "
+                    "saat user minta melihat/deteksi apa yang ada "
+                    "di depan kamera/webcam secara umum.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -624,10 +645,41 @@ def build_tools():
                             "description": "Index webcam (0 = default/utama).",
                             "default": 0
                         },
+                        "duration": {
+                            "type": "number",
+                            "description": "Lama tracking dalam detik.",
+                            "default": 4.0
+                        },
                         "save_snapshot": {
                             "type": "boolean",
                             "description": "Simpan gambar hasil deteksi ke disk.",
                             "default": True
+                        }
+                    },
+                    "required": []
+                }
+            }
+        },
+
+        {
+            "type": "function",
+            "function": {
+                "name": "recognize_object",
+                "description":
+                    "Mengambil satu foto dari webcam dan mencoba "
+                    "mengenali benda SPESIFIK yang ditunjukkan "
+                    "(misal router, pulpen, dompet, dll - bukan "
+                    "cuma kategori umum). Lebih lambat dari "
+                    "detect_objects karena analisisnya lebih "
+                    "mendalam. Gunakan saat user menunjukkan "
+                    "benda tertentu dan minta AI mengenalinya "
+                    "('ini apa?', 'coba tebak ini apa').",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "camera_index": {
+                            "type": "integer",
+                            "default": 0
                         }
                     },
                     "required": []
@@ -641,12 +693,42 @@ def build_tools():
 TOOLS = build_tools()
 
 
+def _call_model_with_retry(messages, tools, max_retries=MAX_EMPTY_RESPONSE_RETRIES):
+    """
+    Beberapa provider gratis (terutama OpenRouter free tier) kadang
+    balas HTTP 200 OK tapi message kosong/rusak - biasanya
+    sementara (rate limit internal yang tidak dilaporkan sebagai
+    HTTP error). Retry otomatis sebelum menyerah ke user, supaya
+    kegagalan sesaat tidak langsung mengganggu pengalaman chat.
+    """
+
+    response = call_model(messages, tools)
+
+    attempt = 0
+
+    while (
+        attempt < max_retries
+        and "error" not in response
+        and response.get("message", {}).get("content") == EMPTY_RESPONSE_MARKER
+    ):
+
+        attempt += 1
+
+        UI.phase(
+            f"Provider balas kosong, mencoba ulang ({attempt}/{max_retries})..."
+        )
+
+        response = call_model(messages, tools)
+
+    return response
+
+
 def _track_usage(memory, response):
     """
     Catat token usage dari satu respons LLM ke token tracker milik
-    sesi ini. Dipanggil setelah SETIAP call_model() yang sukses
-    (bukan yang error), karena satu giliran user bisa memicu
-    beberapa kali call_model() kalau ada tool call berantai.
+    sesi ini. Dipanggil setelah SETIAP call_model() yang sukses,
+    karena satu giliran user bisa memicu beberapa kali call_model()
+    kalau ada tool call berantai.
     """
 
     usage = response.get("usage")
@@ -676,7 +758,7 @@ def run(user_input, memory):
 
     analysis_timer.start()
 
-    response = call_model(
+    response = _call_model_with_retry(
         memory.get_messages(),
         TOOLS
     )
@@ -742,8 +824,6 @@ def run(user_input, memory):
                 memory.token_tracker.summary_line()
             )
 
-            # Ekstraksi fakta otomatis jalan di background thread,
-            # tidak menunda respons yang sudah ditampilkan ke user.
             extract_and_save_facts_async(
                 user_input,
                 answer
@@ -900,7 +980,7 @@ def run(user_input, memory):
 
         decision_timer.start()
 
-        response = call_model(
+        response = _call_model_with_retry(
             memory.get_messages(),
             TOOLS
         )

@@ -24,8 +24,6 @@ load_dotenv(BASE_DIR / ".env")
 # PENTING: "type" di sini HARUS persis "ollama" atau "openai",
 # karena call_model() di bawah mencocokkan string ini secara
 # exact match untuk memilih handler yang dipakai.
-#
-# Tinggal tambah entry baru di sini kalau mau daftarkan API lain.
 # ============================================================
 
 PROVIDERS = {
@@ -62,12 +60,21 @@ PROVIDERS = {
 
 }
 
-# FIX SYNC: sebelumnya default ke qwen3:4b, padahal hasil audit
-# hardware (ThinkPad X270, i7-7500U, 8GB DDR4, CPU-only) sudah
-# menyimpulkan qwen3:1.7b sebagai model yang paling pas. Default
-# provider disamakan dengan kesimpulan itu.
+# Model paling pas untuk hardware X270 (i7-7500U, 8GB RAM,
+# CPU-only) berdasarkan hasil audit performa sebelumnya.
 DEFAULT_PROVIDER_KEY = "ollama-qwen3-1.7b"
 ACTIVE_MODEL_FACT_KEY = "active_model_provider"
+
+# Dipakai _normalize_message() untuk menandai respons kosong/rusak
+# dari provider, dan dicek ulang oleh engine.py untuk memutuskan
+# apakah perlu retry otomatis. Disatukan di sini (bukan string
+# literal terpisah di 2 file) supaya tidak ada typo/ketidaksamaan
+# antara yang di-set dan yang dicek.
+EMPTY_RESPONSE_MARKER = (
+    "(Provider mengembalikan respons kosong atau tidak valid. "
+    "Kemungkinan model sedang rate-limited/bermasalah — "
+    "coba lagi atau ganti model dengan mengetik 'model'.)"
+)
 
 
 def list_providers():
@@ -121,13 +128,8 @@ def call_model(messages, tools):
     """
     Memanggil provider yang sedang aktif. Selalu mengembalikan
     bentuk seragam {"message": {...}, "usage": {...}|None} atau
-    {"error": "..."} supaya agent/engine.py tidak perlu tahu
+    {"error": "..."} supaya agent/core/engine.py tidak perlu tahu
     bedanya provider.
-
-    'usage' ditambahkan supaya token tracker (agent/token_tracker.py)
-    bisa mencatat pemakaian token tiap request, baik dari Ollama
-    (prompt_eval_count/eval_count) maupun dari provider eksternal
-    (field 'usage' standar OpenAI-compatible).
     """
 
     key, config = get_active_provider()
@@ -159,18 +161,18 @@ def _normalize_message(message):
     struktur minimal yang valid sebelum disimpan ke conversation
     history.
 
-    Kenapa ini perlu: beberapa provider (terutama model gratis
-    di OpenRouter) kadang membalas HTTP 200 OK tapi field
-    'message'-nya kosong/rusak (gak ada 'role', content null,
-    tool_calls kosong) — biasanya karena rate limit atau error
-    internal provider yang tidak dilaporkan sebagai HTTP error.
+    Kenapa ini perlu: beberapa provider (terutama model gratis di
+    OpenRouter) kadang membalas HTTP 200 OK tapi field 'message'-nya
+    kosong/rusak (gak ada 'role', content null, tool_calls kosong)
+    — biasanya karena rate limit atau error internal provider yang
+    tidak dilaporkan sebagai HTTP error.
 
-    Kalau dict rusak ini dibiarkan lolos dan disimpan ke history
-    oleh agent/memory.py, request BERIKUTNYA ke provider manapun
-    akan gagal dengan error semacam "missing field `role`",
-    karena history yang dikirim ulang sudah mengandung entry
-    tanpa role yang valid. Jadi normalisasi ini mencegah satu
-    respons buruk meracuni seluruh sisa sesi.
+    Kalau dict rusak ini dibiarkan lolos dan disimpan ke history,
+    request BERIKUTNYA ke provider manapun akan gagal dengan error
+    semacam "missing field `role`", karena history yang dikirim
+    ulang sudah mengandung entry tanpa role yang valid. Jadi
+    normalisasi ini mencegah satu respons buruk meracuni seluruh
+    sisa sesi.
     """
 
     if not isinstance(message, dict):
@@ -183,11 +185,7 @@ def _normalize_message(message):
     has_tool_calls = bool(message.get("tool_calls"))
 
     if not has_content and not has_tool_calls:
-        message["content"] = (
-            "(Provider mengembalikan respons kosong atau tidak valid. "
-            "Kemungkinan model sedang rate-limited/bermasalah — "
-            "coba lagi atau ganti model dengan mengetik 'model'.)"
-        )
+        message["content"] = EMPTY_RESPONSE_MARKER
 
     return message
 
@@ -275,10 +273,6 @@ def _call_openai_compatible(config, messages, tools):
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        # OpenRouter merekomendasikan header ini (opsional untuk
-        # OpenAI/Groq/dll, tapi tidak berbahaya dikirim ke semua
-        # provider kompatibel-OpenAI). Membantu OpenRouter
-        # mengidentifikasi aplikasi kamu di dashboard mereka.
         "HTTP-Referer": "http://localhost",
         "X-Title": "Network AI Agent",
     }
@@ -313,10 +307,6 @@ def _call_openai_compatible(config, messages, tools):
 
         return {
             "message": message,
-            # Provider OpenAI-compatible (termasuk OpenRouter)
-            # sudah melaporkan usage dalam bentuk
-            # {"prompt_tokens", "completion_tokens", "total_tokens"}
-            # jadi tinggal diteruskan apa adanya.
             "usage": data.get("usage"),
         }
 
@@ -341,20 +331,9 @@ def _call_openai_compatible(config, messages, tools):
 
 def get_openrouter_credits(config):
     """
-    Ambil sisa saldo/kredit dari OpenRouter.
-
-    PENTING: ini endpoint TERPISAH dari chat/completions
-    (https://openrouter.ai/api/v1/credits), karena info saldo
-    memang tidak disisipkan di response chat biasa. Hanya berlaku
-    untuk provider dengan base_url openrouter.ai — untuk provider
-    OpenAI-compatible lain (Groq, dsb), endpoint & format saldo
-    beda-beda dan belum didukung di sini.
-
-    Return:
-      {"success": True, "total_credits":.., "total_usage":..,
-       "remaining":..}
-      atau
-      {"success": False, "error": "..."}
+    Ambil sisa saldo/kredit dari OpenRouter lewat endpoint
+    terpisah /credits (bukan bagian dari response chat biasa).
+    Hanya berlaku untuk provider dengan base_url openrouter.ai.
     """
 
     api_key = os.getenv(config["api_key_env"])

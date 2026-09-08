@@ -8,9 +8,7 @@ di hardware 2-core/4-thread seperti X270.
 
 Model "tiny" dipilih karena ini yang paling ringan (~75MB, ~39M
 parameter). Trade-off: akurasi lebih rendah dari base/small,
-terutama untuk audio noisy atau aksen kurang jelas. Kalau nanti
-akurasi terasa kurang dan CPU masih ada headroom, "base" adalah
-langkah upgrade berikutnya yang wajar.
+terutama untuk audio noisy atau aksen kurang jelas.
 
 Model didownload OTOMATIS dari HuggingFace Hub saat pertama kali
 dipanggil (butuh internet sekali saja), lalu di-cache lokal
@@ -23,10 +21,6 @@ from agent.core.logger import log_error, logger
 
 
 MODEL_SIZE = "tiny"
-
-# compute_type "int8" dipilih karena paling ringan untuk CPU-only -
-# quantized ke 8-bit, jauh lebih cepat dari float32 dengan penurunan
-# akurasi yang biasanya masih dapat diterima untuk model sekecil tiny.
 COMPUTE_TYPE = "int8"
 
 _model_instance = None
@@ -77,7 +71,6 @@ def transcribe(audio_int16, sample_rate=16000):
     if model is None:
         return None
 
-    # faster-whisper minta float32 range [-1, 1], bukan int16 mentah.
     audio_float32 = audio_int16.astype("float32") / 32768.0
 
     try:
@@ -85,12 +78,20 @@ def transcribe(audio_int16, sample_rate=16000):
         segments, info = model.transcribe(
             audio_float32,
             language="id",
-            beam_size=1,       # beam_size=1 = greedy decode, paling
-                                # cepat untuk CPU lemah (trade-off
-                                # sedikit akurasi vs kecepatan)
-            vad_filter=False,  # VAD sudah dilakukan sebelumnya di
-                                # voice_io.py (webrtcvad), tidak perlu
-                                # double-filter di sini
+            beam_size=1,
+            vad_filter=False,
         )
 
-        text = " ".join(segment.text.strip() for segment in segments).strip()
+        text_parts = []
+
+        for segment in segments:
+            text_parts.append(segment.text.strip())
+
+        text = " ".join(text_parts).strip()
+
+        return text or None
+
+    except Exception as exc:
+
+        log_error("stt.transcribe", exc)
+        return None

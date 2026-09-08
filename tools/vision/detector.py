@@ -1,16 +1,27 @@
 """
-Deteksi objek dari webcam menggunakan YOLO11n (nano - model
-paling ringan dari keluarga YOLO11, cocok untuk CPU-only seperti
-X270).
+Deteksi + tracking objek dari webcam menggunakan YOLO11n, dengan
+window live preview supaya user bisa melihat langsung apa yang
+sedang "dilihat" AI saat kamera aktif.
 
-Desain "aktif saat dibutuhkan": webcam CUMA dibuka saat fungsi ini
-dipanggil, ambil satu frame, jalankan deteksi, langsung release
-kamera. Tidak ada stream/loop terus-menerus yang makan resource
-di background.
+OPTIMASI UNTUK CPU LEMAH (X270, 2-core/4-thread):
+1. Resolusi capture diturunkan ke 640x480 - webcam sering default
+   ke resolusi native yang jauh lebih besar (misal 1280x720+),
+   makin besar frame makin berat di-resize+infer tiap kali.
+2. imgsz inferensi diturunkan ke 320 (dari default YOLO 640) -
+   YOLO resize internal ke ukuran ini sebelum diproses jaringan
+   neural, jadi ini pengaruh besar ke kecepatan. Trade-off: objek
+   kecil/jauh dari kamera mungkin kurang akurat terdeteksi, tapi
+   untuk kebutuhan "lihat apa yang di depan kamera" jarak dekat
+   biasanya masih cukup andal.
+3. Frame skipping - inferensi PENUH cuma dijalankan tiap
+   INFER_EVERY_N_FRAMES, frame di antaranya cuma menggambar ulang
+   box terakhir yang diketahui (tanpa infer baru). Ini bikin window
+   terasa jauh lebih smooth secara visual walau "mata" AI sebenarnya
+   tidak secepat itu mikir - mirip prinsip interpolasi frame.
 
-Model yolo11n.pt didownload OTOMATIS oleh ultralytics saat
-pertama kali dipakai (~5-6MB, jauh lebih kecil dari model YOLO
-lain), lalu di-cache lokal dan dipakai offline setelahnya.
+Desain "aktif saat dibutuhkan" tetap dipertahankan: webcam CUMA
+dibuka selama durasi tracking berjalan, setelah itu langsung
+di-release.
 """
 
 import time
@@ -21,8 +32,19 @@ import cv2
 from agent.core.logger import log_error, logger
 
 
-MODEL_NAME = "yolo11n.pt"  # nano - paling ringan untuk CPU
+MODEL_NAME = "yolo11n.pt"
 CONFIDENCE_THRESHOLD = 0.5
+
+# --- Parameter optimasi CPU - sesuaikan kalau masih terasa lag ---
+CAPTURE_WIDTH = 640
+CAPTURE_HEIGHT = 480
+INFER_IMG_SIZE = 320          # turunkan lagi ke 224 kalau masih lag
+INFER_EVERY_N_FRAMES = 3      # infer 1 dari tiap N frame yang ditampilkan
+# -------------------------------------------------------------
+
+WINDOW_NAME = "AI Vision - apa yang dilihat AI"
+DEFAULT_LIVE_DURATION = 4.0
+FUSION_LIVE_DURATION = 2.0
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 SNAPSHOT_DIR = BASE_DIR / "data" / "vision_snapshots"
@@ -31,13 +53,6 @@ _model_instance = None
 
 
 def _get_model():
-    """
-    Lazy-load model YOLO - baru diimport & di-load saat PERTAMA
-    kali dipanggil, bukan saat modul ini di-import. Ini penting
-    karena import ultralytics/torch cukup berat (beberapa detik),
-    jangan sampai membebani startup agent kalau fitur ini tidak
-    dipakai di sesi tersebut.
-    """
 
     global _model_instance
 
@@ -62,11 +77,19 @@ def _get_model():
         return None
 
 
-def detect_objects(camera_index=0, save_snapshot=True):
+def detect_objects(
+    camera_index=0,
+    duration=DEFAULT_LIVE_DURATION,
+    show_window=True,
+    save_snapshot=True,
+):
     """
-    Buka webcam, ambil satu frame, jalankan deteksi objek, lalu
-    tutup webcam. Return dict hasil deteksi (format konsisten
-    dengan tool lain di project ini - selalu ada key 'success').
+    Buka webcam, jalankan tracking objek selama `duration` detik
+    (menampilkan window live preview kalau show_window=True), lalu
+    tutup webcam. Return ringkasan objek unik yang terlacak selama
+    durasi tersebut.
+
+    Window bisa ditutup lebih awal dengan menekan 'q'.
     """
 
     model = _get_model()
@@ -83,9 +106,6 @@ def detect_objects(camera_index=0, save_snapshot=True):
             ),
         }
 
-    # cv2.CAP_DSHOW mempercepat startup webcam di Windows -
-    # tanpa ini, OpenCV kadang butuh beberapa detik ekstra untuk
-    # buka device di Windows.
     cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
 
     if not cap.isOpened():
@@ -100,60 +120,108 @@ def detect_objects(camera_index=0, save_snapshot=True):
             ),
         }
 
+    # Minta resolusi lebih kecil ke driver kamera. Catatan: tidak
+    # semua webcam menghormati resolusi custom - kalau webcam kamu
+    # abaikan ini, frame yang masuk tetap resolusi native-nya, dan
+    # imgsz di bawah tetap jadi penyelamat utama kecepatan.
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAPTURE_WIDTH)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAPTURE_HEIGHT)
+
+    tracked_objects = {}
+    last_annotated_frame = None
+    last_plot_result = None  # dipakai untuk re-draw di frame skip
+    frame_counter = 0
+
     try:
 
-        # Ambil beberapa frame dulu dan buang - banyak webcam butuh
-        # "warm-up" beberapa frame sebelum exposure/white-balance
-        # stabil, kalau langsung ambil frame pertama hasilnya
-        # sering gelap/blur.
         for _ in range(5):
             cap.read()
-            time.sleep(0.05)
+            time.sleep(0.03)
 
-        success, frame = cap.read()
+        start_time = time.perf_counter()
 
-        if not success or frame is None:
+        while (time.perf_counter() - start_time) < duration:
 
-            return {
-                "success": False,
-                "tool": "detect_objects",
-                "error": "Gagal mengambil frame dari webcam.",
+            success, frame = cap.read()
+
+            if not success or frame is None:
+                continue
+
+            frame_counter += 1
+            run_inference = (frame_counter % INFER_EVERY_N_FRAMES == 0)
+
+            if run_inference or last_plot_result is None:
+
+                results = model.track(
+                    frame,
+                    conf=CONFIDENCE_THRESHOLD,
+                    imgsz=INFER_IMG_SIZE,
+                    persist=True,
+                    tracker="bytetrack.yaml",
+                    verbose=False,
+                )
+
+                result = results[0]
+                last_plot_result = result
+
+                if result.boxes is not None and result.boxes.id is not None:
+
+                    for box, track_id in zip(result.boxes, result.boxes.id):
+
+                        class_id = int(box.cls[0])
+                        label = model.names[class_id]
+                        confidence = float(box.conf[0])
+                        tid = int(track_id)
+
+                        existing = tracked_objects.get(tid)
+
+                        if existing is None or confidence > existing["best_confidence"]:
+                            tracked_objects[tid] = {
+                                "label": label,
+                                "best_confidence": round(confidence, 3),
+                            }
+
+                last_annotated_frame = last_plot_result.plot()
+
+            else:
+
+                # Frame skip: tidak infer ulang, cuma tampilkan frame
+                # kamera TERBARU tapi dengan box dari hasil inferensi
+                # terakhir yang di-plot ulang. Ini murah secara
+                # komputasi (cuma re-plot, bukan infer neural network
+                # baru) dan bikin window terasa lebih hidup daripada
+                # freeze menunggu inferensi berikutnya.
+                if last_plot_result is not None:
+                    last_annotated_frame = last_plot_result.plot()
+                else:
+                    last_annotated_frame = frame
+
+            if show_window and last_annotated_frame is not None:
+
+                cv2.imshow(WINDOW_NAME, last_annotated_frame)
+
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+
+        detections = [
+            {
+                "track_id": tid,
+                "label": info["label"],
+                "confidence": info["best_confidence"],
             }
-
-        results = model.predict(
-            frame,
-            conf=CONFIDENCE_THRESHOLD,
-            verbose=False,
-        )
-
-        detections = []
-
-        for result in results:
-
-            for box in result.boxes:
-
-                class_id = int(box.cls[0])
-                class_name = model.names[class_id]
-                confidence = float(box.conf[0])
-                x1, y1, x2, y2 = [round(v, 1) for v in box.xyxy[0].tolist()]
-
-                detections.append({
-                    "label": class_name,
-                    "confidence": round(confidence, 3),
-                    "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
-                })
+            for tid, info in tracked_objects.items()
+        ]
 
         snapshot_path = None
 
-        if save_snapshot and detections:
+        if save_snapshot and detections and last_annotated_frame is not None:
 
             SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
-            annotated = results[0].plot()  # frame dengan bbox digambar
             filename = f"snapshot_{int(time.time())}.jpg"
             full_path = SNAPSHOT_DIR / filename
 
-            cv2.imwrite(str(full_path), annotated)
+            cv2.imwrite(str(full_path), last_annotated_frame)
 
             snapshot_path = str(full_path)
 
@@ -177,8 +245,7 @@ def detect_objects(camera_index=0, save_snapshot=True):
 
     finally:
 
-        # WAJIB dilepas di sini (bukan cuma di jalur sukses) supaya
-        # webcam tidak "nyangkut" ke proses ini kalau terjadi error
-        # di tengah - kalau tidak, webcam bisa jadi tidak bisa
-        # dipakai aplikasi lain sampai proses Python di-restart.
         cap.release()
+
+        if show_window:
+            cv2.destroyWindow(WINDOW_NAME)

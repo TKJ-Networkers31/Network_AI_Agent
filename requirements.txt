@@ -7,7 +7,6 @@ ddgs
 beautifulsoup4
 tzdata
 sounddevice
-webrtcvad
 numpy
 soundfile
 kokoro-onnx

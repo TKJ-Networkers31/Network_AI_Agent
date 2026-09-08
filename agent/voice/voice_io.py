@@ -1,13 +1,13 @@
 """
-Orkestrasi voice I/O: mic listening dengan VAD (webrtcvad),
-kirim ke Whisper API saat deteksi akhir ucapan, dan kontrol
-barge-in supaya mic tidak menangkap suara Kokoro sendiri.
+Orkestrasi voice I/O: mic listening dengan VAD berbasis energi
+audio (RMS threshold), kirim ke faster-whisper saat deteksi akhir
+ucapan, dan kontrol barge-in supaya mic tidak menangkap suara
+Kokoro sendiri.
 
-Desain: listen_loop() jalan di background thread terus-menerus
-selama voice mode aktif. Setiap kali VAD deteksi satu utterance
-selesai (ada jeda diam cukup panjang setelah suara), audio
-di-transkripsi dan hasil teksnya dimasukkan ke callback yang
-diberikan caller (biasanya push ke queue utama di main.py).
+Mendukung mode "sensor gabungan" (multimodal fusion) - kalau
+diaktifkan, setiap ucapan yang selesai ditranskripsi juga otomatis
+dilengkapi konteks visual dari webcam sebelum diteruskan ke LLM.
+Lihat agent/core/multimodal.py untuk detail penggabungannya.
 """
 
 import threading
@@ -15,42 +15,49 @@ import collections
 
 import numpy as np
 import sounddevice as sd
-import webrtcvad
 
 from agent.voice.stt import transcribe
+from agent.core.multimodal import fuse_voice_and_vision
 from agent.core.logger import log_error, logger
 
 
-SAMPLE_RATE = 16000       # webrtcvad hanya terima 8k/16k/32k/48k
-FRAME_MS = 30              # ukuran frame VAD: 10/20/30 ms
+SAMPLE_RATE = 16000
+FRAME_MS = 30
 FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_MS / 1000)
 
-# Berapa lama diam (ms) dianggap akhir ucapan. Terlalu pendek bikin
-# kalimat kepotong, terlalu panjang bikin jeda terasa lambat.
+ENERGY_THRESHOLD = 500
+
 SILENCE_END_MS = 800
 SILENCE_END_FRAMES = SILENCE_END_MS // FRAME_MS
 
-# Sensitivitas VAD: 0 (paling longgar) - 3 (paling ketat/agresif
-# nolak noise). 2 biasanya titik aman untuk ruangan normal.
-VAD_AGGRESSIVENESS = 2
+MIN_UTTERANCE_FRAMES = 10
 
-MIN_UTTERANCE_FRAMES = 10  # buang utterance super pendek (noise klik dsb)
+
+def _frame_rms(frame_int16):
+
+    if len(frame_int16) == 0:
+        return 0.0
+
+    samples = frame_int16.astype(np.float64)
+
+    return float(np.sqrt(np.mean(samples ** 2)))
 
 
 class VoiceIO:
 
     def __init__(self, on_transcript):
-        """
-        on_transcript: callback(text: str) dipanggil tiap kali ada
-        hasil transkripsi valid dari ucapan user.
-        """
 
         self.on_transcript = on_transcript
-        self.vad = webrtcvad.Vad(VAD_AGGRESSIVENESS)
 
-        self._active = threading.Event()   # voice mode on/off
-        self._paused = threading.Event()   # dipause selama TTS bicara
+        self._active = threading.Event()
+        self._paused = threading.Event()
         self._stop = threading.Event()
+
+        # Mode fusion suara+visual - default OFF, diaktifkan manual
+        # lewat command di main.py. OFF berarti perilaku persis
+        # seperti sebelumnya (hanya transkripsi suara).
+        self._fusion_enabled = threading.Event()
+
         self._thread = None
 
     # --------------------------------------------------------
@@ -58,7 +65,6 @@ class VoiceIO:
     # --------------------------------------------------------
 
     def start(self):
-        """Aktifkan voice mode dan mulai listener thread kalau belum jalan."""
 
         self._active.set()
 
@@ -76,7 +82,6 @@ class VoiceIO:
             logger.info("VOICE | listener thread dimulai.")
 
     def stop(self):
-        """Matikan voice mode (listener thread berhenti total)."""
 
         self._active.clear()
         self._stop.set()
@@ -87,12 +92,22 @@ class VoiceIO:
         return self._active.is_set()
 
     def pause_mic(self):
-        """Dipanggil sebelum TTS mulai bicara - cegah barge-in loop."""
         self._paused.set()
 
     def resume_mic(self):
-        """Dipanggil setelah TTS selesai bicara."""
         self._paused.clear()
+
+    def enable_fusion(self):
+        """Aktifkan sensor gabungan: tiap ucapan otomatis dilengkapi konteks visual."""
+        self._fusion_enabled.set()
+        logger.info("VOICE | fusion suara+visual diaktifkan.")
+
+    def disable_fusion(self):
+        self._fusion_enabled.clear()
+        logger.info("VOICE | fusion suara+visual dimatikan.")
+
+    def is_fusion_enabled(self):
+        return self._fusion_enabled.is_set()
 
     # --------------------------------------------------------
     # LISTENER LOOP
@@ -117,8 +132,6 @@ class VoiceIO:
             if status:
                 logger.info(f"VOICE | sounddevice status: {status}")
 
-            # Kalau mic sedang di-pause (TTS lagi bicara) atau voice
-            # mode nonaktif, buang frame - jangan diproses sama sekali.
             if self._paused.is_set() or not self._active.is_set():
                 return
 
@@ -141,25 +154,22 @@ class VoiceIO:
                     sd.sleep(10)
                     continue
 
-                frame = frame_queue.popleft()
+                frame_bytes = frame_queue.popleft()
+                frame_int16 = np.frombuffer(frame_bytes, dtype=np.int16)
 
-                if len(frame) != FRAME_SAMPLES * 2:
-                    # Frame size nggak pas (blocksize/format mismatch di
-                    # device tertentu) - skip biar webrtcvad nggak error.
-                    continue
-
-                is_speech = self.vad.is_speech(frame, SAMPLE_RATE)
+                rms = _frame_rms(frame_int16)
+                is_speech = rms >= ENERGY_THRESHOLD
 
                 if is_speech:
 
-                    speech_buffer.append(frame)
+                    speech_buffer.append(frame_bytes)
                     silence_run = 0
                     in_speech = True
 
                 elif in_speech:
 
                     silence_run += 1
-                    speech_buffer.append(frame)  # simpan sedikit ekor diam
+                    speech_buffer.append(frame_bytes)
 
                     if silence_run >= SILENCE_END_FRAMES:
 
@@ -177,8 +187,18 @@ class VoiceIO:
 
         text = transcribe(audio_int16, SAMPLE_RATE)
 
-        if text:
-            logger.info(f"VOICE | transkripsi: {text}")
-            self.on_transcript(text)
-        else:
+        if not text:
             logger.info("VOICE | transkripsi kosong/gagal, diabaikan.")
+            return
+
+        logger.info(f"VOICE | transkripsi: {text}")
+
+        # Kalau fusion aktif, tambahkan konteks visual SEBELUM
+        # dikirim ke callback (yang akan meneruskannya ke LLM
+        # sebagai satu pesan user utuh). Ini dilakukan di sini,
+        # bukan di main.py, supaya main.py tidak perlu tahu detail
+        # webcam sama sekali - cukup terima teks jadi.
+        if self._fusion_enabled.is_set():
+            text = fuse_voice_and_vision(text)
+
+        self.on_transcript(text)
