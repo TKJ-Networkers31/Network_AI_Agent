@@ -12,7 +12,13 @@ from pathlib import Path
 
 import sounddevice as sd
 
-from agent.core.logger import log_error, logger
+import logging
+
+logger = logging.getLogger("aira.yuki.tts")
+
+
+def log_error(context, exc):
+    logger.error(f"ERROR | context={context} | detail={exc}")
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]

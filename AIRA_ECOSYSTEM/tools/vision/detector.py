@@ -29,7 +29,13 @@ from pathlib import Path
 
 import cv2
 
-from agent.core.logger import log_error, logger
+import logging
+
+logger = logging.getLogger("aira.tools.vision")
+
+
+def log_error(context, exc):
+    logger.error(f"ERROR | context={context} | detail={exc}")
 
 
 MODEL_NAME = "yolo11n.pt"

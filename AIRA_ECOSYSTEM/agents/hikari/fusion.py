@@ -16,7 +16,14 @@ alur percakapan suara yang sudah berjalan.
 """
 
 from agents.hikari.vision import detect_objects, FUSION_LIVE_DURATION
-from agent.core.logger import log_error, logger
+
+import logging
+
+logger = logging.getLogger("aira.hikari.fusion")
+
+
+def log_error(context, exc):
+    logger.error(f"ERROR | context={context} | detail={exc}")
 
 
 def _describe_detections(result):
@@ -68,7 +75,7 @@ def fuse_voice_and_vision(voice_text, camera_index=0, show_window=True):
 
     except Exception as exc:
 
-        log_error("multimodal.fuse_voice_and_vision", exc)
+        log_error("fusion.fuse_voice_and_vision", exc)
         description = None
 
     if not description:

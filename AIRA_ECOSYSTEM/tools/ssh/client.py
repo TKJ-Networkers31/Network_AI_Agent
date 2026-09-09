@@ -7,7 +7,13 @@ import paramiko
 import yaml
 from dotenv import load_dotenv
 
-from agent.core.logger import logger, log_error
+import logging
+
+logger = logging.getLogger("aira.tools.ssh")
+
+
+def log_error(context, exc):
+    logger.error(f"ERROR | context={context} | detail={exc}")
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]

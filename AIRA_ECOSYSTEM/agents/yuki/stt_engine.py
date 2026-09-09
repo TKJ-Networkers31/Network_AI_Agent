@@ -17,7 +17,13 @@ dipanggil (butuh internet sekali saja), lalu di-cache lokal
 
 from faster_whisper import WhisperModel
 
-from agent.core.logger import log_error, logger
+import logging
+
+logger = logging.getLogger("aira.yuki.stt")
+
+
+def log_error(context, exc):
+    logger.error(f"ERROR | context={context} | detail={exc}")
 
 
 MODEL_SIZE = "tiny"
