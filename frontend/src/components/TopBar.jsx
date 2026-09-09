@@ -8,7 +8,7 @@ function greeting(hour) {
   return "Good night!";
 }
 
-export default function TopBar({ title, subtitle }) {
+export default function TopBar({ title, subtitle, onMenuClick }) {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -20,18 +20,33 @@ export default function TopBar({ title, subtitle }) {
   const mm = String(now.getMinutes()).padStart(2, "0");
 
   return (
-    <div className="rounded-xl2 bg-hero-gradient border border-border p-6 mb-6 flex items-center justify-between overflow-hidden relative">
-      <div>
-        <h1 className="text-2xl font-bold text-white">{title}</h1>
-        {subtitle && (
-          <p className="text-white/50 text-sm mt-1">{subtitle}</p>
+    <div className="rounded-xl2 bg-hero-gradient border border-border p-4 sm:p-6 mb-4 sm:mb-6 flex items-center justify-between overflow-hidden relative gap-3 shrink-0">
+      <div className="flex items-center gap-3 min-w-0">
+        {onMenuClick && (
+          <button
+            onClick={onMenuClick}
+            className="md:hidden shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-white/5 border border-border text-white/70"
+            aria-label="Buka menu sesi"
+          >
+            ☰
+          </button>
         )}
+        <div className="min-w-0">
+          <h1 className="text-lg sm:text-2xl font-bold text-white truncate">
+            {title}
+          </h1>
+          {subtitle && (
+            <p className="text-white/50 text-xs sm:text-sm mt-1 truncate">
+              {subtitle}
+            </p>
+          )}
+        </div>
       </div>
-      <div className="text-right">
-        <div className="text-4xl font-extrabold tracking-tight text-white">
+      <div className="text-right shrink-0">
+        <div className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white">
           {hh}:{mm}
         </div>
-        <div className="text-white/50 text-sm mt-1">
+        <div className="text-white/50 text-[10px] sm:text-sm mt-1">
           {greeting(now.getHours())}
         </div>
       </div>

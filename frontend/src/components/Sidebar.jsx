@@ -7,7 +7,7 @@ const NAV_ITEMS = [
 
 export default function Sidebar({ active, onChange }) {
   return (
-    <aside className="w-64 shrink-0 bg-panel border-r border-border flex flex-col">
+    <aside className="hidden md:flex w-64 shrink-0 bg-panel border-r border-border flex-col">
       <div className="px-5 py-5 border-b border-border">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-accent-gradient flex items-center justify-center text-sm font-bold">

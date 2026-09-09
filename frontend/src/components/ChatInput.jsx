@@ -9,10 +9,6 @@ export default function ChatInput({ onSend, disabled, tools = [] }) {
   function handleChange(e) {
     const v = e.target.value;
     setValue(v);
-    // Menu tool muncul selama user masih mengetik nama tool
-    // (belum ada spasi setelah '/'). Begitu spasi diketik, menu
-    // ditutup supaya user bebas menulis argumen dalam bahasa
-    // natural setelahnya.
     setShowSlash(v.startsWith("/") && !v.includes(" "));
   }
 
@@ -59,8 +55,8 @@ export default function ChatInput({ onSend, disabled, tools = [] }) {
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           rows={1}
-          placeholder="Tanya sesuatu, atau ketik '/' untuk pakai tool langsung (mis. /ping lakukan ping ke google)"
-          className="flex-1 bg-transparent resize-none outline-none text-sm px-3 py-2 text-white placeholder-white/30 max-h-32"
+          placeholder="Tanya sesuatu, atau ketik '/' untuk tool..."
+          className="flex-1 bg-transparent resize-none outline-none px-3 py-2 text-white placeholder-white/30 max-h-32"
         />
         <button
           type="submit"

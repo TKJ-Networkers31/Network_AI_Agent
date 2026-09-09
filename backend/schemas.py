@@ -41,3 +41,7 @@ class MemoryFactRequest(BaseModel):
 
 class MemoryFactDelete(BaseModel):
     key: str
+
+
+class SessionRenameRequest(BaseModel):
+    title: Optional[str] = None

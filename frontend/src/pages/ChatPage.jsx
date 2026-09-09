@@ -13,6 +13,7 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -20,10 +21,7 @@ export default function ChatPage() {
     api
       .tools()
       .then((res) => setTools(res.tools))
-      .catch(() => {
-        // Kalau gagal load daftar tool, slash-command cuma tidak
-        // menampilkan menu - tidak fatal, chat biasa tetap jalan.
-      });
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -80,7 +78,6 @@ export default function ChatPage() {
       ]);
 
       if (result.session_id !== activeId) {
-        // Sesi baru dibuat otomatis oleh backend (giliran pertama).
         setActiveId(result.session_id);
         loadSessions();
       } else {
@@ -126,7 +123,7 @@ export default function ChatPage() {
     sessions.find((s) => s.id === activeId)?.title || "Chat Baru";
 
   return (
-    <div className="flex h-full min-h-0 gap-6">
+    <div className="flex h-full min-h-0 gap-4 md:gap-6">
       <SessionSidebar
         sessions={sessions}
         activeId={activeId}
@@ -134,15 +131,18 @@ export default function ChatPage() {
         onNew={startNewChat}
         onRename={handleRename}
         onDelete={handleDelete}
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
       />
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <TopBar
           title={activeTitle}
           subtitle="Ngobrol atau ketik '/' untuk pakai tool langsung"
+          onMenuClick={() => setDrawerOpen(true)}
         />
 
-        <div className="flex-1 overflow-y-auto min-h-0 space-y-4 pr-1 pb-3">
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-3 sm:space-y-4 pr-1 pb-3">
           {switching && (
             <p className="text-white/30 text-sm text-center mt-10">
               Memuat percakapan...
@@ -150,7 +150,7 @@ export default function ChatPage() {
           )}
 
           {!switching && messages.length === 0 && !loading && (
-            <p className="text-white/30 text-sm text-center mt-10">
+            <p className="text-white/30 text-sm text-center mt-10 px-4">
               Mulai percakapan baru, atau ketik{" "}
               <span className="font-mono text-accent-light">/</span> untuk
               pakai tool langsung.
@@ -184,7 +184,7 @@ export default function ChatPage() {
           <div ref={bottomRef} />
         </div>
 
-        <div className="mt-3 mb-1">
+        <div className="mt-2 sm:mt-3 mb-1">
           <ChatInput onSend={handleSend} disabled={loading} tools={tools} />
         </div>
       </div>

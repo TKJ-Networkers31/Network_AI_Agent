@@ -5,7 +5,7 @@ export default function MessageBubble({ role, content, steps }) {
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[75%] ${isUser ? "" : "w-full"}`}>
+      <div className={`max-w-[88%] sm:max-w-[75%] ${isUser ? "" : "w-full"}`}>
         {!isUser && steps && steps.length > 0 && (
           <div className="mb-2 space-y-1.5">
             {steps.map((step, i) => (
