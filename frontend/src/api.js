@@ -15,20 +15,20 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  chat: (message, sessionId = "default") =>
+  // session_id: null -> backend otomatis membuat sesi baru
+  chat: (message, sessionId = null) =>
     request("/chat", {
       method: "POST",
       body: JSON.stringify({ message, session_id: sessionId }),
     }),
 
-  reset: (sessionId = "default") =>
+  resetSession: (sessionId) =>
     request("/reset", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId }),
     }),
 
-  tokenUsage: (sessionId = "default") =>
-    request(`/token-usage?session_id=${encodeURIComponent(sessionId)}`),
+  tokenUsage: () => request("/token-usage"),
 
   providers: () => request("/providers"),
 
@@ -56,4 +56,25 @@ export const api = {
   events: (limit = 20) => request(`/memory/events?limit=${limit}`),
 
   devices: () => request("/devices"),
+
+  tools: () => request("/tools"),
+
+  sessions: {
+    list: () => request("/sessions"),
+
+    create: () => request("/sessions", { method: "POST" }),
+
+    messages: (id) => request(`/sessions/${encodeURIComponent(id)}/messages`),
+
+    rename: (id, title) =>
+      request(`/sessions/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+      }),
+
+    remove: (id) =>
+      request(`/sessions/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+  },
 };
