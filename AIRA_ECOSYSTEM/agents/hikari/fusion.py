@@ -15,7 +15,7 @@ tanpa modifikasi - error di jalur visual tidak boleh menghentikan
 alur percakapan suara yang sudah berjalan.
 """
 
-from tools.vision.detector import detect_objects, FUSION_LIVE_DURATION
+from agents.hikari.vision import detect_objects, FUSION_LIVE_DURATION
 from agent.core.logger import log_error, logger
 
 

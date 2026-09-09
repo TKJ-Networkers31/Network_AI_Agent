@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 
-from backend.schemas import SessionRenameRequest
-from backend.state import drop_cache
-from agent.memory_store import chat_sessions as store
+from api.schemas import SessionRenameRequest
+from api.state import drop_cache
+from core import chat_sessions as store
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -19,7 +19,6 @@ def create_session():
 
 @router.get("/{session_id}/messages")
 def get_messages(session_id: str):
-
     if not store.get_session_row(session_id):
         raise HTTPException(status_code=404, detail="Sesi tidak ditemukan.")
 
@@ -28,7 +27,6 @@ def get_messages(session_id: str):
 
 @router.patch("/{session_id}")
 def rename(session_id: str, payload: SessionRenameRequest):
-
     title = (payload.title or "").strip() or "Chat baru"
     ok = store.rename_session(session_id, title)
 
@@ -40,7 +38,6 @@ def rename(session_id: str, payload: SessionRenameRequest):
 
 @router.delete("/{session_id}")
 def delete(session_id: str):
-
     ok = store.delete_session(session_id)
     drop_cache(session_id)
 

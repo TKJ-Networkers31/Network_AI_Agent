@@ -1,4 +1,4 @@
 .venv
 .env
 data/
-logs/
+logs/AIRA_ECOSYSTEM/.env

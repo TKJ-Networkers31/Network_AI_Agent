@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from tools.inventory import list_devices
+from agents.akane.network_tools import list_devices
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 

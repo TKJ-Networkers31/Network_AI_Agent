@@ -47,7 +47,7 @@ DEFAULT_LIVE_DURATION = 4.0
 FUSION_LIVE_DURATION = 2.0
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-SNAPSHOT_DIR = BASE_DIR / "data" / "vision_snapshots"
+SNAPSHOT_DIR = BASE_DIR / "database" / "vision_snapshots"
 
 _model_instance = None
 

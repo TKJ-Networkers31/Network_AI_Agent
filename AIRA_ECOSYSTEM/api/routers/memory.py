@@ -1,12 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from backend.schemas import MemoryFactRequest
-from agent.memory_store.long_term import (
-    get_all_facts,
-    remember_fact,
-    forget_fact,
-    get_recent_events,
-)
+from api.schemas import MemoryFactRequest
+from core.memory import get_all_facts, remember_fact, forget_fact, get_recent_events
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -23,7 +18,6 @@ def add_fact(payload: MemoryFactRequest):
 
 @router.delete("/facts/{key}")
 def delete_fact(key: str):
-
     result = forget_fact(key)
 
     if not result.get("success"):
