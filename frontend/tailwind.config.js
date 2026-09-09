@@ -4,22 +4,23 @@ export default {
   theme: {
     extend: {
       colors: {
-        app: "#0b0a14",
-        panel: "#12111f",
-        card: "#181628",
-        border: "rgba(255,255,255,0.08)",
+        app: "#070b14",
+        panel: "#0c1220",
+        card: "#101a2c",
+        border: "rgba(148,197,255,0.10)",
         accent: {
-          DEFAULT: "#7c6bfb",
-          light: "#9b6bff",
-          soft: "#4c3fb0",
+          DEFAULT: "#2563eb", // blue-600
+          light: "#38bdf8",   // sky-400
+          soft: "#1e3a8a",    // blue-900
         },
       },
       borderRadius: {
         xl2: "1rem",
       },
       backgroundImage: {
-        "accent-gradient": "linear-gradient(90deg, #6d5ef8 0%, #a78bfa 100%)",
-        "hero-gradient": "linear-gradient(135deg, #241f45 0%, #120f24 60%, #0b1a12 100%)",
+        "accent-gradient": "linear-gradient(90deg, #2563eb 0%, #06b6d4 100%)",
+        "hero-gradient":
+          "linear-gradient(135deg, #102341 0%, #0a1220 55%, #062033 100%)",
       },
     },
   },

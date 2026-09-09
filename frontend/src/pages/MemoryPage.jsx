@@ -1,22 +1,24 @@
 import { useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { api } from "../api.js";
+import { useToast } from "../components/Toast.jsx";
 
-export default function MemoryPage() {
+export default function MemoryPage({ onOpenMenu }) {
   const [facts, setFacts] = useState([]);
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
-  const [error, setError] = useState(null);
+  const { notify } = useToast();
 
   function loadFacts() {
     api
       .facts()
       .then((res) => setFacts(res.facts))
-      .catch((e) => setError(e.message));
+      .catch((e) => notify({ type: "error", message: e.message }));
   }
 
   useEffect(() => {
     loadFacts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleAdd(e) {
@@ -28,8 +30,9 @@ export default function MemoryPage() {
       setNewKey("");
       setNewValue("");
       loadFacts();
+      notify({ type: "success", message: "Fakta tersimpan.", duration: 2500 });
     } catch (err) {
-      setError(err.message);
+      notify({ type: "error", message: err.message });
     }
   }
 
@@ -38,7 +41,7 @@ export default function MemoryPage() {
       await api.deleteFact(key);
       loadFacts();
     } catch (err) {
-      setError(err.message);
+      notify({ type: "error", message: err.message });
     }
   }
 
@@ -47,6 +50,7 @@ export default function MemoryPage() {
       <TopBar
         title="Memory"
         subtitle="Fakta jangka-panjang yang diingat agent lintas sesi"
+        onMenuClick={onOpenMenu}
       />
 
       <form
@@ -72,12 +76,6 @@ export default function MemoryPage() {
           + Tambah
         </button>
       </form>
-
-      {error && (
-        <div className="text-sm mb-4 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300">
-          {error}
-        </div>
-      )}
 
       <div className="space-y-2">
         {facts.map((f) => (

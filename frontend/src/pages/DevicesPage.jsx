@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { api } from "../api.js";
 
-export default function DevicesPage() {
+export default function DevicesPage({ onOpenMenu }) {
   const [devices, setDevices] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -23,6 +23,7 @@ export default function DevicesPage() {
       <TopBar
         title="Devices"
         subtitle="Daftar perangkat dari inventory/router.yaml"
+        onMenuClick={onOpenMenu}
       />
 
       {loading && <p className="text-white/40 text-sm">Memuat...</p>}
@@ -40,7 +41,7 @@ export default function DevicesPage() {
           >
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-white">{d.name}</h3>
-              <span className="text-[10px] uppercase tracking-wide bg-emerald-500/10 text-emerald-300 px-2 py-1 rounded-full">
+              <span className="text-[10px] uppercase tracking-wide bg-accent/10 text-accent-light px-2 py-1 rounded-full">
                 inventory
               </span>
             </div>

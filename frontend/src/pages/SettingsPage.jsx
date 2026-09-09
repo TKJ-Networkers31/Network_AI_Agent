@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { api } from "../api.js";
+import { useToast } from "../components/Toast.jsx";
 
-export default function SettingsPage() {
+export default function SettingsPage({ onOpenMenu }) {
   const [providers, setProviders] = useState([]);
   const [activeKey, setActiveKey] = useState(null);
   const [usage, setUsage] = useState(null);
   const [credits, setCredits] = useState(null);
-  const [error, setError] = useState(null);
+  const { notify } = useToast();
 
   function load() {
     api
@@ -16,7 +17,7 @@ export default function SettingsPage() {
         setProviders(res.providers);
         setActiveKey(res.active_key);
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => notify({ type: "error", message: e.message }));
 
     api.tokenUsage().then(setUsage).catch(() => {});
     api.credits().then(setCredits).catch(() => {});
@@ -24,26 +25,26 @@ export default function SettingsPage() {
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleSelect(key) {
     try {
       await api.selectProvider(key);
       load();
+      notify({ type: "success", message: "Model aktif diganti.", duration: 2500 });
     } catch (err) {
-      setError(err.message);
+      notify({ type: "error", message: err.message });
     }
   }
 
   return (
     <div>
-      <TopBar title="Settings" subtitle="Model aktif & pemakaian token" />
-
-      {error && (
-        <div className="text-sm mb-4 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300">
-          {error}
-        </div>
-      )}
+      <TopBar
+        title="Settings"
+        subtitle="Model aktif & pemakaian token"
+        onMenuClick={onOpenMenu}
+      />
 
       <div className="bg-card border border-border rounded-xl2 p-5 mb-6">
         <h3 className="font-semibold mb-4 text-white">Model / Provider Aktif</h3>

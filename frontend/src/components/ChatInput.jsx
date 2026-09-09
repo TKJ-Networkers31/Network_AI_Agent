@@ -1,7 +1,12 @@
 import { useRef, useState } from "react";
 import SlashMenu from "./SlashMenu.jsx";
 
-export default function ChatInput({ onSend, disabled, tools = [] }) {
+export default function ChatInput({
+  onSend,
+  disabled,
+  tools = [],
+  voiceControls,
+}) {
   const [value, setValue] = useState("");
   const [showSlash, setShowSlash] = useState(false);
   const textareaRef = useRef(null);
@@ -49,13 +54,15 @@ export default function ChatInput({ onSend, disabled, tools = [] }) {
         onSubmit={submit}
         className="flex items-end gap-2 bg-card border border-border rounded-xl2 p-2"
       >
+        {voiceControls}
+
         <textarea
           ref={textareaRef}
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           rows={1}
-          placeholder="Tanya sesuatu, atau ketik '/' untuk tool..."
+          placeholder="Tanya sesuatu, ketik '/' untuk tool, atau tekan mic untuk bicara..."
           className="flex-1 bg-transparent resize-none outline-none px-3 py-2 text-white placeholder-white/30 max-h-32"
         />
         <button
