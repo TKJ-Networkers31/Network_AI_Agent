@@ -1,11 +1,26 @@
 """
 agents/rei/provider_client.py — SATU-SATUNYA file di ekosistem AIRA yang
 boleh memanggil provider LLM eksternal (OpenRouter) atau lokal (Ollama).
-Port dari agent/core/providers.py, hanya sumber long-term memory yang
-berubah: dulu agent.memory_store.long_term, sekarang core.memory.
+
+FIX (Phase 0 Stabilization):
+1. response.json() bisa melempar json.JSONDecodeError ketika provider
+   balas body yang bukan JSON valid (pernah terjadi saat OpenRouter
+   error internal). Sebelumnya exception ini TIDAK tertangkap oleh
+   `except requests.exceptions.RequestException`, sehingga bocor ke
+   atas dan bisa menghentikan alur planner/orchestrator di tengah
+   jalan. Sekarang ditangkap eksplisit dan dikembalikan sebagai
+   {"error": ...} seperti kegagalan lain.
+2. _normalize_message() diperkuat: sekarang juga menjamin key
+   'tool_calls' selalu list (bukan None) supaya konsumen di
+   agents/rei/planner.py tidak perlu jaga-jaga null-check berulang.
+3. call_model() memvalidasi config["type"] terhadap whitelist eksplisit
+   {"ollama", "openai"} - kalau ada value asing (mis. sisa config lama
+   seperti "Open Router"), langsung dikembalikan sebagai error yang
+   jelas alih-alih menyebabkan behaviour tak terduga di pemanggil.
 """
 
 import os
+import json
 import logging
 from pathlib import Path
 
@@ -22,6 +37,8 @@ AIRA_ROOT = Path(__file__).resolve().parents[2]
 
 load_dotenv(REPO_ROOT / ".env")
 load_dotenv(AIRA_ROOT / ".env", override=False)
+
+VALID_PROVIDER_TYPES = {"ollama", "openai"}
 
 PROVIDERS = {
     "ollama-qwen3-4b": {
@@ -89,25 +106,46 @@ def get_active_provider():
 def call_model(messages, tools):
     key, config = get_active_provider()
 
-    if config["type"] == "ollama":
-        result = _call_ollama(config, messages, tools)
-    elif config["type"] == "openai":
-        result = _call_openai_compatible(config, messages, tools)
-    else:
-        result = {"error": f"Tipe provider '{config['type']}' tidak dikenal."}
+    provider_type = config.get("type")
 
-    return result
+    # FIX: validasi eksplisit terhadap whitelist, bukan cuma if/elif
+    # yang jatuh ke else generik. Ini mencegah config rusak/asing
+    # (mis. sisa "Open Router" dari versi lama) lolos tanpa pesan
+    # yang jelas.
+    if provider_type not in VALID_PROVIDER_TYPES:
+        return {
+            "error": (
+                f"Tipe provider '{provider_type}' tidak dikenal "
+                f"(provider key='{key}'). Tipe yang valid: "
+                f"{sorted(VALID_PROVIDER_TYPES)}."
+            )
+        }
+
+    if provider_type == "ollama":
+        return _call_ollama(config, messages, tools)
+
+    return _call_openai_compatible(config, messages, tools)
 
 
 def _normalize_message(message):
     if not isinstance(message, dict):
         message = {}
+
     if "role" not in message or not message.get("role"):
         message["role"] = "assistant"
+
+    # FIX: pastikan tool_calls selalu list, bukan None/missing, supaya
+    # planner.py tidak perlu `message.get("tool_calls", [])` berulang
+    # dengan asumsi yang bisa salah kalau providernya taruh None literal.
+    if message.get("tool_calls") is None:
+        message["tool_calls"] = []
+
     has_content = bool(message.get("content"))
     has_tool_calls = bool(message.get("tool_calls"))
+
     if not has_content and not has_tool_calls:
         message["content"] = EMPTY_RESPONSE_MARKER
+
     return message
 
 
@@ -131,9 +169,21 @@ def _call_ollama(config, messages, tools):
     try:
         response = requests.post(config["url"], json=payload, timeout=300)
         response.raise_for_status()
-        data = response.json()
+
+        try:
+            data = response.json()
+        except json.JSONDecodeError as exc:
+            logger.error("call_ollama: response bukan JSON valid: %s", exc)
+            return {
+                "error": (
+                    f"Ollama di {config['url']} membalas body yang bukan "
+                    f"JSON valid: {exc}"
+                )
+            }
+
         message = _normalize_message(data.get("message", {}))
         return {"message": message, "usage": _extract_ollama_usage(data)}
+
     except requests.exceptions.RequestException as exc:
         logger.error("call_ollama gagal: %s", exc)
         return {"error": f"Tidak bisa menghubungi Ollama di {config['url']}: {exc}"}
@@ -157,11 +207,30 @@ def _call_openai_compatible(config, messages, tools):
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
-        data = response.json()
+
+        # FIX: json.JSONDecodeError sebelumnya TIDAK tertangkap di
+        # sini karena bukan turunan requests.exceptions.RequestException.
+        # Kalau lolos raise_for_status() tapi body-nya bukan JSON valid
+        # (pernah terjadi di provider Nvidia via OpenRouter), exception
+        # ini bocor dan menghentikan planner di tengah jalan.
+        try:
+            data = response.json()
+        except json.JSONDecodeError as exc:
+            body_preview = response.text[:500] if response.text else "(kosong)"
+            logger.error("call_openai_compatible: response bukan JSON valid: %s", exc)
+            return {
+                "error": (
+                    f"{config['base_url']} membalas body yang bukan JSON "
+                    f"valid: {exc} | body: {body_preview}"
+                )
+            }
+
         choices = data.get("choices") or [{}]
         choice = choices[0] if choices else {}
+
         message = _normalize_message(choice.get("message") or {})
         return {"message": message, "usage": data.get("usage")}
+
     except requests.exceptions.RequestException as exc:
         detail = str(exc)
         if getattr(exc, "response", None) is not None:
@@ -189,7 +258,12 @@ def get_openrouter_credits(config=None):
     try:
         response = requests.get("https://openrouter.ai/api/v1/credits", headers=headers, timeout=15)
         response.raise_for_status()
-        data = response.json().get("data", {})
+
+        try:
+            data = response.json().get("data", {})
+        except json.JSONDecodeError as exc:
+            return {"success": False, "error": f"Response credits bukan JSON valid: {exc}"}
+
         total_credits = data.get("total_credits")
         total_usage = data.get("total_usage")
         remaining = (

@@ -1,7 +1,19 @@
+"""
+agent/memory_store/auto_extract.py
+
+FIX (Phase 0 Stabilization) - sama seperti versi AIRA_ECOSYSTEM
+(agents/rei/auto_extract.py): skip ekstraksi kalau assistant_answer
+adalah EMPTY_RESPONSE_MARKER, supaya tidak buang API call + tidak
+spam log "Gagal parse JSON" tiap kali provider rate-limited.
+
+Dipertahankan untuk kompatibilitas selama masa transisi migrasi ke
+AIRA_ECOSYSTEM - lihat MIGRATION_PLAN.md Tahap 5.
+"""
+
 import json
 import threading
 
-from agent.core.providers import call_model
+from agent.core.providers import call_model, EMPTY_RESPONSE_MARKER
 from agent.memory_store.long_term import remember_fact
 from agent.core.logger import log_error, logger
 
@@ -37,6 +49,11 @@ Kalau tidak ada yang layak disimpan, balas persis: []
 
 def _extract(user_input, assistant_answer):
 
+    # FIX: skip lebih awal kalau jawaban assistant hanyalah marker
+    # retry provider, bukan jawaban asli.
+    if not assistant_answer or assistant_answer.strip() == EMPTY_RESPONSE_MARKER:
+        return []
+
     messages = [
         {"role": "system", "content": EXTRACTION_PROMPT},
         {
@@ -53,7 +70,9 @@ def _extract(user_input, assistant_answer):
 
     content = response.get("message", {}).get("content", "")
 
-    if not content:
+    # FIX: kalau giliran ekstraksi ini sendiri kena rate-limit dan
+    # balas marker, jangan dianggap gagal parse - cukup skip.
+    if not content or content.strip() == EMPTY_RESPONSE_MARKER:
         return []
 
     content = content.strip()
