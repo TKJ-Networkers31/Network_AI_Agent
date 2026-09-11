@@ -147,20 +147,17 @@ export function useVoice({ onTranscript, notify } = {}) {
   );
 
   const toggleSpeak = useCallback(() => {
-    setSpeakEnabled((prev) => {
-      const next = !prev;
+    const next = !speakEnabled;
+    setSpeakEnabled(next);
 
-      if (!next) stopSpeaking();
+    if (!next) stopSpeaking();
 
-      notify?.({
-        type: "info",
-        message: next ? "Mode bicara diaktifkan." : "Mode bicara dimatikan.",
-        duration: 2500,
-      });
-
-      return next;
+    notify?.({
+      type: "info",
+      message: next ? "Mode bicara diaktifkan." : "Mode bicara dimatikan.",
+      duration: 2500,
     });
-  }, [stopSpeaking, notify]);
+  }, [speakEnabled, stopSpeaking, notify]);
 
   return {
     supported: speechSupported,

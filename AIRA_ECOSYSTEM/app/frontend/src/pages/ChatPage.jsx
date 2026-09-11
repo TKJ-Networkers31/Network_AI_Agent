@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import ThinkingIndicator from "../components/ThinkingIndicator.jsx";
 import TopBar from "../components/TopBar.jsx";
 import MessageBubble from "../components/MessageBubble.jsx";
 import ChatInput from "../components/ChatInput.jsx";
@@ -173,8 +174,8 @@ export default function ChatPage({ onOpenMenu }) {
 
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-card border border-border rounded-xl2 px-4 py-3 text-sm text-white/50">
-              <span className="animate-pulse">Agent sedang berpikir...</span>
+            <div className="bg-card border border-border rounded-xl2 px-4 py-3">
+              <ThinkingIndicator />
             </div>
           </div>
         )}

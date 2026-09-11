@@ -24,6 +24,8 @@ class ChatResponse(BaseModel):
     duration: float
     token_usage: Optional[dict] = None
     error: bool = False
+    session_id: str
+    session_title: str
 
 
 class ResetRequest(BaseModel):
