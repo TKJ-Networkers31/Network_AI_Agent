@@ -77,4 +77,19 @@ export const api = {
         method: "DELETE",
       }),
   },
+  logs: {
+    list: (params = {}) => {
+      const qs = new URLSearchParams(
+        Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""))
+      ).toString();
+      return request(`/logs${qs ? `?${qs}` : ""}`);
+    },
+    categories: () => request("/logs/categories"),
+    stats: (sinceMinutes) =>
+      request(`/logs/stats${sinceMinutes ? `?since_minutes=${sinceMinutes}` : ""}`),
+    clear: (category) =>
+      request(`/logs${category ? `?category=${encodeURIComponent(category)}` : ""}`, {
+        method: "DELETE",
+      }),
+  },
 };

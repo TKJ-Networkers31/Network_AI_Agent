@@ -29,3 +29,6 @@
 2026-09-11 19:48:46 [INFO] aira.brain | BRAIN | menerima input user (18 char)
 2026-09-11 19:49:00 [INFO] aira.rei.auto_extract | AUTO MEMORY tersimpan otomatis: ['official_name']
 2026-09-11 19:50:42 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
+2026-09-11 20:31:19 | aira | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-11 20:35:01 | aira | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-11 20:42:24 | aira | LOGGING SETUP | console + aira.log + categories/ + logs.db

@@ -18,7 +18,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import chat, providers, memory, devices, sessions, tools
+from api.routers import chat, providers, memory, devices, sessions, tools, logs
+
+
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 APP_DIST = BASE_DIR / "app" / "frontend" / "dist"
@@ -39,6 +41,7 @@ app.include_router(memory.router)
 app.include_router(devices.router)
 app.include_router(sessions.router)
 app.include_router(tools.router)
+app.include_router(logs.router)
 
 
 @app.get("/api/health")
@@ -48,3 +51,5 @@ def health():
 
 if APP_DIST.exists():
     app.mount("/", StaticFiles(directory=str(APP_DIST), html=True), name="app")
+
+

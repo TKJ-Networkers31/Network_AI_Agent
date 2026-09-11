@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 
 import logging
 
+from core.logger import log_event
+
 logger = logging.getLogger("aira.tools.ssh")
 
 
@@ -234,6 +236,13 @@ def ssh_execute(
                 # sebagai kegagalan logis.
                 success = not bool(error)
 
+                log_event(
+                    logger, "INFO" if success else "WARNING",
+                    f"SSH exec {'sukses' if success else 'ada stderr'} | {command}",
+                    category="ssh",
+                    context={"device": device_name, "host": device["host"], "command": command},
+                    success=success,
+                )
                 return {
                     "success": success,
                     "device": device_name,

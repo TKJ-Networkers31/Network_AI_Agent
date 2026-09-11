@@ -12,6 +12,7 @@ const PAGES = {
   chat: ChatPage,
   devices: DevicesPage,
   memory: MemoryPage,
+  logs: LogsPage,
   settings: SettingsPage,
 };
 
