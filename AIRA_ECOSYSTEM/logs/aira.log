@@ -1,0 +1,14 @@
+2026-09-11 19:02:30 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
+2026-09-11 19:03:02 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
+2026-09-11 19:03:16 [INFO] aira.brain | BRAIN | menerima input user (3 char)
+2026-09-11 19:03:26 [INFO] aira.brain | BRAIN | menerima input user (18 char)
+2026-09-11 19:04:02 [INFO] aira.brain | BRAIN | menerima input user (43 char)
+2026-09-11 19:04:14 [INFO] aira.rei.planner | Provider balas kosong, mencoba ulang (1/1)...
+2026-09-11 19:04:40 [INFO] aira.brain | BRAIN | menerima input user (24 char)
+2026-09-11 19:06:07 [WARNING] aira.tools.ssh | SSH attempt 1 gagal untuk device=R1 command='/ip route print': timed out
+2026-09-11 19:06:19 [WARNING] aira.tools.ssh | SSH attempt 2 gagal untuk device=R1 command='/ip route print': timed out
+2026-09-11 19:06:46 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
+2026-09-11 19:07:03 [INFO] aira.brain | BRAIN | menerima input user (32 char)
+2026-09-11 19:13:23 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
+2026-09-11 19:13:47 [INFO] aira.brain | BRAIN | menerima input user (3 char)
+2026-09-11 19:14:14 [INFO] aira.brain | BRAIN | menerima input user (20 char)

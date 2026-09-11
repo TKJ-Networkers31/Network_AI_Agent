@@ -1,10 +1,22 @@
+import platform
 import subprocess
 
 
 def ping(target, count=4):
+    """
+    Cross-platform ping.
+
+    Windows  : ping -n <count> <target>
+    Unix/Mac : ping -c <count> <target>
+    """
+
     try:
+        is_windows = platform.system().lower() == "windows"
+
+        count_flag = "-n" if is_windows else "-c"
+
         result = subprocess.run(
-            ["ping", "-n", str(count), target],
+            ["ping", count_flag, str(count), target],
             capture_output=True,
             text=True,
             timeout=20
@@ -64,14 +76,34 @@ def nslookup(
 def traceroute(
     target
 ):
+    """
+    Cross-platform traceroute.
+
+    Windows      : tracert <target>
+    Unix/Linux/Mac: traceroute <target>
+
+    FIX (regresi Phase 0): sebelumnya command 'traceroute' selalu
+    hardcode, sehingga di Windows selalu gagal dengan
+    '[WinError 2] The system cannot find the file specified' karena
+    binary bernama 'traceroute' memang tidak ada di Windows - yang
+    ada 'tracert'. Ini persis bug yang sebelumnya sudah pernah
+    diperbaiki (lihat catatan migrasi) tapi hilang lagi saat porting
+    ke AIRA_ECOSYSTEM. Deteksi OS dipakai lagi di sini seperti fix
+    aslinya.
+    """
 
     try:
 
+        is_windows = platform.system().lower() == "windows"
+
+        command = (
+            ["tracert", target]
+            if is_windows
+            else ["traceroute", target]
+        )
+
         result = subprocess.run(
-            [
-                "traceroute",
-                target
-            ],
+            command,
             capture_output=True,
             text=True,
             timeout=30

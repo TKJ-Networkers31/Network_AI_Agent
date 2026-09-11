@@ -7,6 +7,13 @@ Jalankan dari root AIRA_ECOSYSTEM/:
 
 from pathlib import Path
 
+from core.logger import setup_logging
+
+# WAJIB dipanggil SEBELUM import lain yang bisa melakukan logging
+# (agents/*, core/orchestrator, dst) - supaya handler sudah terpasang
+# begitu request pertama masuk.
+setup_logging()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

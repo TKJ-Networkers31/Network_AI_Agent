@@ -15,6 +15,13 @@ Taruh file ini di: AIRA_ECOSYSTEM/run_chat.py
 
 import sys
 
+from core.logger import setup_logging
+
+# WAJIB dipanggil sebelum Brain/ConversationMemory dipakai, supaya
+# semua log (TOOL CALL, LLM REQUEST, dst) tertulis ke
+# AIRA_ECOSYSTEM/logs/aira.log - tanpa ini log akan hilang total.
+setup_logging()
+
 from core.brain import Brain
 from core.memory import ConversationMemory
 
