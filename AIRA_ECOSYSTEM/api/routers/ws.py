@@ -1,16 +1,5 @@
 """
-api/routers/ws.py — WebSocket realtime streaming untuk AIRA (Phase 0.5).
-
-WAJIB TERPISAH dari REST /api/chat (chat.py TIDAK diubah). Endpoint ini
-memanggil Brain.think() yang SAMA PERSIS dengan yang dipakai REST, jadi
-tidak ada logic ganda / tidak ada "chatbot kedua" - cuma jalur transport
-berbeda untuk event realtime (thinking/tool_start/.../response).
-
-Brain.think() masih sepenuhnya SYNC (call_model pakai requests, SSH pakai
-paramiko) - supaya tidak menghentikan event loop FastAPI, eksekusinya
-didorong ke thread terpisah lewat asyncio.to_thread(), dan progress
-di-relay balik lewat queue.Queue thread-safe yang di-drain oleh loop
-asyncio di endpoint ini.
+api/routers/ws.py — WebSocket realtime streaming untuk AIRA.
 """
 
 import asyncio
@@ -30,12 +19,10 @@ logger = logging.getLogger("aira.ws")
 
 router = APIRouter(prefix="/ws", tags=["websocket"])
 
-QUEUE_POLL_INTERVAL = 0.05  # detik, kecepatan drain queue -> socket
+QUEUE_POLL_INTERVAL = 0.05
 
 
 def _apply_slash_command(raw_message: str) -> str:
-    """Duplikat kecil dari chat.py::_apply_slash_command - dipertahankan
-    identik supaya perilaku '/tool ...' sama persis di WS maupun REST."""
     if not raw_message.startswith("/"):
         return raw_message
 
@@ -57,11 +44,6 @@ def _apply_slash_command(raw_message: str) -> str:
 
 
 async def _drain_queue_to_socket(session_id: str, event_queue: "queue.Queue", stop_flag: dict) -> None:
-    """
-    Loop async yang membaca event_queue (diisi dari thread lain oleh
-    on_event callback sync) dan mengirimkannya ke websocket, sampai
-    stop_flag['done'] diset True DAN queue sudah kosong.
-    """
     while True:
         drained_any = False
 
@@ -74,8 +56,6 @@ async def _drain_queue_to_socket(session_id: str, event_queue: "queue.Queue", st
             await manager.send(session_id, event)
 
         if stop_flag.get("done") and not drained_any:
-            # pastikan tidak ada event yang datang tepat setelah flag
-            # di-set tapi sebelum drain terakhir - cek sekali lagi.
             if event_queue.empty():
                 break
 
@@ -87,19 +67,16 @@ async def _drain_queue_to_socket(session_id: str, event_queue: "queue.Queue", st
 async def chat_ws(websocket: WebSocket, session_id: str):
     await manager.connect(session_id, websocket)
 
-    # Pastikan sesi ada di storage (sama seperti chat.py membuat sesi
-    # kalau belum ada) - kalau belum ada, biarkan seperti apa adanya;
-    # frontend selalu kirim session_id yang sudah dibuat lewat REST
-    # POST /api/sessions atau hasil chat REST sebelumnya. Kalau belum
-    # ada baris sesi di DB, chat_turns tetap tidak akan gagal karena
-    # add_turn tidak melakukan foreign-key check.
     try:
         while True:
             raw = await websocket.receive_json()
             display_message = (raw.get("message") or "").strip()
 
             if not display_message:
-                await manager.send(session_id, {"type": "error", "data": {"message": "Pesan kosong."}})
+                await manager.send(session_id, {
+                    "type": "error",
+                    "data": {"message": "Pesan kosong.", "session_id": session_id},
+                })
                 continue
 
             llm_message = _apply_slash_command(display_message)
@@ -110,16 +87,16 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             stop_flag = {"done": False}
 
             def on_event(event_type: str, payload: dict) -> None:
-                # Dipanggil dari THREAD LAIN (worker asyncio.to_thread) -
-                # queue.Queue thread-safe, aman dipanggil langsung tanpa
-                # loop.call_soon_threadsafe.
                 event_queue.put({
                     "type": event_type,
-                    "data": payload,
+                    "data": {**payload, "session_id": session_id},
                     "ts": time.time(),
                 })
 
-            await manager.send(session_id, {"type": "ack", "data": {"message": display_message}})
+            await manager.send(session_id, {
+                "type": "ack",
+                "data": {"message": display_message, "session_id": session_id},
+            })
 
             think_task = asyncio.create_task(
                 asyncio.to_thread(brain.think, llm_message, on_event)
@@ -134,11 +111,14 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 logger.exception("WS think() gagal | session=%s", session_id)
                 stop_flag["done"] = True
                 await drain_task
-                await manager.send(session_id, {"type": "error", "data": {"message": str(exc)}})
+                await manager.send(session_id, {
+                    "type": "error",
+                    "data": {"message": str(exc), "session_id": session_id},
+                })
                 continue
 
             stop_flag["done"] = True
-            await drain_task  # pastikan semua event sudah terkirim sebelum "response"
+            await drain_task
 
             persist_memory(session_id, memory)
             add_global_usage(result.token_usage)

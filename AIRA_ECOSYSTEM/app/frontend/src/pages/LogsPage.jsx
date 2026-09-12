@@ -24,9 +24,6 @@ function formatTimePrecise(ts) {
   return `${d.toLocaleString("id-ID", { hour12: false })}.${String(d.getMilliseconds()).padStart(3, "0")}`;
 }
 
-// Detail lengkap satu entri log, dibuka lewat klik baris - menampilkan
-// SEMUA yang tersimpan (pesan penuh, sumber kode, context mentah, dsb)
-// supaya troubleshooting tidak perlu tebak-tebakan.
 function LogDetailPanel({ log }) {
   const source = log.context?._source;
   const otherContext = log.context
@@ -124,21 +121,45 @@ function LogRow({ log }) {
   );
 }
 
-// Keterangan kategori yang sedang aktif difilter - menjawab "log ini
-// isinya apa" dan "apa yang bikin log ini tercatat" langsung di atas
-// daftar, tanpa perlu buka source code.
-function CategoryLegend({ info }) {
+// Keterangan kategori yang sedang aktif difilter - punya toggle
+// minimize/expand SENDIRI, terpisah dari panel filter.
+function CategoryLegend({ info, open, onToggle }) {
   if (!info || (!info.description && !info.triggered_by)) return null;
 
   return (
-    <div className="bg-accent/5 border border-accent/20 rounded-lg px-4 py-3 text-xs space-y-1">
-      <div className="font-semibold text-accent-light">{info.label}</div>
-      {info.description && <p className="text-white/60">{info.description}</p>}
-      {info.triggered_by && (
-        <p className="text-white/40">
-          <span className="text-white/60 font-medium">Tercatat saat: </span>
-          {info.triggered_by}
-        </p>
+    <div className="bg-accent/5 border border-accent/20 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-accent-light"
+      >
+        <span className="flex items-center gap-2">
+          Tentang kategori "{info.label}"
+          {!open && (info.description || info.triggered_by) && (
+            <span className="text-[10px] font-normal text-accent-light/60 normal-case">
+              (klik untuk lihat detail)
+            </span>
+          )}
+        </span>
+        <svg
+          viewBox="0 0 24 24" fill="none"
+          className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+          style={{ width: 12, height: 12 }}
+        >
+          <path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-3 text-xs space-y-1">
+          {info.description && <p className="text-white/60">{info.description}</p>}
+          {info.triggered_by && (
+            <p className="text-white/40">
+              <span className="text-white/60 font-medium">Tercatat saat: </span>
+              {info.triggered_by}
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
@@ -154,10 +175,11 @@ export default function LogsPage({ onOpenMenu }) {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  // Panel filter/legend bisa di-minimize/di-expand supaya daftar log
-  // dapat ruang lebih besar di layar kecil, tanpa kehilangan akses
-  // cepat ke filter yang sedang aktif.
+  // FIX: panel Filter dan panel Penjelasan Kategori sekarang punya
+  // state minimize/expand MASING-MASING, tidak lagi digabung jadi
+  // satu toggle "filtersOpen" tunggal seperti sebelumnya.
   const [filtersOpen, setFiltersOpen] = useState(true);
+  const [legendOpen, setLegendOpen] = useState(true);
 
   const { notify } = useToast();
 
@@ -327,7 +349,11 @@ export default function LogsPage({ onOpenMenu }) {
               </button>
             </div>
 
-            <CategoryLegend info={activeCategoryInfo} />
+            <CategoryLegend
+              info={activeCategoryInfo}
+              open={legendOpen}
+              onToggle={() => setLegendOpen((v) => !v)}
+            />
           </div>
         )}
       </div>

@@ -39,20 +39,28 @@ function notifyBrowser(title, body) {
  * state percakapan + koneksi WebSocket TIDAK ikut mati saat user
  * pindah ke halaman lain (Settings, Devices, dst). ChatPage jadi cuma
  * "jendela" yang menampilkan data dari sini, bukan pemilik datanya.
+ *
+ * PENTING: koneksi WebSocket dibuat SATU KALI di sini (lewat
+ * useAiraSocket), TIDAK boleh dibuat lagi di ChatPage atau komponen
+ * lain manapun untuk sessionId yang sama - kalau dibuat dua kali,
+ * satu event dari server akan diproses dua kali (notifikasi dobel,
+ * step tool dobel).
+ *
+ * loading/phase/liveTools disimpan PER session_id (bukan state
+ * tunggal/global), supaya proses di satu sesi tidak "bocor" ke UI
+ * sesi lain yang sedang/baru dibuka.
  */
 export function ChatRuntimeProvider({ children, isOnChatPage }) {
   const { activeId, setActiveId, upsertSession } = useSessionsContext();
   const { notify } = useToast();
 
   const [messagesBySession, setMessagesBySession] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [phase, setPhase] = useState(null);
-  const [liveTools, setLiveTools] = useState([]);
+  const [loadingBySession, setLoadingBySession] = useState({});
+  const [phaseBySession, setPhaseBySession] = useState({});
+  const [liveToolsBySession, setLiveToolsBySession] = useState({});
   const [switching, setSwitching] = useState(false);
   const [unreadSessionIds, setUnreadSessionIds] = useState(() => new Set());
 
-  // Ref supaya callback socket selalu baca nilai TERBARU tanpa perlu
-  // reconnect socket tiap kali isOnChatPage/activeId berubah.
   const isOnChatPageRef = useRef(isOnChatPage);
   isOnChatPageRef.current = isOnChatPage;
 
@@ -60,6 +68,9 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
   activeIdRef.current = activeId;
 
   const messages = messagesBySession[activeId] || [];
+  const loading = loadingBySession[activeId] || false;
+  const phase = phaseBySession[activeId] || null;
+  const liveTools = liveToolsBySession[activeId] || [];
 
   const setMessagesForSession = useCallback((sessionId, updater) => {
     setMessagesBySession((prev) => {
@@ -77,32 +88,45 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
     });
   }, []);
 
+  // -----------------------------------------------------------------
+  // SATU-SATUNYA koneksi WebSocket untuk seluruh aplikasi, mengikuti
+  // activeId. Status koneksinya (idle/connecting/open/closed) di-expose
+  // lewat `wsStatus` di value provider, dikonsumsi TopBar via ChatPage.
+  // -----------------------------------------------------------------
   const socket = useAiraSocket(activeId, {
     onEvent: (evt) => {
-      const sessionId = activeIdRef.current;
+      const sid = evt.data?.session_id || activeIdRef.current;
+      if (!sid) return;
 
-      if (evt.type === "thinking") {
-        setPhase(evt.data.message);
+      if (evt.type === "ack") {
+        // tidak ada state khusus untuk ack, cukup diabaikan di sini
+        return;
+      } else if (evt.type === "thinking") {
+        setPhaseBySession((prev) => ({ ...prev, [sid]: evt.data.message }));
       } else if (evt.type === "tool_start") {
-        setPhase(null);
-        setLiveTools((prev) => [
+        setPhaseBySession((prev) => ({ ...prev, [sid]: null }));
+        setLiveToolsBySession((prev) => ({
           ...prev,
-          { type: "tool_call", name: evt.data.name, category: evt.data.category, success: null },
-        ]);
+          [sid]: [
+            ...(prev[sid] || []),
+            { type: "tool_call", name: evt.data.name, category: evt.data.category, success: null },
+          ],
+        }));
       } else if (evt.type === "tool_finish") {
-        setLiveTools((prev) =>
-          prev.map((s) =>
+        setLiveToolsBySession((prev) => ({
+          ...prev,
+          [sid]: (prev[sid] || []).map((s) =>
             s.name === evt.data.name && s.success === null
               ? { ...s, success: evt.data.success, duration: evt.data.duration }
               : s
-          )
-        );
+          ),
+        }));
       } else if (evt.type === "response") {
-        setPhase(null);
-        setLiveTools([]);
-        setLoading(false);
+        setPhaseBySession((prev) => ({ ...prev, [sid]: null }));
+        setLiveToolsBySession((prev) => ({ ...prev, [sid]: [] }));
+        setLoadingBySession((prev) => ({ ...prev, [sid]: false }));
 
-        setMessagesForSession(sessionId, (prev) => [
+        setMessagesForSession(sid, (prev) => [
           ...prev,
           { role: "assistant", content: evt.data.answer, steps: evt.data.steps, isNew: true },
         ]);
@@ -114,10 +138,10 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
           updated_at: now,
         });
 
-        // User sedang TIDAK di halaman Chat saat jawaban ini datang
-        // -> tandai belum dibaca + kasih notifikasi.
-        if (!isOnChatPageRef.current) {
-          markUnread(sessionId);
+        const isCurrentlyViewing = isOnChatPageRef.current && sid === activeIdRef.current;
+
+        if (!isCurrentlyViewing) {
+          markUnread(sid);
           notify({
             type: "success",
             message: `AIRA selesai menjawab: "${truncate(evt.data.answer, 60)}"`,
@@ -126,21 +150,19 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
           notifyBrowser("AIRA selesai menjawab", evt.data.answer);
         }
       } else if (evt.type === "error") {
-        setPhase(null);
-        setLiveTools([]);
-        setLoading(false);
+        setPhaseBySession((prev) => ({ ...prev, [sid]: null }));
+        setLiveToolsBySession((prev) => ({ ...prev, [sid]: [] }));
+        setLoadingBySession((prev) => ({ ...prev, [sid]: false }));
 
-        if (!isOnChatPageRef.current) {
-          markUnread(sessionId);
+        const isCurrentlyViewing = isOnChatPageRef.current && sid === activeIdRef.current;
+        if (!isCurrentlyViewing) {
+          markUnread(sid);
         }
         notify({ type: "error", message: evt.data.message });
       }
     },
   });
 
-  // Load riwayat sesi HANYA kalau belum ada di cache lokal - supaya
-  // balik ke sesi yang sama tidak fetch ulang & tidak menimpa pesan
-  // yang baru saja masuk lewat WS selama kamu tidak di halaman ini.
   useEffect(() => {
     if (!activeId) return;
     if (messagesBySession[activeId]) return;
@@ -168,8 +190,6 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
-  // Begitu user membuka halaman Chat untuk sesi ini, hapus tanda
-  // "belum dibaca".
   useEffect(() => {
     if (isOnChatPage && activeId && unreadSessionIds.has(activeId)) {
       setUnreadSessionIds((prev) => {
@@ -187,17 +207,14 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
       const bucketKey = sessionId || PENDING_KEY;
 
       setMessagesForSession(bucketKey, (prev) => [...prev, { role: "user", content: text }]);
-      setLoading(true);
-      setPhase("Menganalisis permintaan...");
+      setLoadingBySession((prev) => ({ ...prev, [bucketKey]: true }));
+      setPhaseBySession((prev) => ({ ...prev, [bucketKey]: "Menganalisis permintaan..." }));
 
-      // Sesi sudah ada & socket connect -> pakai WebSocket, hasil
-      // ditangani di onEvent di atas.
       if (sessionId && socket.isOpen) {
         const sent = socket.send(text);
         if (sent) return;
       }
 
-      // --- Fallback REST (chat pertama / socket belum siap) ---
       try {
         const result = await api.chat(text, sessionId);
         const finalId = result.session_id;
@@ -209,6 +226,17 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
             { role: "assistant", content: result.answer, steps: result.steps, isNew: true },
           ];
           const next = { ...prev, [finalId]: merged };
+          if (bucketKey !== finalId) delete next[bucketKey];
+          return next;
+        });
+
+        setLoadingBySession((prev) => {
+          const next = { ...prev, [finalId]: false };
+          if (bucketKey !== finalId) delete next[bucketKey];
+          return next;
+        });
+        setPhaseBySession((prev) => {
+          const next = { ...prev, [finalId]: null };
           if (bucketKey !== finalId) delete next[bucketKey];
           return next;
         });
@@ -225,8 +253,8 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
         notify({ type: "error", message: err.message });
         return null;
       } finally {
-        setLoading(false);
-        setPhase(null);
+        setLoadingBySession((prev) => ({ ...prev, [bucketKey]: false }));
+        setPhaseBySession((prev) => ({ ...prev, [bucketKey]: null }));
       }
     },
     [socket, upsertSession, notify, setMessagesForSession]

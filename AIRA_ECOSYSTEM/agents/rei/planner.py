@@ -11,6 +11,17 @@ input user bisa memicu beberapa kali call_model() kalau ada tool-call
 berantai. Sekarang tiap kali call_model() sukses, usage-nya langsung
 ditambahkan ke memory.token_tracker (kumulatif per SESI, bukan cuma
 per panggilan API), sesuai perilaku sistem lama.
+
+FIX (anti-loop tool call):
+Sebelumnya planner cuma berhenti kalau tool_count >= MAX_TOOL_CALLS
+(10x) tanpa peduli apakah tool yang sama dipanggil berulang-ulang
+dengan argumen identik (mis. web_search gagal terus tapi tetap
+dicoba lagi sampai limit tercapai). Sekarang setiap signature
+(nama tool + argumen) dilacak per giliran - kalau sudah diulang
+lebih dari MAX_REPEATED_IDENTICAL_CALLS kali, tool call berikutnya
+dengan signature yang sama otomatis DILEWATI dan model diberi tahu
+supaya berhenti mencoba, bukan terus mengulang sampai limit keras
+tercapai.
 """
 
 import json
@@ -27,6 +38,12 @@ logger = logging.getLogger("aira.rei.planner")
 
 MAX_TOOL_CALLS = 10
 MAX_EMPTY_RESPONSE_RETRIES = 1
+
+# Kalau tool+argumen yang PERSIS SAMA dipanggil lebih dari ini kali
+# dalam satu giliran, panggilan berikutnya otomatis dilewati alih-alih
+# dieksekusi ulang. Ini mencegah loop (mis. web_search yang terus
+# gagal) menghabiskan seluruh MAX_TOOL_CALLS tanpa progres.
+MAX_REPEATED_IDENTICAL_CALLS = 2
 
 
 class Planner:
@@ -69,6 +86,10 @@ class Planner:
         self._track_usage(memory, response)
 
         tool_count = 0
+        # Melacak berapa kali signature (nama tool + argumen) tertentu
+        # sudah dipanggil DALAM GILIRAN INI - direset tiap kali run()
+        # dipanggil ulang (giliran baru), bukan lintas sesi.
+        call_signatures = {}
 
         while True:
             message = response.get("message", {})
@@ -112,6 +133,44 @@ class Planner:
                         arguments = {}
 
                 category = self.tool_category.get(name, "tool")
+
+                # ------------------------------------------------------
+                # GUARD ANTI-LOOP: tool+argumen identik diulang terus
+                # ------------------------------------------------------
+                signature = f"{name}:{json.dumps(arguments, sort_keys=True, ensure_ascii=False)}"
+                call_signatures[signature] = call_signatures.get(signature, 0) + 1
+
+                if call_signatures[signature] > MAX_REPEATED_IDENTICAL_CALLS:
+                    logger.warning(
+                        "Tool '%s' dilewati - dipanggil berulang (%dx) dengan argumen identik.",
+                        name, call_signatures[signature],
+                    )
+                    steps.append({
+                        "type": "tool_call",
+                        "name": name,
+                        "category": category,
+                        "arguments": arguments,
+                        "success": False,
+                        "duration": 0,
+                        "result_preview": "dilewati (dipanggil berulang tanpa hasil baru)",
+                    })
+                    emit("tool_finish", {"name": name, "category": category, "success": False, "duration": 0})
+                    memory.add_tool_result(
+                        json.dumps({
+                            "success": False,
+                            "error": (
+                                "Tool ini sudah dipanggil berulang kali dengan argumen yang "
+                                "sama tanpa hasil baru. JANGAN memanggilnya lagi dengan "
+                                "argumen ini. Jawab pertanyaan user berdasarkan pengetahuan "
+                                "yang sudah ada, atau sampaikan bahwa informasi tidak "
+                                "berhasil ditemukan."
+                            ),
+                        }),
+                        tool_call_id=call.get("id"),
+                    )
+                    tool_count += 1
+                    continue
+                # ------------------------------------------------------
 
                 if name in self.dangerous_tools:
                     steps.append({"type": "confirmation_required", "name": name, "category": category, "arguments": arguments})
@@ -163,14 +222,6 @@ class Planner:
             self._track_usage(memory, response)
 
     def _track_usage(self, memory, response):
-        """
-        Catat usage dari SATU respons LLM ke token_tracker milik sesi
-        ini. Dipanggil setelah setiap call_model() yang sukses -
-        karena satu giliran user bisa memicu beberapa kali call_model()
-        kalau ada tool call berantai, ini menjamin token_tracker
-        mengakumulasi SEMUA panggilan dalam giliran itu, bukan cuma
-        yang terakhir.
-        """
         usage = response.get("usage")
         if usage:
             memory.token_tracker.add(usage)

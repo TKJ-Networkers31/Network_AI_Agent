@@ -1,7 +1,6 @@
 """
 api/ws_manager.py — registry koneksi WebSocket AIRA, dikelompokkan per
-session_id (sama seperti sesi chat REST). Terpisah dari api/state.py
-supaya tidak mencampur cache ConversationMemory dengan koneksi socket.
+session_id.
 """
 
 import asyncio
@@ -34,11 +33,6 @@ class ConnectionManager:
         logger.info("WS DISCONNECT | session=%s", session_id)
 
     async def send(self, session_id: str, payload: dict) -> None:
-        """
-        Kirim ke semua koneksi aktif untuk session_id ini (biasanya
-        cuma satu tab, tapi mendukung multi-tab/multi-device tanpa
-        perubahan tambahan).
-        """
         async with self._lock:
             conns = list(self._connections.get(session_id, []))
 

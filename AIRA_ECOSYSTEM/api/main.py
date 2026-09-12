@@ -9,9 +9,6 @@ from pathlib import Path
 
 from core.logger import setup_logging
 
-# WAJIB dipanggil SEBELUM import lain yang bisa melakukan logging
-# (agents/*, core/orchestrator, dst) - supaya handler sudah terpasang
-# begitu request pertama masuk.
 setup_logging()
 
 from fastapi import FastAPI
@@ -19,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from api.routers import chat, providers, memory, devices, sessions, tools, logs
-from api.routers import ws 
+from api.routers import ws
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -52,5 +49,3 @@ def health():
 
 if APP_DIST.exists():
     app.mount("/", StaticFiles(directory=str(APP_DIST), html=True), name="app")
-
-
