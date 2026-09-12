@@ -1,3 +1,7 @@
+// Taruh file ini di: AIRA_ECOSYSTEM/app/frontend/src/components/Sidebar.jsx
+// (TIMPA file lama). Perubahan: menambahkan nav item "Models" (Phase 1.2 -
+// Workspace REI -> Model Management). Bagian lain TIDAK diubah.
+
 import { useState } from "react";
 import { useSessionsContext } from "../context/SessionsContext.jsx";
 import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
@@ -6,6 +10,7 @@ import { useToast } from "./Toast.jsx";
 const NAV_ITEMS = [
   { id: "chat", label: "Chat", icon: "💬" },
   { id: "devices", label: "Devices", icon: "🖧" },
+  { id: "models", label: "Models", icon: "🧩" },
   { id: "memory", label: "Memory", icon: "🧠" },
   { id: "logs", label: "Logs", icon: "📋" },
   { id: "settings", label: "Settings", icon: "⚙️" },

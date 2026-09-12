@@ -1,3 +1,7 @@
+// Taruh file ini di: AIRA_ECOSYSTEM/app/frontend/src/api.js (TIMPA file lama)
+// Perubahan dari versi sebelumnya: menambahkan namespace `models` (Phase 1.2
+// - Model Management System). Namespace lain TIDAK diubah.
+
 const BASE = "/api";
 
 async function request(path, options = {}) {
@@ -77,6 +81,7 @@ export const api = {
         method: "DELETE",
       }),
   },
+
   logs: {
     list: (params = {}) => {
       const qs = new URLSearchParams(
@@ -90,6 +95,52 @@ export const api = {
     clear: (category) =>
       request(`/logs${category ? `?category=${encodeURIComponent(category)}` : ""}`, {
         method: "DELETE",
+      }),
+  },
+
+  // Phase 1.2 - Model Management System (REI Workspace)
+  models: {
+    list: () => request("/models"),
+
+    get: (nickname) => request(`/models/${encodeURIComponent(nickname)}`),
+
+    create: (payload) =>
+      request("/models", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    update: (nickname, payload) =>
+      request(`/models/${encodeURIComponent(nickname)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }),
+
+    remove: (nickname) =>
+      request(`/models/${encodeURIComponent(nickname)}`, {
+        method: "DELETE",
+      }),
+
+    setDefault: (nickname) =>
+      request(`/models/${encodeURIComponent(nickname)}/set-default`, {
+        method: "POST",
+      }),
+
+    setFallback: (nickname, isFallback) =>
+      request(`/models/${encodeURIComponent(nickname)}/set-fallback`, {
+        method: "POST",
+        body: JSON.stringify({ is_fallback: isFallback }),
+      }),
+
+    setEnabled: (nickname, enabled) =>
+      request(`/models/${encodeURIComponent(nickname)}/enable`, {
+        method: "POST",
+        body: JSON.stringify({ enabled }),
+      }),
+
+    testConnection: (nickname) =>
+      request(`/models/${encodeURIComponent(nickname)}/test-connection`, {
+        method: "POST",
       }),
   },
 };

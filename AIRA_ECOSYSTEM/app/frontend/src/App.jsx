@@ -1,8 +1,13 @@
+// Taruh file ini di: AIRA_ECOSYSTEM/app/frontend/src/App.jsx (TIMPA file lama)
+// Perubahan: menambahkan import ModelsPage + entry "models" di PAGES
+// (Phase 1.2 - Workspace REI -> Model Management). Bagian lain TIDAK diubah.
+
 import { useState } from "react";
 import Sidebar from "./components/Sidebar.jsx";
 import MobileNav from "./components/MobileNav.jsx";
 import ChatPage from "./pages/ChatPage.jsx";
 import DevicesPage from "./pages/DevicesPage.jsx";
+import ModelsPage from "./pages/ModelsPage.jsx";
 import MemoryPage from "./pages/MemoryPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
 import LogsPage from "./pages/LogsPage.jsx";
@@ -13,6 +18,7 @@ import { ToastProvider } from "./components/Toast.jsx";
 const PAGES = {
   chat: ChatPage,
   devices: DevicesPage,
+  models: ModelsPage,
   memory: MemoryPage,
   logs: LogsPage,
   settings: SettingsPage,
@@ -28,7 +34,7 @@ export default function App() {
       <SessionsProvider>
         {/* ChatRuntimeProvider dipasang DI SINI (level App), bukan di
             dalam ChatPage - supaya state chat & koneksi WebSocket TIDAK
-            ikut hilang saat Page berpindah (mis. ke Settings). */}
+            ikut hilang saat Page berpindah (mis. ke Settings/Models). */}
         <ChatRuntimeProvider isOnChatPage={active === "chat"}>
           <div className="h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
             <Sidebar

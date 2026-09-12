@@ -1,6 +1,10 @@
 """
 api/main.py — entry point FastAPI untuk AIRA.
 
+Taruh file ini di: AIRA_ECOSYSTEM/api/main.py (TIMPA file lama).
+Perubahan dari versi sebelumnya: menambahkan router models (Phase 1.2 -
+Model Management System). Tidak ada router/middleware lain yang diubah.
+
 Jalankan dari root AIRA_ECOSYSTEM/:
     uvicorn api.main:app --reload --port 8000
 """
@@ -9,13 +13,16 @@ from pathlib import Path
 
 from core.logger import setup_logging
 
+# WAJIB dipanggil SEBELUM import lain yang bisa melakukan logging
+# (agents/*, core/orchestrator, dst) - supaya handler sudah terpasang
+# begitu request pertama masuk.
 setup_logging()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import chat, providers, memory, devices, sessions, tools, logs
+from api.routers import chat, providers, memory, devices, sessions, tools, logs, models
 from api.routers import ws
 
 
@@ -39,6 +46,7 @@ app.include_router(devices.router)
 app.include_router(sessions.router)
 app.include_router(tools.router)
 app.include_router(logs.router)
+app.include_router(models.router)
 app.include_router(ws.router)
 
 

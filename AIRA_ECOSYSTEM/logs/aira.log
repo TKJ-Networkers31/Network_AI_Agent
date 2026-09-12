@@ -333,3 +333,14 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-12 15:11:35 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 15:16:57 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
 2026-09-12 15:17:00 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 00:52:51 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 00:53:57 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 00:54:47 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 00:54:48 | INFO     | aira.model_registry | model_registry.py:143 (_seed_defaults) | MODEL REGISTRY | seed default terisi (4 model).
+2026-09-13 00:56:33 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 00:57:03 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 00:57:44 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 00:57:57 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 00:58:51 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 00:59:28 | INFO     | aira.model_registry | model_registry.py:338 (delete_model) | MODEL DELETE | nickname=ollama-qwen3-4b
+2026-09-13 01:00:22 | INFO     | aira.model_registry | model_registry.py:364 (set_default) | MODEL SET DEFAULT | nickname=Nemotron 3 Super
