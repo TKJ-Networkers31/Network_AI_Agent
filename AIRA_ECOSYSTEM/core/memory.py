@@ -4,6 +4,16 @@ core/memory.py — satu-satunya lapisan memory AIRA.
 Port dari agent/core/memory.py (ConversationMemory) + agent/memory_store/
 long_term.py (facts & events lintas sesi). Aturan keras: semua storage
 lewat SQLite di folder database/, TIDAK ADA file JSON.
+
+FIX (Phase 0 Stabilization - token tracker hilang):
+Versi sebelumnya menghapus TokenTracker per-sesi yang ada di sistem lama
+(agent/utils/token_tracker.py + ConversationMemory.token_tracker), diganti
+counter global lintas-sesi di api/state.py yang tercampur semua sesi jadi
+satu dan tidak bisa diakses dari run_chat.py (mode terminal). TokenTracker
+dikembalikan di sini, dipasang balik ke ConversationMemory, supaya
+pemakaian token PER SESI bisa dipantau lagi seperti dulu - penting karena
+provider gratis (OpenRouter Nemotron) punya rate-limit dan model lokal
+(Ollama) performanya dipantau di hardware terbatas.
 """
 
 import sqlite3
@@ -11,7 +21,7 @@ import time
 import logging
 from pathlib import Path
 from contextlib import closing
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger("aira.memory")
 
@@ -56,23 +66,98 @@ init_db()
 
 
 # ============================================================
+# TOKEN TRACKER (per-sesi, dipasang ke ConversationMemory)
+# ============================================================
+
+class TokenTracker:
+    """
+    Pelacak token untuk SATU sesi percakapan (satu instance
+    ConversationMemory). Port dari agent/utils/token_tracker.py yang
+    sempat hilang saat migrasi ke AIRA_ECOSYSTEM.
+
+    Catatan:
+    - Ollama (lokal) cuma melaporkan token dipakai per request
+      (prompt_eval_count, eval_count) - tidak ada konsep kuota
+      tersisa.
+    - Provider eksternal (OpenRouter) melaporkan usage per request
+      lewat field 'usage'. Untuk saldo/kuota tersisa, itu di luar
+      cakupan tracker ini - lihat
+      agents/rei/provider_client.py::get_openrouter_credits().
+    """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self) -> None:
+        self.session_prompt_tokens = 0
+        self.session_completion_tokens = 0
+        self.session_total_tokens = 0
+        self.last_usage: Optional[dict] = None
+
+    def add(self, usage: Optional[dict]) -> None:
+        if not usage:
+            return
+
+        prompt = usage.get("prompt_tokens") or 0
+        completion = usage.get("completion_tokens") or 0
+        total = usage.get("total_tokens") or (prompt + completion)
+
+        self.session_prompt_tokens += prompt
+        self.session_completion_tokens += completion
+        self.session_total_tokens += total
+
+        self.last_usage = {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": total,
+        }
+
+    def summary_line(self) -> Optional[str]:
+        if self.session_total_tokens == 0:
+            return None
+
+        last = ""
+        if self.last_usage:
+            last = f" (giliran ini: {self.last_usage['total_tokens']} token)"
+
+        return (
+            f"Token sesi: {self.session_total_tokens} total "
+            f"(prompt: {self.session_prompt_tokens}, "
+            f"completion: {self.session_completion_tokens}){last}"
+        )
+
+    def as_dict(self) -> dict:
+        return {
+            "session_prompt_tokens": self.session_prompt_tokens,
+            "session_completion_tokens": self.session_completion_tokens,
+            "session_total_tokens": self.session_total_tokens,
+            "last_usage": self.last_usage,
+        }
+
+
+# ============================================================
 # CONVERSATION MEMORY (per-sesi, dikirim ke REI tiap giliran)
 # ============================================================
 
 class ConversationMemory:
     """
-    Port 1:1 dari agent/core/memory.py, dengan satu perbedaan: system
-    prompt sekarang datang dari core.persona.build_system_prompt() lewat
-    parameter get_messages(system_prompt), bukan disimpan statis di sini.
+    Port 1:1 dari agent/core/memory.py, dengan dua perbedaan:
+    1. system prompt sekarang datang dari core.persona.build_system_prompt()
+       lewat parameter get_messages(system_prompt), bukan disimpan statis
+       di sini.
+    2. FIX: token_tracker per-sesi dikembalikan (lihat TokenTracker di
+       atas) - sempat hilang saat migrasi.
     """
 
     def __init__(self, max_history_messages: int = 30):
         self.max_history_messages = max_history_messages
         self.history: list[dict[str, Any]] = []
+        self.token_tracker = TokenTracker()
 
     def reset(self) -> None:
         self.history = []
-        logger.info("MEMORY RESET | riwayat percakapan dikosongkan.")
+        self.token_tracker.reset()
+        logger.info("MEMORY RESET | riwayat percakapan & token tracker dikosongkan.")
 
     def add_user(self, content: str) -> None:
         self.history.append({"role": "user", "content": content})

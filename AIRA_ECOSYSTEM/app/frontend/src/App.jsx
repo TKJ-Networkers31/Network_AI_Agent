@@ -5,6 +5,7 @@ import ChatPage from "./pages/ChatPage.jsx";
 import DevicesPage from "./pages/DevicesPage.jsx";
 import MemoryPage from "./pages/MemoryPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
+import LogsPage from "./pages/LogsPage.jsx"; 
 import { SessionsProvider } from "./context/SessionsContext.jsx";
 import { ToastProvider } from "./components/Toast.jsx";
 

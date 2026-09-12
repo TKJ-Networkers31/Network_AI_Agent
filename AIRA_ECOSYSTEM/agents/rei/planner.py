@@ -3,6 +3,14 @@ agents/rei/planner.py — REI (Reasoning & Executive Intelligence).
 Port dari loop agen agent/core/engine.py::run() / engine_web.py::run_web(),
 dipersempit: REI cuma mikir & memutuskan, eksekusi tool fisik lewat
 callback tool_executor yang di-inject orchestrator (Dependency Inversion).
+
+FIX (Phase 0 Stabilization - token tracker):
+Sebelumnya usage dari call_model() cuma dikembalikan di response akhir
+(response.get("usage") - HANYA usage giliran TERAKHIR), padahal satu
+input user bisa memicu beberapa kali call_model() kalau ada tool-call
+berantai. Sekarang tiap kali call_model() sukses, usage-nya langsung
+ditambahkan ke memory.token_tracker (kumulatif per SESI, bukan cuma
+per panggilan API), sesuai perilaku sistem lama.
 """
 
 import json
@@ -42,6 +50,8 @@ class Planner:
                 "steps": steps, "token_usage": None, "error": True,
             }
 
+        self._track_usage(memory, response)
+
         tool_count = 0
 
         while True:
@@ -53,14 +63,23 @@ class Planner:
             if not tool_calls:
                 answer = message.get("content", "")
                 extract_and_save_facts_async(user_input, answer)
-                return {"answer": answer, "steps": steps, "token_usage": response.get("usage"), "error": False}
+                return {
+                    "answer": answer,
+                    "steps": steps,
+                    "token_usage": memory.token_tracker.last_usage,
+                    "session_token_usage": memory.token_tracker.as_dict(),
+                    "error": False,
+                }
 
             for call in tool_calls:
                 if tool_count >= MAX_TOOL_CALLS:
                     steps.append({"type": "limit_reached", "message": "Batas jumlah tool call tercapai."})
                     return {
                         "answer": "Saya menghentikan proses karena jumlah observasi sudah mencapai batas.",
-                        "steps": steps, "token_usage": response.get("usage"), "error": False,
+                        "steps": steps,
+                        "token_usage": memory.token_tracker.last_usage,
+                        "session_token_usage": memory.token_tracker.as_dict(),
+                        "error": False,
                     }
 
                 function = call.get("function", {})
@@ -103,8 +122,26 @@ class Planner:
             if "error" in response:
                 return {
                     "answer": f"Terjadi error saat menghubungi model: {response['error']}",
-                    "steps": steps, "token_usage": None, "error": True,
+                    "steps": steps,
+                    "token_usage": memory.token_tracker.last_usage,
+                    "session_token_usage": memory.token_tracker.as_dict(),
+                    "error": True,
                 }
+
+            self._track_usage(memory, response)
+
+    def _track_usage(self, memory, response):
+        """
+        Catat usage dari SATU respons LLM ke token_tracker milik sesi
+        ini. Dipanggil setelah setiap call_model() yang sukses -
+        karena satu giliran user bisa memicu beberapa kali call_model()
+        kalau ada tool call berantai, ini menjamin token_tracker
+        mengakumulasi SEMUA panggilan dalam giliran itu, bukan cuma
+        yang terakhir.
+        """
+        usage = response.get("usage")
+        if usage:
+            memory.token_tracker.add(usage)
 
     def _call_with_retry(self, messages, max_retries=MAX_EMPTY_RESPONSE_RETRIES):
         response = call_model(messages, self.tool_schemas)

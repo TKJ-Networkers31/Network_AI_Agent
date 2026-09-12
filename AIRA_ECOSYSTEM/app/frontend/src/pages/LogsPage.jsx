@@ -16,42 +16,129 @@ const AUTO_REFRESH_MS = 5000;
 
 function formatTime(ts) {
   const d = new Date(ts * 1000);
-  return d.toLocaleString("id-ID", { hour12: false });
+  return d.toLocaleString("id-ID", { hour12: false, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function formatTimePrecise(ts) {
+  const d = new Date(ts * 1000);
+  return `${d.toLocaleString("id-ID", { hour12: false })}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+}
+
+// Detail lengkap satu entri log, dibuka lewat klik baris - menampilkan
+// SEMUA yang tersimpan (pesan penuh, sumber kode, context mentah, dsb)
+// supaya troubleshooting tidak perlu tebak-tebakan.
+function LogDetailPanel({ log }) {
+  const source = log.context?._source;
+  const otherContext = log.context
+    ? Object.fromEntries(Object.entries(log.context).filter(([k]) => k !== "_source"))
+    : {};
+  const hasOtherContext = Object.keys(otherContext).length > 0;
+
+  return (
+    <div className="border-t border-border bg-black/30 px-3 py-3 space-y-3 text-xs">
+      <div>
+        <div className="text-white/40 uppercase tracking-wide text-[10px] mb-1">Pesan lengkap</div>
+        <p className="text-white/80 whitespace-pre-wrap break-words font-mono">{log.message}</p>
+      </div>
+
+      {source && (
+        <div>
+          <div className="text-white/40 uppercase tracking-wide text-[10px] mb-1">
+            Dibuat dari kode (siapa yang mencatat log ini)
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-white/60 font-mono">
+            <span>File</span><span className="text-accent-light">{source.file}</span>
+            <span>Baris</span><span className="text-accent-light">{source.line}</span>
+            <span>Fungsi</span><span className="text-accent-light">{source.function}()</span>
+            <span>Module</span><span className="text-accent-light">{source.module}</span>
+            <span>Logger</span><span className="text-accent-light">{source.logger}</span>
+            <span>Thread</span><span className="text-accent-light">{source.thread} (pid {source.process})</span>
+          </div>
+        </div>
+      )}
+
+      {hasOtherContext && (
+        <div>
+          <div className="text-white/40 uppercase tracking-wide text-[10px] mb-1">Data tambahan (context)</div>
+          <pre className="text-white/70 bg-black/40 rounded-lg p-2 overflow-x-auto">
+            {JSON.stringify(otherContext, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-white/50">
+        <span>Waktu presisi</span><span className="font-mono">{formatTimePrecise(log.created_at)}</span>
+        {typeof log.duration_ms === "number" && (
+          <>
+            <span>Durasi eksekusi</span><span className="font-mono">{log.duration_ms.toFixed(2)} ms</span>
+          </>
+        )}
+        {log.success !== null && (
+          <>
+            <span>Status</span>
+            <span className={log.success ? "text-emerald-300" : "text-red-300"}>
+              {log.success ? "Berhasil" : "Gagal"}
+            </span>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function LogRow({ log }) {
   const [open, setOpen] = useState(false);
   const style = LEVEL_STYLES[log.level] || LEVEL_STYLES.INFO;
-  const hasContext = log.context && Object.keys(log.context).length > 0;
 
   return (
     <div className="border border-border rounded-lg bg-card/60 overflow-hidden">
       <button
         type="button"
-        onClick={() => hasContext && setOpen((v) => !v)}
-        className={`w-full text-left px-3 py-2 flex items-start gap-2 ${hasContext ? "cursor-pointer hover:bg-white/5" : "cursor-default"}`}
+        onClick={() => setOpen((v) => !v)}
+        className="w-full text-left px-3 py-2 flex items-start gap-2 cursor-pointer hover:bg-white/5"
       >
         <span className={`shrink-0 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${style}`}>
           {log.level}
         </span>
-        <span className="shrink-0 text-[10px] uppercase tracking-wide text-accent-light bg-accent/10 px-2 py-0.5 rounded-full mt-0">
+        <span className="shrink-0 text-[10px] uppercase tracking-wide text-accent-light bg-accent/10 px-2 py-0.5 rounded-full">
           {log.category}
         </span>
-        <span className="flex-1 min-w-0 text-sm text-white/80 truncate">
-          {log.message}
-        </span>
+        <span className="flex-1 min-w-0 text-sm text-white/80 truncate">{log.message}</span>
         {typeof log.duration_ms === "number" && (
           <span className="shrink-0 text-[10px] text-white/30">{log.duration_ms.toFixed(0)}ms</span>
         )}
         {log.success === false && <span className="shrink-0 text-[10px] text-red-300">✗</span>}
         {log.success === true && <span className="shrink-0 text-[10px] text-emerald-300">✓</span>}
         <span className="shrink-0 text-[10px] text-white/30 font-mono">{formatTime(log.created_at)}</span>
+        <svg
+          viewBox="0 0 24 24" fill="none"
+          className={`shrink-0 mt-0.5 transition-transform ${open ? "rotate-180" : ""}`}
+          style={{ width: 12, height: 12 }}
+        >
+          <path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
 
-      {open && hasContext && (
-        <pre className="text-[11px] text-white/60 bg-black/30 px-3 py-2 overflow-x-auto border-t border-border">
-          {JSON.stringify(log.context, null, 2)}
-        </pre>
+      {open && <LogDetailPanel log={log} />}
+    </div>
+  );
+}
+
+// Keterangan kategori yang sedang aktif difilter - menjawab "log ini
+// isinya apa" dan "apa yang bikin log ini tercatat" langsung di atas
+// daftar, tanpa perlu buka source code.
+function CategoryLegend({ info }) {
+  if (!info || (!info.description && !info.triggered_by)) return null;
+
+  return (
+    <div className="bg-accent/5 border border-accent/20 rounded-lg px-4 py-3 text-xs space-y-1">
+      <div className="font-semibold text-accent-light">{info.label}</div>
+      {info.description && <p className="text-white/60">{info.description}</p>}
+      {info.triggered_by && (
+        <p className="text-white/40">
+          <span className="text-white/60 font-medium">Tercatat saat: </span>
+          {info.triggered_by}
+        </p>
       )}
     </div>
   );
@@ -109,12 +196,10 @@ export default function LogsPage({ onOpenMenu }) {
 
   useEffect(() => {
     if (!autoRefresh) return undefined;
-
     const timer = setInterval(() => {
       loadLogs(true);
       loadCategories();
     }, AUTO_REFRESH_MS);
-
     return () => clearInterval(timer);
   }, [autoRefresh, loadLogs, loadCategories]);
 
@@ -137,14 +222,17 @@ export default function LogsPage({ onOpenMenu }) {
     }
   }
 
+  const activeCategoryInfo = categories.find((c) => c.category === category);
+
   return (
     <div className="flex flex-col min-h-0 h-full">
       <TopBar title="Logs" subtitle={`${total} entri · kategori & level bisa difilter`} onMenuClick={onOpenMenu} />
 
-      <div className="bg-card border border-border rounded-xl2 p-4 mb-4 space-y-3 shrink-0">
+      <div className="bg-card border border-border rounded-xl2 p-4 mb-3 space-y-3 shrink-0">
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setCategory("all")}
+            title="Tampilkan semua kategori log"
             className={`text-xs px-3 py-1.5 rounded-full border transition ${
               category === "all" ? "bg-accent-gradient text-white border-transparent" : "border-border text-white/50 hover:text-white"
             }`}
@@ -155,11 +243,12 @@ export default function LogsPage({ onOpenMenu }) {
             <button
               key={c.category}
               onClick={() => setCategory(c.category)}
+              title={c.description || c.category}
               className={`text-xs px-3 py-1.5 rounded-full border transition ${
                 category === c.category ? "bg-accent-gradient text-white border-transparent" : "border-border text-white/50 hover:text-white"
               }`}
             >
-              {c.category} ({c.count})
+              {c.label || c.category} ({c.count})
             </button>
           ))}
         </div>
@@ -188,19 +277,11 @@ export default function LogsPage({ onOpenMenu }) {
           </form>
 
           <label className="flex items-center gap-1.5 text-xs text-white/50 select-none">
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="accent-accent"
-            />
+            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} className="accent-accent" />
             Auto-refresh 5s
           </label>
 
-          <button
-            onClick={() => loadLogs()}
-            className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-white/70 hover:text-white"
-          >
+          <button onClick={() => loadLogs()} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-white/70 hover:text-white">
             ⟳ Refresh
           </button>
 
@@ -211,17 +292,17 @@ export default function LogsPage({ onOpenMenu }) {
             Hapus
           </button>
         </div>
+
+        <CategoryLegend info={activeCategoryInfo} />
       </div>
 
+      <p className="text-[11px] text-white/30 mb-2 px-1 shrink-0">
+        Klik baris log untuk buka detail lengkap: pesan penuh, file & baris kode sumber, dan data context mentah.
+      </p>
+
       <div className="flex-1 overflow-y-auto min-h-0 space-y-1.5 pr-1">
-        {loading && logs.length === 0 && (
-          <p className="text-white/30 text-sm text-center mt-10">Memuat log...</p>
-        )}
-
-        {!loading && logs.length === 0 && (
-          <p className="text-white/30 text-sm text-center mt-10">Tidak ada log untuk filter ini.</p>
-        )}
-
+        {loading && logs.length === 0 && <p className="text-white/30 text-sm text-center mt-10">Memuat log...</p>}
+        {!loading && logs.length === 0 && <p className="text-white/30 text-sm text-center mt-10">Tidak ada log untuk filter ini.</p>}
         {logs.map((log) => (
           <LogRow key={log.id} log={log} />
         ))}

@@ -7,19 +7,17 @@ AKANE TIDAK BERBICARA LANGSUNG KE USER - satu-satunya cara memanggilnya
 adalah lewat AKANE_TOOLS di bawah, yang dikonsumsi oleh
 core/orchestrator.py::AGENT_TOOL_MAP.
 
-Ini adalah port dari bagian network di tools/registry.py lama (TOOL_MAP,
-TOOL_CATEGORY, execute_tool) - HANYA yang berkaitan dengan network/mikrotik/
-snmp/ssh, tanpa web_search/memory/vision (itu domain agent lain).
-
-Kenapa dipisah dari network_tools.py: registry.py = "apa saja yang AKANE
-bisa lakukan + validasi nama tool", network_tools.py = implementasi nyata
-tiap kemampuan (wrap tools/ssh, tools/snmp, tools/mikrotik, tools/network).
+FIX (Phase 0 Stabilization):
+Deskripsi 'traceroute' dan 'get_routes' sebelumnya terlalu mirip (sama-sama
+menyinggung kata "route"), sehingga LLM planner pernah salah memilih
+get_routes(device_name='R1') untuk permintaan "tracert ke facebook.com" -
+padahal traceroute ke host eksternal TIDAK ADA HUBUNGANNYA dengan routing
+table internal sebuah device MikroTik. Deskripsi kedua tool ini sekarang
+dipertegas saling silang supaya LLM tidak tertukar lagi.
 """
 
 from agents.akane import network_tools as nt
 
-# TODO: lengkapi mapping ini 1:1 dari bagian "mikrotik"/"network"/"snmp" di
-# tools/registry.py::TOOL_MAP lama.
 AKANE_TOOLS: dict = {
     "ping": nt.ping,
     "nslookup": nt.nslookup,
@@ -41,11 +39,8 @@ AKANE_TOOLS: dict = {
     "snmp_get_interface_traffic": nt.snmp_get_interface_traffic,
 }
 
-# Tool yang butuh konfirmasi manual sebelum eksekusi (mis. nanti ada
-# "set_interface_disable", dsb). Port dari tools/registry.py::DANGEROUS_TOOLS.
 AKANE_DANGEROUS_TOOLS: set[str] = set()
 
-# Kategori untuk keperluan UI/logging (port dari TOOL_CATEGORY, subset network).
 AKANE_TOOL_CATEGORY: dict[str, str] = {
     "ping": "network",
     "nslookup": "network",
@@ -67,12 +62,10 @@ AKANE_TOOL_CATEGORY: dict[str, str] = {
     "snmp_get_interface_traffic": "snmp",
 }
 
-# Skema function-calling (format tools=[...]) untuk semua tool AKANE,
-# port dari agent/core/engine.py::build_tools() bagian network/mikrotik/snmp.
 AKANE_TOOL_SCHEMAS = [
     {"type": "function", "function": {
         "name": "ping",
-        "description": "Melakukan ping ICMP dari komputer agent ke target jaringan (hostname atau IP).",
+        "description": "Melakukan ping ICMP dari komputer agent ke target jaringan (hostname atau IP), termasuk host publik seperti google.com, facebook.com, 8.8.8.8, dsb.",
         "parameters": {"type": "object", "properties": {
             "target": {"type": "string", "description": "Hostname atau IP address tujuan."},
             "count": {"type": "integer", "description": "Jumlah paket ping.", "default": 4},
@@ -85,8 +78,27 @@ AKANE_TOOL_SCHEMAS = [
     }},
     {"type": "function", "function": {
         "name": "traceroute",
-        "description": "Melakukan traceroute menuju target.",
-        "parameters": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]},
+        "description": (
+            "Melakukan traceroute/tracert (jejak rute paket hop-by-hop) dari komputer agent "
+            "menuju TARGET APA SAJA di internet atau LAN - boleh hostname publik "
+            "(google.com, facebook.com, youtube.com, dsb) MAUPUN IP address. "
+            "WAJIB pakai tool ini untuk setiap permintaan yang menyebut kata "
+            "'traceroute', 'tracert', atau 'trace ke <host>'. "
+            "JANGAN PERNAH memakai 'get_routes' untuk permintaan semacam ini - "
+            "get_routes itu HAL YANG BERBEDA TOTAL: cuma untuk melihat routing "
+            "table INTERNAL satu perangkat MikroTik yang sudah terdaftar di "
+            "inventory (butuh device_name, misal 'R1'), bukan untuk trace ke "
+            "host eksternal. "
+            "CATATAN PENTING: traceroute ke internet bisa butuh waktu (sampai "
+            "~45 detik) dan KADANG GAGAL karena ICMP diblokir firewall/ISP di "
+            "tengah jalan - ini normal, BUKAN bug. Kalau traceroute gagal "
+            "sekali untuk satu target, JANGAN mengulang panggilan traceroute "
+            "ke target yang sama atau ke IP hasil resolusinya - cukup "
+            "laporkan apa adanya ke user (sertakan output parsial kalau ada), "
+            "dan tawarkan 'ping' sebagai cek konektivitas dasar sebagai "
+            "gantinya."
+        ),
+        "parameters": {"type": "object", "properties": {"target": {"type": "string", "description": "Hostname publik atau IP tujuan trace, contoh: 'facebook.com', '8.8.8.8'."}}, "required": ["target"]},
     }},
     {"type": "function", "function": {
         "name": "list_devices",
@@ -105,7 +117,15 @@ AKANE_TOOL_SCHEMAS = [
     }},
     {"type": "function", "function": {
         "name": "get_routes",
-        "description": "Mengambil routing table MikroTik.",
+        "description": (
+            "Mengambil ROUTING TABLE INTERNAL dari SATU perangkat MikroTik "
+            "yang sudah terdaftar di inventory (WAJIB isi device_name, mis. "
+            "'R1' - kalau tidak tahu device apa saja yang ada, panggil "
+            "'list_devices' dulu). Tool ini TIDAK ADA HUBUNGANNYA dengan "
+            "traceroute/tracert ke host eksternal seperti google.com atau "
+            "facebook.com - untuk kebutuhan itu WAJIB pakai tool 'traceroute', "
+            "BUKAN tool ini."
+        ),
         "parameters": {"type": "object", "properties": {"device_name": {"type": "string"}}, "required": ["device_name"]},
     }},
     {"type": "function", "function": {

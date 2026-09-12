@@ -64,7 +64,10 @@ def _infer_category(logger_name: str) -> str:
 
 
 class ColorConsoleFormatter(logging.Formatter):
-    """Formatter berwarna: [LEVEL][kategori] timestamp | logger | pesan."""
+    """
+    Formatter berwarna detail:
+    [LEVEL][kategori] HH:MM:SS | file.py:line (fungsi) | pesan | context={...} | 182ms
+    """
 
     def format(self, record):
         category = getattr(record, "category", None) or _infer_category(record.name)
@@ -72,22 +75,44 @@ class ColorConsoleFormatter(logging.Formatter):
 
         base = super().format(record)
 
+        source = f"{record.filename}:{record.lineno} ({record.funcName})"
+
+        suffix_parts = []
+        context = getattr(record, "context", None)
+        if context:
+            suffix_parts.append(f"context={context}")
+        duration_ms = getattr(record, "duration_ms", None)
+        if duration_ms is not None:
+            suffix_parts.append(f"{duration_ms:.1f}ms")
+        success = getattr(record, "success", None)
+        if success is not None:
+            suffix_parts.append("OK" if success else "GAGAL")
+        suffix = ("  | " + " | ".join(suffix_parts)) if suffix_parts else ""
+
         prefix = (
             f"{level_color}[{record.levelname:<8}]{RESET} "
             f"{CATEGORY_COLOR}[{category:<14}]{RESET} "
         )
 
-        return prefix + base
+        return f"{prefix}{base}  \033[90m[{source}]\033[0m{suffix}"
+
 
 
 class SQLiteLogHandler(logging.Handler):
-    """Menulis tiap log record ke database/logs.db supaya bisa di-query dari
-    API dan ditampilkan/difilter di halaman Logs PWA."""
+    """
+    Menulis tiap log record ke database/logs.db supaya bisa di-query dari
+    API dan ditampilkan/difilter di halaman Logs PWA.
+
+    Setiap record OTOMATIS dilengkapi info sumber (file, baris, fungsi,
+    nama logger, nama thread/proses) ke dalam kolom context (key "_source"),
+    walau pemanggil tidak menyertakan context sendiri - ini jawaban untuk
+    "log ini dibuat dari mana" tanpa perlu baca source code manual.
+    """
 
     def emit(self, record):
         try:
             category = getattr(record, "category", None) or _infer_category(record.name)
-            context = getattr(record, "context", None)
+            user_context = getattr(record, "context", None)
             duration_ms = getattr(record, "duration_ms", None)
             success = getattr(record, "success", None)
 
@@ -96,12 +121,25 @@ class SQLiteLogHandler(logging.Handler):
             if record.exc_info:
                 message += "\n" + self.formatException(record.exc_info)
 
+            merged_context = dict(user_context) if isinstance(user_context, dict) else (
+                {"value": user_context} if user_context is not None else {}
+            )
+            merged_context["_source"] = {
+                "file": record.filename,
+                "line": record.lineno,
+                "function": record.funcName,
+                "module": record.module,
+                "logger": record.name,
+                "thread": record.threadName,
+                "process": record.process,
+            }
+
             log_store.insert_log(
                 category=category,
                 level=record.levelname,
                 logger_name=record.name,
                 message=message,
-                context=context,
+                context=merged_context,
                 duration_ms=duration_ms,
                 success=success,
                 created_at=record.created,
@@ -161,7 +199,8 @@ def setup_logging(level: int = logging.INFO) -> None:
         return
 
     plain_formatter = logging.Formatter(
-        "%(asctime)s | %(name)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(filename)s:%(lineno)d (%(funcName)s) | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
 
     console_handler = logging.StreamHandler(sys.stdout)
