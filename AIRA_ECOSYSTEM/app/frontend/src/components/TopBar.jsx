@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import WsStatusBadge from "./WsStatusBadge.jsx";
 
 function greeting(hour) {
   if (hour < 5) return "Good night!";
@@ -8,7 +9,7 @@ function greeting(hour) {
   return "Good night!";
 }
 
-export default function TopBar({ title, subtitle, onMenuClick }) {
+export default function TopBar({ title, subtitle, onMenuClick, wsStatus }) {
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
@@ -32,9 +33,12 @@ export default function TopBar({ title, subtitle, onMenuClick }) {
           </button>
         )}
         <div className="min-w-0">
-          <h1 className="text-lg sm:text-2xl font-bold text-white truncate">
-            {title}
-          </h1>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-lg sm:text-2xl font-bold text-white truncate">
+              {title}
+            </h1>
+            {wsStatus && <WsStatusBadge status={wsStatus} />}
+          </div>
           {subtitle && (
             <p className="text-white/50 text-xs sm:text-sm mt-1 truncate">
               {subtitle}

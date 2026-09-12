@@ -5,8 +5,9 @@ import ChatPage from "./pages/ChatPage.jsx";
 import DevicesPage from "./pages/DevicesPage.jsx";
 import MemoryPage from "./pages/MemoryPage.jsx";
 import SettingsPage from "./pages/SettingsPage.jsx";
-import LogsPage from "./pages/LogsPage.jsx"; 
+import LogsPage from "./pages/LogsPage.jsx";
 import { SessionsProvider } from "./context/SessionsContext.jsx";
+import { ChatRuntimeProvider } from "./context/ChatRuntimeContext.jsx";
 import { ToastProvider } from "./components/Toast.jsx";
 
 const PAGES = {
@@ -25,24 +26,29 @@ export default function App() {
   return (
     <ToastProvider>
       <SessionsProvider>
-        <div className="h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
-          <Sidebar
-            active={active}
-            onChange={setActive}
-            isOpen={drawerOpen}
-            onClose={() => setDrawerOpen(false)}
-          />
+        {/* ChatRuntimeProvider dipasang DI SINI (level App), bukan di
+            dalam ChatPage - supaya state chat & koneksi WebSocket TIDAK
+            ikut hilang saat Page berpindah (mis. ke Settings). */}
+        <ChatRuntimeProvider isOnChatPage={active === "chat"}>
+          <div className="h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
+            <Sidebar
+              active={active}
+              onChange={setActive}
+              isOpen={drawerOpen}
+              onClose={() => setDrawerOpen(false)}
+            />
 
-          <main className="flex-1 min-w-0 overflow-y-auto">
-            <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 h-full">
-              <div className="max-w-5xl mx-auto h-full flex flex-col">
-                <Page onOpenMenu={() => setDrawerOpen(true)} />
+            <main className="flex-1 min-w-0 overflow-y-auto">
+              <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 h-full">
+                <div className="max-w-5xl mx-auto h-full flex flex-col">
+                  <Page onOpenMenu={() => setDrawerOpen(true)} />
+                </div>
               </div>
-            </div>
-          </main>
+            </main>
 
-          <MobileNav active={active} onChange={setActive} />
-        </div>
+            <MobileNav active={active} onChange={setActive} />
+          </div>
+        </ChatRuntimeProvider>
       </SessionsProvider>
     </ToastProvider>
   );

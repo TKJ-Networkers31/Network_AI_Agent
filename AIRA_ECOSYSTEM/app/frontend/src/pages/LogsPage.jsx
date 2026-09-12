@@ -153,6 +153,12 @@ export default function LogsPage({ onOpenMenu }) {
   const [search, setSearch] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [loading, setLoading] = useState(false);
+
+  // Panel filter/legend bisa di-minimize/di-expand supaya daftar log
+  // dapat ruang lebih besar di layar kecil, tanpa kehilangan akses
+  // cepat ke filter yang sedang aktif.
+  const [filtersOpen, setFiltersOpen] = useState(true);
+
   const { notify } = useToast();
 
   const searchRef = useRef(search);
@@ -228,72 +234,102 @@ export default function LogsPage({ onOpenMenu }) {
     <div className="flex flex-col min-h-0 h-full">
       <TopBar title="Logs" subtitle={`${total} entri · kategori & level bisa difilter`} onMenuClick={onOpenMenu} />
 
-      <div className="bg-card border border-border rounded-xl2 p-4 mb-3 space-y-3 shrink-0">
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setCategory("all")}
-            title="Tampilkan semua kategori log"
-            className={`text-xs px-3 py-1.5 rounded-full border transition ${
-              category === "all" ? "bg-accent-gradient text-white border-transparent" : "border-border text-white/50 hover:text-white"
-            }`}
+      <div className="bg-card border border-border rounded-xl2 mb-3 shrink-0 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((v) => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold text-white/70 hover:text-white transition"
+        >
+          <span className="flex items-center gap-2">
+            Filter & kategori
+            {!filtersOpen && (
+              <span className="text-[10px] font-normal text-white/40">
+                (
+                {category === "all" ? "semua kategori" : category}
+                {level !== "all" ? `, level ${level}` : ""}
+                {search ? `, cari "${search}"` : ""}
+                )
+              </span>
+            )}
+          </span>
+          <svg
+            viewBox="0 0 24 24" fill="none"
+            className={`shrink-0 transition-transform ${filtersOpen ? "rotate-180" : ""}`}
+            style={{ width: 14, height: 14 }}
           >
-            Semua ({categories.reduce((s, c) => s + c.count, 0)})
-          </button>
-          {categories.map((c) => (
-            <button
-              key={c.category}
-              onClick={() => setCategory(c.category)}
-              title={c.description || c.category}
-              className={`text-xs px-3 py-1.5 rounded-full border transition ${
-                category === c.category ? "bg-accent-gradient text-white border-transparent" : "border-border text-white/50 hover:text-white"
-              }`}
-            >
-              {c.label || c.category} ({c.count})
-            </button>
-          ))}
-        </div>
+            <path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={level}
-            onChange={(e) => setLevel(e.target.value)}
-            className="bg-white/5 border border-border rounded-lg px-2 py-1.5 text-xs text-white/80 outline-none"
-          >
-            {LEVELS.map((l) => (
-              <option key={l} value={l}>{l === "all" ? "Semua level" : l}</option>
-            ))}
-          </select>
+        {filtersOpen && (
+          <div className="px-4 pb-4 space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setCategory("all")}
+                title="Tampilkan semua kategori log"
+                className={`text-xs px-3 py-1.5 rounded-full border transition ${
+                  category === "all" ? "bg-accent-gradient text-white border-transparent" : "border-border text-white/50 hover:text-white"
+                }`}
+              >
+                Semua ({categories.reduce((s, c) => s + c.count, 0)})
+              </button>
+              {categories.map((c) => (
+                <button
+                  key={c.category}
+                  onClick={() => setCategory(c.category)}
+                  title={c.description || c.category}
+                  className={`text-xs px-3 py-1.5 rounded-full border transition ${
+                    category === c.category ? "bg-accent-gradient text-white border-transparent" : "border-border text-white/50 hover:text-white"
+                  }`}
+                >
+                  {c.label || c.category} ({c.count})
+                </button>
+              ))}
+            </div>
 
-          <form onSubmit={handleSearchSubmit} className="flex-1 min-w-[160px] flex gap-2">
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cari pesan/context..."
-              className="flex-1 bg-white/5 border border-border rounded-lg px-3 py-1.5 text-xs outline-none focus:border-accent"
-            />
-            <button type="submit" className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-white/70 hover:text-white">
-              Cari
-            </button>
-          </form>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={level}
+                onChange={(e) => setLevel(e.target.value)}
+                className="bg-white/5 border border-border rounded-lg px-2 py-1.5 text-xs text-white/80 outline-none"
+              >
+                {LEVELS.map((l) => (
+                  <option key={l} value={l}>{l === "all" ? "Semua level" : l}</option>
+                ))}
+              </select>
 
-          <label className="flex items-center gap-1.5 text-xs text-white/50 select-none">
-            <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} className="accent-accent" />
-            Auto-refresh 5s
-          </label>
+              <form onSubmit={handleSearchSubmit} className="flex-1 min-w-[160px] flex gap-2">
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Cari pesan/context..."
+                  className="flex-1 bg-white/5 border border-border rounded-lg px-3 py-1.5 text-xs outline-none focus:border-accent"
+                />
+                <button type="submit" className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-white/70 hover:text-white">
+                  Cari
+                </button>
+              </form>
 
-          <button onClick={() => loadLogs()} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-white/70 hover:text-white">
-            ⟳ Refresh
-          </button>
+              <label className="flex items-center gap-1.5 text-xs text-white/50 select-none">
+                <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} className="accent-accent" />
+                Auto-refresh 5s
+              </label>
 
-          <button
-            onClick={handleClear}
-            className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-300 hover:bg-red-500/20 border border-red-500/20"
-          >
-            Hapus
-          </button>
-        </div>
+              <button onClick={() => loadLogs()} className="text-xs px-3 py-1.5 rounded-lg bg-white/10 text-white/70 hover:text-white">
+                ⟳ Refresh
+              </button>
 
-        <CategoryLegend info={activeCategoryInfo} />
+              <button
+                onClick={handleClear}
+                className="text-xs px-3 py-1.5 rounded-lg bg-red-500/10 text-red-300 hover:bg-red-500/20 border border-red-500/20"
+              >
+                Hapus
+              </button>
+            </div>
+
+            <CategoryLegend info={activeCategoryInfo} />
+          </div>
+        )}
       </div>
 
       <p className="text-[11px] text-white/30 mb-2 px-1 shrink-0">

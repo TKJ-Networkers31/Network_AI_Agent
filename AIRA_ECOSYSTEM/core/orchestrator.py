@@ -33,9 +33,9 @@ class Orchestrator:
             dangerous_tools=DANGEROUS_TOOLS,
         )
 
-    def route(self, user_input: str, memory) -> dict:
+    def route(self, user_input: str, memory, on_event=None) -> dict:
         start = time.perf_counter()
-        result = self.planner.run(user_input, memory, tool_executor=self._execute_tool)
+        result = self.planner.run(user_input, memory, tool_executor=self._execute_tool, on_event=on_event)
         result["duration"] = round(time.perf_counter() - start, 3)
         return result
 

@@ -34,10 +34,10 @@ class Brain:
         self.memory = memory
         self.orchestrator = Orchestrator()
 
-    def think(self, user_input: str) -> BrainResponse:
+    def think(self, user_input: str, on_event=None) -> BrainResponse:
         logger.info("BRAIN | menerima input user (%d char)", len(user_input))
 
-        result = self.orchestrator.route(user_input, self.memory)
+        result = self.orchestrator.route(user_input, self.memory, on_event=on_event)
 
         return BrainResponse(
             answer=result.get("answer", ""),

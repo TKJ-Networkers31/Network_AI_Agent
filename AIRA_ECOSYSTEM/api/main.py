@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from api.routers import chat, providers, memory, devices, sessions, tools, logs
-
+from api.routers import ws 
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -42,6 +42,7 @@ app.include_router(devices.router)
 app.include_router(sessions.router)
 app.include_router(tools.router)
 app.include_router(logs.router)
+app.include_router(ws.router)
 
 
 @app.get("/api/health")

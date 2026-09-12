@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSessionsContext } from "../context/SessionsContext.jsx";
+import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
 import { useToast } from "./Toast.jsx";
 
 const NAV_ITEMS = [
@@ -28,6 +29,7 @@ export default function Sidebar({ active, onChange, isOpen, onClose }) {
     deleteSession,
   } = useSessionsContext();
 
+  const { unreadSessionIds } = useChatRuntime();
   const { notify } = useToast();
 
   const [sessionsOpen, setSessionsOpen] = useState(true);
@@ -184,6 +186,7 @@ export default function Sidebar({ active, onChange, isOpen, onClose }) {
                   const isRowActive = s.id === activeId && active === "chat";
                   const isEditing = editingId === s.id;
                   const isConfirming = confirmDeleteId === s.id;
+                  const isUnread = unreadSessionIds.has(s.id);
 
                   return (
                     <div
@@ -236,7 +239,12 @@ export default function Sidebar({ active, onChange, isOpen, onClose }) {
                         </div>
                       ) : (
                         <div className="flex items-center justify-between gap-2">
-                          <span className="truncate">{s.title}</span>
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            {isUnread && (
+                              <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent-light pulse-ring-soft" />
+                            )}
+                            <span className="truncate">{s.title}</span>
+                          </span>
                           <div className="hidden group-hover:flex items-center gap-1 shrink-0">
                             <button
                               type="button"

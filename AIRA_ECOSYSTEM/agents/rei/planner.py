@@ -36,15 +36,31 @@ class Planner:
         self.tool_category = tool_category or {}
         self.dangerous_tools = dangerous_tools or set()
 
-    def run(self, user_input, memory, tool_executor):
+    def run(self, user_input, memory, tool_executor, on_event=None):
+        """
+        on_event: Optional[Callable[[str, dict], None]] - dipanggil sync
+        untuk tiap event realtime (thinking/tool_start/tool_progress/
+        tool_finish). None (default) = tidak ada perubahan perilaku,
+        dipakai oleh alur REST lama yang tidak butuh streaming.
+        """
+        def emit(event_type, payload):
+            if on_event:
+                try:
+                    on_event(event_type, payload)
+                except Exception:
+                    logger.exception("on_event callback error (diabaikan)")
+
         steps = []
         memory.add_user(user_input)
+
+        emit("thinking", {"message": "Menganalisis permintaan..."})
 
         system_prompt = build_system_prompt(time_context_block() + build_context_snippet())
 
         response = self._call_with_retry(memory.get_messages(system_prompt))
 
         if "error" in response:
+            emit("error", {"message": response["error"]})
             return {
                 "answer": f"Terjadi error saat menghubungi model: {response['error']}",
                 "steps": steps, "token_usage": None, "error": True,
@@ -71,9 +87,12 @@ class Planner:
                     "error": False,
                 }
 
+            emit("thinking", {"message": f"Menggunakan {len(tool_calls)} tool..."})
+
             for call in tool_calls:
                 if tool_count >= MAX_TOOL_CALLS:
                     steps.append({"type": "limit_reached", "message": "Batas jumlah tool call tercapai."})
+                    emit("error", {"message": "Batas jumlah tool call tercapai."})
                     return {
                         "answer": "Saya menghentikan proses karena jumlah observasi sudah mencapai batas.",
                         "steps": steps,
@@ -96,12 +115,16 @@ class Planner:
 
                 if name in self.dangerous_tools:
                     steps.append({"type": "confirmation_required", "name": name, "category": category, "arguments": arguments})
+                    emit("tool_finish", {"name": name, "category": category, "success": False, "skipped": True})
                     memory.add_tool_result(
                         json.dumps({"success": False, "error": "Tool ini butuh konfirmasi manual, dilewati otomatis."}),
                         tool_call_id=call.get("id"),
                     )
                     tool_count += 1
                     continue
+
+                emit("tool_start", {"name": name, "category": category, "arguments": arguments})
+                emit("tool_progress", {"name": name, "category": category, "message": f"Menjalankan {name}..."})
 
                 step_start = time.perf_counter()
                 result = tool_executor(name, arguments)
@@ -115,11 +138,20 @@ class Planner:
                     "duration": round(step_duration, 3), "result_preview": _preview(result),
                 })
 
+                emit("tool_finish", {
+                    "name": name, "category": category,
+                    "success": bool(result.get("success")),
+                    "duration": round(step_duration, 3),
+                })
+
                 memory.add_tool_result(json.dumps(result, ensure_ascii=False), tool_call_id=call.get("id"))
+
+            emit("thinking", {"message": "Menyusun jawaban..."})
 
             response = self._call_with_retry(memory.get_messages(system_prompt))
 
             if "error" in response:
+                emit("error", {"message": response["error"]})
                 return {
                     "answer": f"Terjadi error saat menghubungi model: {response['error']}",
                     "steps": steps,

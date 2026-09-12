@@ -1,0 +1,6 @@
+2026-09-12 10:32:13 | ERROR    | aira.orchestrator | orchestrator.py:48 (_execute_tool) | Tool 'web_search' gagal
+Traceback (most recent call last):
+  File "D:\data\agent_ai\AIRA_ECOSYSTEM\core\orchestrator.py", line 46, in _execute_tool
+    return AGENT_TOOL_MAP[name](**arguments)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+TypeError: web_search() missing 1 required positional argument: 'query'

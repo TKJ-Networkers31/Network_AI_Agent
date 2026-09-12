@@ -55,11 +55,11 @@ function ProcessSteps({ steps }) {
   );
 }
 
-export default function MessageBubble({ role, content, steps }) {
+export default function MessageBubble({ role, content, steps, isNew }) {
   const isUser = role === "user";
 
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"} ${isNew ? "reveal-fade" : ""}`}>
       <div className={`max-w-[88%] sm:max-w-[75%] ${isUser ? "" : "w-full"}`}>
         {!isUser && <ProcessSteps steps={steps} />}
 

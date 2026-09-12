@@ -1,81 +1,9 @@
-2026-09-11 19:02:30 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
-2026-09-11 19:03:02 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
-2026-09-11 19:03:16 [INFO] aira.brain | BRAIN | menerima input user (3 char)
-2026-09-11 19:03:26 [INFO] aira.brain | BRAIN | menerima input user (18 char)
-2026-09-11 19:04:02 [INFO] aira.brain | BRAIN | menerima input user (43 char)
-2026-09-11 19:04:14 [INFO] aira.rei.planner | Provider balas kosong, mencoba ulang (1/1)...
-2026-09-11 19:04:40 [INFO] aira.brain | BRAIN | menerima input user (24 char)
-2026-09-11 19:06:07 [WARNING] aira.tools.ssh | SSH attempt 1 gagal untuk device=R1 command='/ip route print': timed out
-2026-09-11 19:06:19 [WARNING] aira.tools.ssh | SSH attempt 2 gagal untuk device=R1 command='/ip route print': timed out
-2026-09-11 19:06:46 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
-2026-09-11 19:07:03 [INFO] aira.brain | BRAIN | menerima input user (32 char)
-2026-09-11 19:13:23 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
-2026-09-11 19:13:47 [INFO] aira.brain | BRAIN | menerima input user (3 char)
-2026-09-11 19:14:14 [INFO] aira.brain | BRAIN | menerima input user (20 char)
-2026-09-11 19:26:43 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
-2026-09-11 19:27:04 [INFO] aira.brain | BRAIN | menerima input user (3 char)
-2026-09-11 19:27:20 [INFO] aira.brain | BRAIN | menerima input user (17 char)
-2026-09-11 19:38:45 [INFO] aira.brain | BRAIN | menerima input user (3 char)
-2026-09-11 19:38:54 [INFO] aira.rei.auto_extract | AUTO MEMORY tersimpan otomatis: ['nickname']
-2026-09-11 19:39:06 [INFO] aira.brain | BRAIN | menerima input user (43 char)
-2026-09-11 19:39:08 [INFO] aira.rei.planner | Provider balas kosong, mencoba ulang (1/1)...
-2026-09-11 19:43:13 [INFO] aira.brain | BRAIN | menerima input user (40 char)
-2026-09-11 19:43:19 [INFO] aira.rei.auto_extract | AUTO MEMORY tersimpan otomatis: ['name_preference']
-2026-09-11 19:43:22 [INFO] aira.brain | BRAIN | menerima input user (4 char)
-2026-09-11 19:43:34 [INFO] aira.rei.auto_extract | AUTO MEMORY tersimpan otomatis: ['user_name']
-2026-09-11 19:43:37 [INFO] aira.brain | BRAIN | menerima input user (3 char)
-2026-09-11 19:47:38 [INFO] aira.brain | BRAIN | menerima input user (263 char)
-2026-09-11 19:48:19 [INFO] aira.rei.auto_extract | AUTO MEMORY tersimpan otomatis: ['acronym_expansion']
-2026-09-11 19:48:46 [INFO] aira.brain | BRAIN | menerima input user (18 char)
-2026-09-11 19:49:00 [INFO] aira.rei.auto_extract | AUTO MEMORY tersimpan otomatis: ['official_name']
-2026-09-11 19:50:42 [INFO] aira | LOGGING SETUP | log file: D:\data\agent_ai\AIRA_ECOSYSTEM\logs\aira.log
-2026-09-11 20:31:19 | aira | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-11 20:35:01 | aira | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-11 20:42:24 | aira | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-11 20:50:46 | aira | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-11 20:53:38 | aira.brain | BRAIN | menerima input user (43 char)
-2026-09-11 20:53:38 | aira.memory | MEMORY TRIM | menghapus 2 pesan lama dari riwayat.
-2026-09-11 20:53:41 | aira.rei.provider_client | call_openai_compatible gagal: 429 Client Error: Too Many Requests for url: https://openrouter.ai/api/v1/chat/completions | body: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429,"metadata":{"headers":{"X-RateLimit-Limit":"50","X-RateLimit-Remaining":"0","X-RateLimit-Reset":"1789171200000"},"limit_source":"openrouter_free_tier_daily","remedy_hint":"Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.","provider_name":null}},"user_id":"user_3IwYq6vPOiy2TVpZ0kvnVdxP2Qg"}
-2026-09-11 20:54:19 | aira.brain | BRAIN | menerima input user (3 char)
-2026-09-11 20:54:21 | aira.rei.provider_client | call_openai_compatible gagal: 429 Client Error: Too Many Requests for url: https://openrouter.ai/api/v1/chat/completions | body: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429,"metadata":{"headers":{"X-RateLimit-Limit":"50","X-RateLimit-Remaining":"0","X-RateLimit-Reset":"1789171200000"},"limit_source":"openrouter_free_tier_daily","remedy_hint":"Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.","provider_name":null}},"user_id":"user_3IwYq6vPOiy2TVpZ0kvnVdxP2Qg"}
-2026-09-12 07:57:55 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 07:59:32 | INFO     | aira.brain | brain.py:31 (think) | BRAIN | menerima input user (4 char)
-2026-09-12 07:59:32 | INFO     | aira.memory | memory.py:104 (_trim) | MEMORY TRIM | menghapus 20 pesan lama dari riwayat.
-2026-09-12 07:59:54 | INFO     | aira.rei.auto_extract | auto_extract.py:100 (_extract) | AUTO MEMORY tersimpan otomatis: ['preferred_name']
-2026-09-12 08:03:59 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 08:04:10 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 08:04:51 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 08:05:14 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 08:05:25 | INFO     | aira.brain | brain.py:31 (think) | BRAIN | menerima input user (4 char)
-2026-09-12 08:05:43 | INFO     | aira.brain | brain.py:31 (think) | BRAIN | menerima input user (28 char)
-2026-09-12 08:10:36 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 08:11:01 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 08:11:13 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 08:11:26 | INFO     | aira.brain | brain.py:31 (think) | BRAIN | menerima input user (28 char)
-2026-09-12 08:16:12 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 08:16:42 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 08:17:34 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 08:17:40 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:10:49 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:11:17 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:11:27 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:11:51 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:11:55 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:18:38 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:19:12 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:19:38 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:20:02 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:20:14 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:40:14 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 09:51:09 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
 2026-09-12 09:51:50 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
 2026-09-12 09:51:53 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 09:51:54 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
-2026-09-12 09:52:27 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (15 char)
 2026-09-12 09:52:32 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 09:52:32 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=d744e967930a | total_conn=1
 2026-09-12 09:52:33 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
-2026-09-12 09:53:03 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (91 char)
 2026-09-12 10:04:35 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:04:36 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=d744e967930a | total_conn=2
 2026-09-12 10:04:38 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=d744e967930a | total_conn=3
@@ -83,8 +11,6 @@
 2026-09-12 10:05:01 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=d744e967930a
 2026-09-12 10:05:01 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=d744e967930a
 2026-09-12 10:05:04 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
-2026-09-12 10:05:16 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (24 char)
-2026-09-12 10:05:18 | INFO     | aira.rei.planner | planner.py:188 (_call_with_retry) | Provider balas kosong, mencoba ulang (1/1)...
 2026-09-12 10:06:07 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=2
 2026-09-12 10:06:08 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=3
 2026-09-12 10:07:16 | WARNING  | aira.ws | ws_manager.py:51 (send) | WS SEND gagal (dibuang dari pool) | session=c1377722d051 | 
@@ -97,7 +23,6 @@ Traceback (most recent call last):
     raise RuntimeError('WebSocket is not connected. Need to call "accept" first.')
 RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-12 10:07:16 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
-2026-09-12 10:07:23 | INFO     | aira.rei.auto_extract | auto_extract.py:100 (_extract) | AUTO MEMORY tersimpan otomatis: ['user_name']
 2026-09-12 10:11:57 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:11:58 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=2
 2026-09-12 10:11:58 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=3
@@ -109,7 +34,6 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-12 10:21:49 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:21:49 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:21:52 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
-2026-09-12 10:22:10 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (27 char)
 2026-09-12 10:23:00 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=2
 2026-09-12 10:23:03 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:23:03 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=2
@@ -117,18 +41,11 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-12 10:23:04 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=2
 2026-09-12 10:23:11 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:23:12 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=2
-2026-09-12 10:24:18 | INFO     | aira.memory | memory.py:189 (_trim) | MEMORY TRIM | menghapus 2 pesan lama dari riwayat.
-2026-09-12 10:24:57 | INFO     | aira.memory | memory.py:189 (_trim) | MEMORY TRIM | menghapus 2 pesan lama dari riwayat.
-2026-09-12 10:25:58 | INFO     | aira.memory | memory.py:189 (_trim) | MEMORY TRIM | menghapus 2 pesan lama dari riwayat.
 2026-09-12 10:26:38 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:26:39 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=2
 2026-09-12 10:26:40 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=3
 2026-09-12 10:26:41 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:26:42 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=3
-2026-09-12 10:26:49 | INFO     | aira.memory | memory.py:189 (_trim) | MEMORY TRIM | menghapus 2 pesan lama dari riwayat.
-2026-09-12 10:27:29 | INFO     | aira.memory | memory.py:189 (_trim) | MEMORY TRIM | menghapus 1 pesan lama dari riwayat.
-2026-09-12 10:27:50 | INFO     | aira.memory | memory.py:189 (_trim) | MEMORY TRIM | menghapus 3 pesan lama dari riwayat.
-2026-09-12 10:28:24 | INFO     | aira.memory | memory.py:189 (_trim) | MEMORY TRIM | menghapus 6 pesan lama dari riwayat.
 2026-09-12 10:28:38 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:28:38 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=3
 2026-09-12 10:28:39 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=4
@@ -146,17 +63,8 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-12 10:31:32 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:31:32 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=4
 2026-09-12 10:31:33 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=5
-2026-09-12 10:31:47 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (22 char)
-2026-09-12 10:31:47 | INFO     | aira.memory | memory.py:189 (_trim) | MEMORY TRIM | menghapus 8 pesan lama dari riwayat.
 2026-09-12 10:31:50 | WARNING  | aira.ws | ws_manager.py:51 (send) | WS SEND gagal (dibuang dari pool) | session=c1377722d051 | 
 2026-09-12 10:31:51 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=5
-2026-09-12 10:32:13 | ERROR    | aira.orchestrator | orchestrator.py:48 (_execute_tool) | Tool 'web_search' gagal
-Traceback (most recent call last):
-  File "D:\data\agent_ai\AIRA_ECOSYSTEM\core\orchestrator.py", line 46, in _execute_tool
-    return AGENT_TOOL_MAP[name](**arguments)
-           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
-TypeError: web_search() missing 1 required positional argument: 'query'
-2026-09-12 10:32:13 | INFO     | aira.memory | memory.py:189 (_trim) | MEMORY TRIM | menghapus 22 pesan lama dari riwayat.
 2026-09-12 10:32:14 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:32:14 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=5
 2026-09-12 10:32:15 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=6
@@ -177,19 +85,12 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-12 10:32:53 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:32:55 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
 2026-09-12 10:49:45 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
-2026-09-12 10:49:47 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
 2026-09-12 10:49:50 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
 2026-09-12 10:50:08 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
-2026-09-12 10:50:10 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
 2026-09-12 10:50:12 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
 2026-09-12 10:51:31 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:54:27 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
-2026-09-12 10:54:37 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (27 char)
 2026-09-12 10:55:36 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
-2026-09-12 10:56:30 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 10:56:35 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 10:56:39 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
-2026-09-12 10:56:51 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (3 char)
 2026-09-12 10:56:55 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
 2026-09-12 10:56:55 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=2
 2026-09-12 10:56:55 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
@@ -200,7 +101,6 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-12 10:56:56 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=2
 2026-09-12 10:56:57 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 10:56:57 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
-2026-09-12 10:56:57 | INFO     | aira.rei.auto_extract | auto_extract.py:100 (_extract) | AUTO MEMORY tersimpan otomatis: ['name']
 2026-09-12 10:56:57 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
 2026-09-12 10:56:57 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=2
 2026-09-12 10:56:58 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=3
@@ -211,9 +111,6 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-12 10:57:00 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=b2a901f6efeb | total_conn=4
 2026-09-12 10:57:01 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=3
 2026-09-12 10:57:01 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=4
-2026-09-12 10:57:16 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (4 char)
-2026-09-12 10:57:20 | ERROR    | aira.rei.provider_client | provider_client.py:241 (_call_openai_compatible) | call_openai_compatible gagal: 429 Client Error: Too Many Requests for url: https://openrouter.ai/api/v1/chat/completions | body: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429,"metadata":{"headers":{"X-RateLimit-Limit":"50","X-RateLimit-Remaining":"0","X-RateLimit-Reset":"1789257600000"},"limit_source":"openrouter_free_tier_daily","remedy_hint":"Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.","provider_name":null}},"user_id":"user_3IwYq6vPOiy2TVpZ0kvnVdxP2Qg"}
-2026-09-12 10:57:20 | ERROR    | aira.rei.auto_extract | auto_extract.py:62 (_extract) | auto_memory gagal: Tidak bisa menghubungi https://openrouter.ai/api/v1: 429 Client Error: Too Many Requests for url: https://openrouter.ai/api/v1/chat/completions | body: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429,"metadata":{"headers":{"X-RateLimit-Limit":"50","X-RateLimit-Remaining":"0","X-RateLimit-Reset":"1789257600000"},"limit_source":"openrouter_free_tier_daily","remedy_hint":"Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.","provider_name":null}},"user_id":"user_3IwYq6vPOiy2TVpZ0kvnVdxP2Qg"}
 2026-09-12 10:57:23 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=b2a901f6efeb
 2026-09-12 10:57:23 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=b2a901f6efeb
 2026-09-12 10:57:23 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=c1377722d051
@@ -236,8 +133,6 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-12 10:57:32 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=b2a901f6efeb | total_conn=2
 2026-09-12 10:57:33 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=b2a901f6efeb | total_conn=3
 2026-09-12 10:57:33 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=b2a901f6efeb | total_conn=4
-2026-09-12 10:57:35 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (4 char)
-2026-09-12 10:57:35 | ERROR    | aira.rei.provider_client | provider_client.py:241 (_call_openai_compatible) | call_openai_compatible gagal: 429 Client Error: Too Many Requests for url: https://openrouter.ai/api/v1/chat/completions | body: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429,"metadata":{"headers":{"X-RateLimit-Limit":"50","X-RateLimit-Remaining":"0","X-RateLimit-Reset":"1789257600000"},"limit_source":"openrouter_free_tier_daily","remedy_hint":"Wait for the daily reset (see X-RateLimit-Reset), or purchase credits to raise your free-model daily limit.","provider_name":null}},"user_id":"user_3IwYq6vPOiy2TVpZ0kvnVdxP2Qg"}
 2026-09-12 10:57:41 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=b2a901f6efeb
 2026-09-12 10:57:41 | INFO     | aira.ws | ws_manager.py:34 (disconnect) | WS DISCONNECT | session=b2a901f6efeb
 2026-09-12 10:57:41 | INFO     | aira.ws | ws_manager.py:25 (connect) | WS CONNECT | session=c1377722d051 | total_conn=3
