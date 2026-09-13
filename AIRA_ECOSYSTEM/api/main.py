@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections
+from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files
 from api.routers import ws
 
 
@@ -42,6 +42,7 @@ app.include_router(logs.router)
 app.include_router(models.router)
 app.include_router(persona.router)
 app.include_router(connections.router)
+app.include_router(files.router)
 app.include_router(ws.router)
 
 

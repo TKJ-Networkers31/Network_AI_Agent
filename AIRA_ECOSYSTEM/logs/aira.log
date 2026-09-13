@@ -509,3 +509,28 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-13 16:17:07 | INFO     | aira.rei.provider_client | provider_client.py:470 (call_model) | AUTO FAILOVER | Nemotron 3 Super -> ollama-qwen3-1.7b (alasan: rate_limit)
 2026-09-13 16:17:09 | ERROR    | aira.rei.provider_client | provider_client.py:200 (_call_ollama) | call_ollama gagal (other): 500 Server Error: Internal Server Error for url: http://localhost:11434/api/chat
 2026-09-13 16:17:09 | ERROR    | aira.rei.provider_client | provider_client.py:478 (call_model) | AUTO FAILOVER GAGAL | fallback 'ollama-qwen3-1.7b' juga gagal: Tidak bisa menghubungi Ollama di http://localhost:11434/api/chat: 500 Server Error: Internal Server Error for url: http://localhost:11434/api/chat
+2026-09-13 23:31:40 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:31:48 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-13 23:32:07 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-13 23:34:22 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:34:31 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:34:48 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:34:58 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:35:15 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:35:30 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:35:48 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:36:23 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:36:41 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:36:59 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:37:21 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:37:43 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:38:05 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:38:24 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:38:48 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:39:17 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:39:28 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:40:08 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:40:16 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:40:30 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:40:37 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 23:40:57 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db

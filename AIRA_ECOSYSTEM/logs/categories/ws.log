@@ -291,3 +291,5 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-13 16:12:01 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=0e880c1252a1 | total_conn=1
 2026-09-13 16:12:27 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=0e880c1252a1
 2026-09-13 16:12:36 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-13 23:31:48 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-13 23:32:07 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
