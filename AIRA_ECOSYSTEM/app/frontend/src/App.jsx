@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar.jsx";
 import MobileNav from "./components/MobileNav.jsx";
 import ChatPage from "./pages/ChatPage.jsx";
 import DevicesPage from "./pages/DevicesPage.jsx";
+import AkaneWorkspace from "./pages/AkaneWorkspace.jsx";
 import ModelsPage from "./pages/ModelsPage.jsx";
 import PersonaPage from "./pages/PersonaPage.jsx";
 import MemoryPage from "./pages/MemoryPage.jsx";
@@ -11,10 +12,12 @@ import LogsPage from "./pages/LogsPage.jsx";
 import { SessionsProvider } from "./context/SessionsContext.jsx";
 import { ChatRuntimeProvider } from "./context/ChatRuntimeContext.jsx";
 import { ToastProvider } from "./components/Toast.jsx";
+import ConnectionIndicator from "./components/connection/ConnectionIndicator.jsx";
 
 const PAGES = {
   chat: ChatPage,
   devices: DevicesPage,
+  akane: AkaneWorkspace,
   models: ModelsPage,
   persona: PersonaPage,
   memory: MemoryPage,
@@ -39,7 +42,11 @@ export default function App() {
               onClose={() => setDrawerOpen(false)}
             />
 
-            <main className="flex-1 min-w-0 overflow-y-auto">
+            <main className="flex-1 min-w-0 overflow-y-auto relative">
+              <div className="fixed top-3 right-3 z-30">
+                <ConnectionIndicator onClick={() => setActive("akane")} />
+              </div>
+
               <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 h-full">
                 <div className="max-w-5xl mx-auto h-full flex flex-col">
                   <Page onOpenMenu={() => setDrawerOpen(true)} />

@@ -92,6 +92,22 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(payload),
       }),
+        connections: {
+          list: () => request("/connections"),
+          get: (sessionId) => request(`/connections/${encodeURIComponent(sessionId)}`),
+          open: (payload) =>
+            request("/connections/open", { method: "POST", body: JSON.stringify(payload) }),
+          close: (sessionId) =>
+            request("/connections/close", {
+              method: "POST",
+              body: JSON.stringify({ session_id: sessionId }),
+            }),
+          execute: (sessionId, command) =>
+            request("/connections/execute", {
+              method: "POST",
+              body: JSON.stringify({ session_id: sessionId, command }),
+            }),
+        },
     remove: (nickname) =>
       request(`/models/${encodeURIComponent(nickname)}`, { method: "DELETE" }),
     setDefault: (nickname) =>

@@ -2,3 +2,7 @@
 2026-09-13 00:59:28 | INFO     | aira.model_registry | model_registry.py:338 (delete_model) | MODEL DELETE | nickname=ollama-qwen3-4b
 2026-09-13 01:00:22 | INFO     | aira.model_registry | model_registry.py:364 (set_default) | MODEL SET DEFAULT | nickname=Nemotron 3 Super
 2026-09-13 08:52:52 | INFO     | aira.model_registry | model_registry.py:325 (update_model) | MODEL UPDATE | nickname=ollama-qwen3-1.7b fields=['provider', 'model_id', 'endpoint', 'enabled']
+2026-09-13 16:12:20 | INFO     | aira.model_registry | model_registry.py:388 (set_fallback) | MODEL SET FALLBACK | nickname=Nemotron 3.5 Lightning is_fallback=False
+2026-09-13 16:12:21 | INFO     | aira.model_registry | model_registry.py:388 (set_fallback) | MODEL SET FALLBACK | nickname=ollama-qwen3-1.7b is_fallback=True
+2026-09-13 16:16:49 | INFO     | aira.model_registry | model_registry.py:275 (create_model) | MODEL CREATE | nickname=Gemini provider=ollama
+2026-09-13 16:17:00 | INFO     | aira.model_registry | model_registry.py:388 (set_fallback) | MODEL SET FALLBACK | nickname=Gemini is_fallback=True
