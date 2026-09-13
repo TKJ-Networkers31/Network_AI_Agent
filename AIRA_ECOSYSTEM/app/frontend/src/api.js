@@ -53,6 +53,7 @@ export const api = {
   sessions: {
     list: () => request("/sessions"),
     create: () => request("/sessions", { method: "POST" }),
+    active: () => request("/sessions/active"),
     messages: (id) => request(`/sessions/${encodeURIComponent(id)}/messages`),
     rename: (id, title) =>
       request(`/sessions/${encodeURIComponent(id)}`, {
@@ -109,8 +110,6 @@ export const api = {
       request(`/models/${encodeURIComponent(nickname)}/test-connection`, { method: "POST" }),
   },
 
-  // Dynamic Persona Engine (Phase 1.3) - identity, behavior slider, preset,
-  // dan live preview system prompt. TIDAK pernah memanggil LLM.
   persona: {
     get: () => request("/persona"),
 

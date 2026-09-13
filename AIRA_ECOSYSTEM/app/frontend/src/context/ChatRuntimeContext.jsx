@@ -40,21 +40,12 @@ function notifyBrowser(title, body) {
  * pindah ke halaman lain (Settings, Devices, dst). ChatPage jadi cuma
  * "jendela" yang menampilkan data dari sini, bukan pemilik datanya.
  *
- * PENTING: koneksi WebSocket dibuat SATU KALI di sini (lewat
- * useAiraSocket), TIDAK boleh dibuat lagi di ChatPage atau komponen
- * lain manapun untuk sessionId yang sama.
- *
- * FIX (Voice Call Mode):
- * - Event WS baru "transcript" (bubble user dari hasil STT server) dan
- *   "transcript_empty" (beri tahu user + batalkan status menunggu di
- *   voice call hook).
- * - Event "response" bisa membawa "audio_base64" (giliran suara),
- *   diteruskan ke voiceCallHandlersRef yang di-registrasi ChatPage.
- * - sendRaw(payload): kirim payload mentah ke socket, dipakai voice call.
- * - waitForConnection(): expose socket.waitUntilOpen supaya ChatPage bisa
- *   menunggu WS benar-benar terbuka sebelum voice call mulai menangkap
- *   audio - ini yang mencegah "Koneksi belum siap" muncul saat sesi
- *   baru dibuka lalu langsung dipakai voice call.
+ * FIX (Dynamic Greeting & Chat Session Lifecycle):
+ * Persona profile sekarang di-load SEKALI di sini (bukan cuma di dalam
+ * PersonaPage), supaya greeting dinamis di ChatPage bisa dibangun
+ * sebelum chat dirender - lihat components/BootScreen.jsx dan
+ * utils/greeting.js. Ini TIDAK memanggil LLM sama sekali (murni GET
+ * /api/persona), jadi tidak menyentuh Provider Client/Model Registry.
  */
 export function ChatRuntimeProvider({ children, isOnChatPage }) {
   const { activeId, setActiveId, upsertSession } = useSessionsContext();
@@ -66,6 +57,9 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
   const [liveToolsBySession, setLiveToolsBySession] = useState({});
   const [switching, setSwitching] = useState(false);
   const [unreadSessionIds, setUnreadSessionIds] = useState(() => new Set());
+
+  const [persona, setPersona] = useState(null);
+  const [personaReady, setPersonaReady] = useState(false);
 
   const isOnChatPageRef = useRef(isOnChatPage);
   isOnChatPageRef.current = isOnChatPage;
@@ -98,6 +92,27 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
       next.add(sessionId);
       return next;
     });
+  }, []);
+
+  // Persona di-load sekali di boot app. Kegagalan tetap men-set
+  // personaReady=true (fallback ke "AIRA" tanpa nama user) supaya app
+  // tidak macet selamanya di BootScreen kalau backend persona error.
+  useEffect(() => {
+    let cancelled = false;
+
+    api.persona
+      .get()
+      .then((res) => {
+        if (!cancelled) setPersona(res.profile);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setPersonaReady(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const socket = useAiraSocket(activeId, {
@@ -310,6 +325,8 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
     waitForConnection,
     registerVoiceCallHandlers,
     unreadSessionIds,
+    persona,
+    personaReady,
   };
 
   return <ChatRuntimeContext.Provider value={value}>{children}</ChatRuntimeContext.Provider>;

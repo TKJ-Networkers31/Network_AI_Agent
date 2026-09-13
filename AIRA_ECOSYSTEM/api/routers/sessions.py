@@ -17,6 +17,23 @@ def create_session():
     return store.create_session()
 
 
+@router.get("/active")
+def get_active_session():
+    """
+    Mengembalikan sesi yang terakhir dipakai (sudah urut by updated_at
+    DESC di store.list_sessions()), atau otomatis membuat sesi baru
+    kalau belum ada sesi sama sekali. Frontend TIDAK PERNAH membuat
+    dummy session sendiri - selalu lewat endpoint ini saat app dibuka,
+    supaya activeId tidak pernah null di first render.
+    """
+    sessions = store.list_sessions()
+
+    if sessions:
+        return sessions[0]
+
+    return store.create_session()
+
+
 @router.get("/{session_id}/messages")
 def get_messages(session_id: str):
     if not store.get_session_row(session_id):

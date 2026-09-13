@@ -247,3 +247,30 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-13 12:24:46 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=21dd68ae2bde
 2026-09-13 12:25:23 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=b36aca49ed10 | total_conn=1
 2026-09-13 12:35:54 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=b36aca49ed10
+2026-09-13 15:56:56 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=21dd68ae2bde | total_conn=1
+2026-09-13 15:57:22 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=21dd68ae2bde
+2026-09-13 15:57:31 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=6905015a2776 | total_conn=1
+2026-09-13 15:58:17 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=6905015a2776
+2026-09-13 15:58:30 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=3936a1ee3935 | total_conn=1
+2026-09-13 15:58:51 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=3936a1ee3935
+2026-09-13 15:59:36 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=f13507dacc9c | total_conn=1
+2026-09-13 15:59:51 | WARNING  | aira.ws | ws_manager.py:45 (send) | WS SEND gagal (dibuang dari pool) | session=f13507dacc9c | 
+2026-09-13 15:59:52 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=f13507dacc9c | total_conn=1
+2026-09-13 15:59:53 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=f13507dacc9c
+2026-09-13 16:00:04 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=f13507dacc9c | total_conn=1
+2026-09-13 16:00:09 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=f13507dacc9c
+2026-09-13 16:00:09 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=4f409728bab4 | total_conn=1
+2026-09-13 16:00:12 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=4f409728bab4
+2026-09-13 16:00:53 | ERROR    | aira.ws | ws.py:263 (chat_ws) | WS loop error tak terduga | session=f13507dacc9c
+Traceback (most recent call last):
+  File "D:\data\agent_ai\AIRA_ECOSYSTEM\api\routers\ws.py", line 119, in chat_ws
+    raw = await websocket.receive_json()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\data\agent_ai\.venv\Lib\site-packages\starlette\websockets.py", line 134, in receive_json
+    raise RuntimeError('WebSocket is not connected. Need to call "accept" first.')
+RuntimeError: WebSocket is not connected. Need to call "accept" first.
+2026-09-13 16:00:53 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=f13507dacc9c
+2026-09-13 16:01:51 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=f13507dacc9c | total_conn=1
+2026-09-13 16:02:37 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=f13507dacc9c
+2026-09-13 16:02:43 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c9dff0ec4872 | total_conn=1
+2026-09-13 16:09:01 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c9dff0ec4872

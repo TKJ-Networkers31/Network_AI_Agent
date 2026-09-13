@@ -12,6 +12,7 @@ const SessionsContext = createContext(null);
 export function SessionsProvider({ children }) {
   const [sessions, setSessions] = useState([]);
   const [activeId, setActiveId] = useState(null);
+  const [sessionsReady, setSessionsReady] = useState(false);
 
   const loadSessions = useCallback(() => {
     return api.sessions
@@ -20,9 +21,37 @@ export function SessionsProvider({ children }) {
       .catch(() => {});
   }, []);
 
+  // FIX (Chat Session Lifecycle): sebelumnya activeId default null dan
+  // TIDAK PERNAH di-resolve otomatis - user harus refresh/klik manual
+  // sebuah sesi dulu sebelum bisa chat. Sekarang, sekali saat app
+  // dibuka, kita minta backend "sesi aktif" (terakhir dipakai, atau
+  // otomatis dibuatkan baru kalau belum ada sama sekali sesuai
+  // GET /api/sessions/active) - frontend tidak pernah bikin dummy
+  // session sendiri.
   useEffect(() => {
-    loadSessions();
-  }, [loadSessions]);
+    let cancelled = false;
+
+    async function init() {
+      try {
+        const active = await api.sessions.active();
+        if (cancelled) return;
+        setActiveId(active.id);
+        await loadSessions();
+      } catch {
+        // Backend belum siap / gagal - biarkan activeId null, user
+        // tetap bisa mulai chat baru secara manual nanti.
+      } finally {
+        if (!cancelled) setSessionsReady(true);
+      }
+    }
+
+    init();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const startNewChat = useCallback(() => {
     setActiveId(null);
@@ -66,6 +95,7 @@ export function SessionsProvider({ children }) {
         activeId,
         setActiveId,
         loadSessions,
+        sessionsReady,
         startNewChat,
         renameSession,
         deleteSession,

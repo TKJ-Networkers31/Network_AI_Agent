@@ -418,3 +418,48 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-13 12:30:24 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.02, confidence rendah): ' Tanya ini juga jadi bannung.'
 2026-09-13 12:30:34 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (29 char)
 2026-09-13 12:35:54 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=b36aca49ed10
+2026-09-13 15:43:39 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 15:43:40 | INFO     | aira.persona | engine.py:176 (_seed_default_profile_and_behavior) | PERSONA | profile & behavior default (akane) tersedia.
+2026-09-13 15:56:49 | INFO     | aira.persona | engine.py:286 (update_profile) | PERSONA PROFILE UPDATE | fields=['assistant_name', 'user_name', 'language', 'timezone', 'greeting']
+2026-09-13 15:56:56 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=21dd68ae2bde | total_conn=1
+2026-09-13 15:57:00 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (4 char)
+2026-09-13 15:57:15 | INFO     | aira.rei.auto_extract | auto_extract.py:100 (_extract) | AUTO MEMORY tersimpan otomatis: ['user_preferred_name']
+2026-09-13 15:57:22 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=21dd68ae2bde
+2026-09-13 15:57:28 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (20 char)
+2026-09-13 15:57:31 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=6905015a2776 | total_conn=1
+2026-09-13 15:57:48 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (20 char)
+2026-09-13 15:58:03 | INFO     | aira.rei.auto_extract | auto_extract.py:100 (_extract) | AUTO MEMORY tersimpan otomatis: ['preferensi_gaya_jawab']
+2026-09-13 15:58:17 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=6905015a2776
+2026-09-13 15:58:24 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (8 char)
+2026-09-13 15:58:30 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=3936a1ee3935 | total_conn=1
+2026-09-13 15:58:51 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=3936a1ee3935
+2026-09-13 15:59:01 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (32 char)
+2026-09-13 15:59:36 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=f13507dacc9c | total_conn=1
+2026-09-13 15:59:47 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (34 char)
+2026-09-13 15:59:47 | INFO     | aira.rei.auto_extract | auto_extract.py:100 (_extract) | AUTO MEMORY tersimpan otomatis: ['nama_panggilan']
+2026-09-13 15:59:51 | WARNING  | aira.ws | ws_manager.py:45 (send) | WS SEND gagal (dibuang dari pool) | session=f13507dacc9c | 
+2026-09-13 15:59:52 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=f13507dacc9c | total_conn=1
+2026-09-13 15:59:53 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=f13507dacc9c
+2026-09-13 15:59:59 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (24 char)
+2026-09-13 16:00:04 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=f13507dacc9c | total_conn=1
+2026-09-13 16:00:09 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=f13507dacc9c
+2026-09-13 16:00:09 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=4f409728bab4 | total_conn=1
+2026-09-13 16:00:12 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=4f409728bab4
+2026-09-13 16:00:53 | ERROR    | aira.ws | ws.py:263 (chat_ws) | WS loop error tak terduga | session=f13507dacc9c
+Traceback (most recent call last):
+  File "D:\data\agent_ai\AIRA_ECOSYSTEM\api\routers\ws.py", line 119, in chat_ws
+    raw = await websocket.receive_json()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\data\agent_ai\.venv\Lib\site-packages\starlette\websockets.py", line 134, in receive_json
+    raise RuntimeError('WebSocket is not connected. Need to call "accept" first.')
+RuntimeError: WebSocket is not connected. Need to call "accept" first.
+2026-09-13 16:00:53 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=f13507dacc9c
+2026-09-13 16:01:01 | INFO     | aira.rei.auto_extract | auto_extract.py:100 (_extract) | AUTO MEMORY tersimpan otomatis: ['user_name']
+2026-09-13 16:01:51 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=f13507dacc9c | total_conn=1
+2026-09-13 16:02:33 | INFO     | aira.persona | engine.py:351 (apply_preset) | PERSONA PRESET APPLIED | preset_id=companion
+2026-09-13 16:02:37 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=f13507dacc9c
+2026-09-13 16:02:40 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (8 char)
+2026-09-13 16:02:43 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c9dff0ec4872 | total_conn=1
+2026-09-13 16:05:09 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (80 char)
+2026-09-13 16:06:38 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (37 char)
+2026-09-13 16:09:01 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c9dff0ec4872

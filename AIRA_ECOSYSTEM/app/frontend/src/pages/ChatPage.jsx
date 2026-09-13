@@ -5,14 +5,17 @@ import ChatInput from "../components/ChatInput.jsx";
 import VoiceControls from "../components/VoiceControls.jsx";
 import VoiceOverlay from "../components/VoiceOverlay.jsx";
 import LiveSteps from "../components/LiveSteps.jsx";
+import BootScreen from "../components/BootScreen.jsx";
 import { api } from "../api.js";
 import { useSessionsContext } from "../context/SessionsContext.jsx";
 import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { useVoiceCall } from "../hooks/useVoiceCall.js";
+import { buildGreeting } from "../utils/greeting.js";
 
 export default function ChatPage({ onOpenMenu }) {
-  const { sessions, activeId, setActiveId, loadSessions } = useSessionsContext();
+  const { sessions, activeId, setActiveId, loadSessions, sessionsReady } =
+    useSessionsContext();
 
   const {
     messages,
@@ -25,6 +28,8 @@ export default function ChatPage({ onOpenMenu }) {
     sendRaw,
     waitForConnection,
     registerVoiceCallHandlers,
+    persona,
+    personaReady,
   } = useChatRuntime();
 
   const [tools, setTools] = useState([]);
@@ -83,10 +88,20 @@ export default function ChatPage({ onOpenMenu }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  // FIX (Chat Session Lifecycle): jangan render ChatPage sampai sesi
+  // aktif ter-resolve (SessionsContext) DAN persona ter-load
+  // (ChatRuntimeContext). Ini titik "Ready" di lifecycle diagram -
+  // tidak ada blank screen, tidak butuh refresh. Semua hook di atas
+  // TETAP dipanggil sebelum early-return ini (Rules of Hooks).
+  if (!sessionsReady || !personaReady) {
+    return <BootScreen />;
+  }
+
   async function handleSend(text) {
     await sendMessage(text, {
       onNewSession: (newId) => {
         setActiveId(newId);
+        loadSessions?.();
       },
     });
   }
@@ -168,12 +183,25 @@ export default function ChatPage({ onOpenMenu }) {
           </p>
         )}
 
+        {/* FIX (Dynamic Greeting): greeting dibangun lokal dari Persona
+            + jam saat ini, HANYA muncul saat sesi belum punya pesan
+            sama sekali (sesi baru / pertama kali dibuka). Begitu
+            messages.length > 0, blok ini otomatis hilang dan tidak
+            pernah muncul lagi di sesi yang sama - bukan AI response,
+            tidak pernah memanggil backend/LLM. */}
         {!switching && messages.length === 0 && !loading && (
-          <p className="text-white/30 text-sm text-center mt-10 px-4">
-            Mulai percakapan baru, ketik{" "}
-            <span className="font-mono text-accent-light">/</span> untuk
-            pakai tool langsung, atau tekan mic untuk mulai sesi suara.
-          </p>
+          <div className="mt-6 px-1">
+            <MessageBubble
+              role="assistant"
+              content={buildGreeting(persona)}
+              isNew
+            />
+            <p className="text-white/30 text-xs text-center mt-3 px-4">
+              Ketik <span className="font-mono text-accent-light">/</span>{" "}
+              untuk pakai tool langsung, atau tekan mic untuk mulai sesi
+              suara.
+            </p>
+          </div>
         )}
 
         {!switching &&
