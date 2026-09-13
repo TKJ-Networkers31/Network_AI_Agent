@@ -534,3 +534,14 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-13 23:40:30 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
 2026-09-13 23:40:37 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
 2026-09-13 23:40:57 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-14 05:49:08 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-14 05:49:46 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-14 05:49:56 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 05:50:24 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 05:50:24 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c9dff0ec4872 | total_conn=1
+2026-09-14 05:50:29 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c9dff0ec4872
+2026-09-14 05:50:29 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 05:50:34 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 06:21:15 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 06:21:30 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 06:21:31 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1

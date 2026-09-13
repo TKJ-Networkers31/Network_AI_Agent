@@ -92,22 +92,6 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(payload),
       }),
-        connections: {
-          list: () => request("/connections"),
-          get: (sessionId) => request(`/connections/${encodeURIComponent(sessionId)}`),
-          open: (payload) =>
-            request("/connections/open", { method: "POST", body: JSON.stringify(payload) }),
-          close: (sessionId) =>
-            request("/connections/close", {
-              method: "POST",
-              body: JSON.stringify({ session_id: sessionId }),
-            }),
-          execute: (sessionId, command) =>
-            request("/connections/execute", {
-              method: "POST",
-              body: JSON.stringify({ session_id: sessionId, command }),
-            }),
-        },
     remove: (nickname) =>
       request(`/models/${encodeURIComponent(nickname)}`, { method: "DELETE" }),
     setDefault: (nickname) =>
@@ -124,6 +108,29 @@ export const api = {
       }),
     testConnection: (nickname) =>
       request(`/models/${encodeURIComponent(nickname)}/test-connection`, { method: "POST" }),
+  },
+
+  // FIX (P0 blank-screen bug): this block was previously nested INSIDE
+  // `models` above, so `api.connections` was `undefined`. Every caller
+  // (ConnectionIndicator.jsx, ConnectionPanel.jsx, AkaneWorkspace.jsx)
+  // does `api.connections.list()` / `.open()` / `.close()` / `.execute()`,
+  // which expects this to be a TOP-LEVEL key of `api`. Moved here as a
+  // sibling of `models`, `sessions`, `logs`, etc.
+  connections: {
+    list: () => request("/connections"),
+    get: (sessionId) => request(`/connections/${encodeURIComponent(sessionId)}`),
+    open: (payload) =>
+      request("/connections/open", { method: "POST", body: JSON.stringify(payload) }),
+    close: (sessionId) =>
+      request("/connections/close", {
+        method: "POST",
+        body: JSON.stringify({ session_id: sessionId }),
+      }),
+    execute: (sessionId, command) =>
+      request("/connections/execute", {
+        method: "POST",
+        body: JSON.stringify({ session_id: sessionId, command }),
+      }),
   },
 
   persona: {
