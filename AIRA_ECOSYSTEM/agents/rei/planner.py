@@ -1,27 +1,13 @@
 """
 agents/rei/planner.py — REI (Reasoning & Executive Intelligence).
-Port dari loop agen agent/core/engine.py::run() / engine_web.py::run_web(),
-dipersempit: REI cuma mikir & memutuskan, eksekusi tool fisik lewat
-callback tool_executor yang di-inject orchestrator (Dependency Inversion).
 
-FIX (Phase 0 Stabilization - token tracker):
-Sebelumnya usage dari call_model() cuma dikembalikan di response akhir
-(response.get("usage") - HANYA usage giliran TERAKHIR), padahal satu
-input user bisa memicu beberapa kali call_model() kalau ada tool-call
-berantai. Sekarang tiap kali call_model() sukses, usage-nya langsung
-ditambahkan ke memory.token_tracker (kumulatif per SESI, bukan cuma
-per panggilan API), sesuai perilaku sistem lama.
-
-FIX (anti-loop tool call):
-Sebelumnya planner cuma berhenti kalau tool_count >= MAX_TOOL_CALLS
-(10x) tanpa peduli apakah tool yang sama dipanggil berulang-ulang
-dengan argumen identik (mis. web_search gagal terus tapi tetap
-dicoba lagi sampai limit tercapai). Sekarang setiap signature
-(nama tool + argumen) dilacak per giliran - kalau sudah diulang
-lebih dari MAX_REPEATED_IDENTICAL_CALLS kali, tool call berikutnya
-dengan signature yang sama otomatis DILEWATI dan model diberi tahu
-supaya berhenti mencoba, bukan terus mengulang sampai limit keras
-tercapai.
+FIX (Phase 1.3 - Dynamic Persona Engine):
+System prompt SEKARANG selalu diambil lewat core.persona.get_engine().build(),
+BUKAN lagi core.persona.build_system_prompt() statis. REI tidak tahu apa-apa
+soal preset/slider persona - dia cuma menerima system_prompt jadi dan
+mengirimkannya apa adanya ke provider LLM (lihat docs/architecture.md,
+Layer 1 vs Layer 2). Ganti model aktif TIDAK memengaruhi bagian ini sama
+sekali.
 """
 
 import json
@@ -30,7 +16,7 @@ import logging
 
 from agents.rei.provider_client import call_model, EMPTY_RESPONSE_MARKER
 from agents.rei.auto_extract import extract_and_save_facts_async
-from core.persona import build_system_prompt
+from core.persona import get_engine
 from core.time_utils import time_context_block
 from core.memory import build_context_snippet
 
@@ -38,11 +24,6 @@ logger = logging.getLogger("aira.rei.planner")
 
 MAX_TOOL_CALLS = 10
 MAX_EMPTY_RESPONSE_RETRIES = 1
-
-# Kalau tool+argumen yang PERSIS SAMA dipanggil lebih dari ini kali
-# dalam satu giliran, panggilan berikutnya otomatis dilewati alih-alih
-# dieksekusi ulang. Ini mencegah loop (mis. web_search yang terus
-# gagal) menghabiskan seluruh MAX_TOOL_CALLS tanpa progres.
 MAX_REPEATED_IDENTICAL_CALLS = 2
 
 
@@ -54,12 +35,6 @@ class Planner:
         self.dangerous_tools = dangerous_tools or set()
 
     def run(self, user_input, memory, tool_executor, on_event=None):
-        """
-        on_event: Optional[Callable[[str, dict], None]] - dipanggil sync
-        untuk tiap event realtime (thinking/tool_start/tool_progress/
-        tool_finish). None (default) = tidak ada perubahan perilaku,
-        dipakai oleh alur REST lama yang tidak butuh streaming.
-        """
         def emit(event_type, payload):
             if on_event:
                 try:
@@ -72,7 +47,8 @@ class Planner:
 
         emit("thinking", {"message": "Menganalisis permintaan..."})
 
-        system_prompt = build_system_prompt(time_context_block() + build_context_snippet())
+        # FIX Phase 1.3: system prompt SELALU lewat Persona Engine.
+        system_prompt = get_engine().build(time_context_block() + build_context_snippet())
 
         response = self._call_with_retry(memory.get_messages(system_prompt))
 
@@ -86,9 +62,6 @@ class Planner:
         self._track_usage(memory, response)
 
         tool_count = 0
-        # Melacak berapa kali signature (nama tool + argumen) tertentu
-        # sudah dipanggil DALAM GILIRAN INI - direset tiap kali run()
-        # dipanggil ulang (giliran baru), bukan lintas sesi.
         call_signatures = {}
 
         while True:
@@ -134,9 +107,6 @@ class Planner:
 
                 category = self.tool_category.get(name, "tool")
 
-                # ------------------------------------------------------
-                # GUARD ANTI-LOOP: tool+argumen identik diulang terus
-                # ------------------------------------------------------
                 signature = f"{name}:{json.dumps(arguments, sort_keys=True, ensure_ascii=False)}"
                 call_signatures[signature] = call_signatures.get(signature, 0) + 1
 
@@ -170,7 +140,6 @@ class Planner:
                     )
                     tool_count += 1
                     continue
-                # ------------------------------------------------------
 
                 if name in self.dangerous_tools:
                     steps.append({"type": "confirmation_required", "name": name, "category": category, "arguments": arguments})

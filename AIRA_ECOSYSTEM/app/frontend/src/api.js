@@ -15,7 +15,6 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-  // session_id: null -> backend otomatis membuat sesi baru
   chat: (message, sessionId = null) =>
     request("/chat", {
       method: "POST",
@@ -30,10 +29,6 @@ export const api = {
 
   tokenUsage: () => request("/token-usage"),
 
-  // Manajemen model (list/select/default/fallback) sekarang HANYA lewat
-  // namespace `models` di bawah - dipakai ModelsPage. Endpoint lama
-  // /providers dan /providers/select sudah dihapus dari sini supaya
-  // tidak ada 2 cara berbeda untuk melakukan hal yang sama.
   credits: () => request("/providers/credits"),
 
   facts: () => request("/memory/facts"),
@@ -57,17 +52,13 @@ export const api = {
 
   sessions: {
     list: () => request("/sessions"),
-
     create: () => request("/sessions", { method: "POST" }),
-
     messages: (id) => request(`/sessions/${encodeURIComponent(id)}/messages`),
-
     rename: (id, title) =>
       request(`/sessions/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify({ title }),
       }),
-
     remove: (id) =>
       request(`/sessions/${encodeURIComponent(id)}`, {
         method: "DELETE",
@@ -90,50 +81,72 @@ export const api = {
       }),
   },
 
-  // Model Management System (REI Workspace) - satu-satunya tempat untuk
-  // list/create/update/delete/set-default/set-fallback/enable/test-connection.
   models: {
     list: () => request("/models"),
-
     get: (nickname) => request(`/models/${encodeURIComponent(nickname)}`),
-
     create: (payload) =>
-      request("/models", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      }),
-
+      request("/models", { method: "POST", body: JSON.stringify(payload) }),
     update: (nickname, payload) =>
       request(`/models/${encodeURIComponent(nickname)}`, {
         method: "PUT",
         body: JSON.stringify(payload),
       }),
-
     remove: (nickname) =>
-      request(`/models/${encodeURIComponent(nickname)}`, {
-        method: "DELETE",
-      }),
-
+      request(`/models/${encodeURIComponent(nickname)}`, { method: "DELETE" }),
     setDefault: (nickname) =>
-      request(`/models/${encodeURIComponent(nickname)}/set-default`, {
-        method: "POST",
-      }),
-
+      request(`/models/${encodeURIComponent(nickname)}/set-default`, { method: "POST" }),
     setFallback: (nickname, isFallback) =>
       request(`/models/${encodeURIComponent(nickname)}/set-fallback`, {
         method: "POST",
         body: JSON.stringify({ is_fallback: isFallback }),
       }),
-
     setEnabled: (nickname, enabled) =>
       request(`/models/${encodeURIComponent(nickname)}/enable`, {
         method: "POST",
         body: JSON.stringify({ enabled }),
       }),
-
     testConnection: (nickname) =>
-      request(`/models/${encodeURIComponent(nickname)}/test-connection`, {
+      request(`/models/${encodeURIComponent(nickname)}/test-connection`, { method: "POST" }),
+  },
+
+  // Dynamic Persona Engine (Phase 1.3) - identity, behavior slider, preset,
+  // dan live preview system prompt. TIDAK pernah memanggil LLM.
+  persona: {
+    get: () => request("/persona"),
+
+    updateProfile: (payload) =>
+      request("/persona/profile", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }),
+
+    updateBehavior: (payload) =>
+      request("/persona/behavior", {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }),
+
+    presets: () => request("/persona/presets"),
+
+    getPreset: (presetId) =>
+      request(`/persona/presets/${encodeURIComponent(presetId)}`),
+
+    applyPreset: (presetId) =>
+      request("/persona/presets/apply", {
         method: "POST",
+        body: JSON.stringify({ preset_id: presetId }),
+      }),
+
+    clonePreset: (presetId, newName) =>
+      request("/persona/presets/clone", {
+        method: "POST",
+        body: JSON.stringify({ preset_id: presetId, new_name: newName }),
+      }),
+
+    preview: (extraContext = "") =>
+      request("/persona/preview", {
+        method: "POST",
+        body: JSON.stringify({ extra_context: extraContext }),
       }),
   },
 };

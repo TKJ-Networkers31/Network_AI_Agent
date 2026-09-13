@@ -5,6 +5,7 @@ const NAV_ITEMS = [
   { id: "chat", label: "Chat", icon: "💬" },
   { id: "devices", label: "Devices", icon: "🖧" },
   { id: "models", label: "Models", icon: "🧩" },
+  { id: "persona", label: "Persona", icon: "🎭" }, 
   { id: "memory", label: "Memory", icon: "🧠" },
   { id: "logs", label: "Logs", icon: "📋" },
   { id: "settings", label: "Settings", icon: "⚙️" },
