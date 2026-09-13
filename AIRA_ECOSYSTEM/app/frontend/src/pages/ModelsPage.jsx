@@ -13,6 +13,7 @@ import { useToast } from "../components/Toast.jsx";
 const PROVIDER_OPTIONS = [
   { value: "ollama", label: "Ollama (lokal)" },
   { value: "openrouter", label: "OpenRouter" },
+  { value: "gemini", label: "Google Gemini" },
 ];
 
 const EMPTY_FORM = {
@@ -24,11 +25,14 @@ const EMPTY_FORM = {
   enabled: true,
 };
 
+const PROVIDER_COLORS = {
+  openrouter: "bg-fuchsia-500/10 text-fuchsia-300 border-fuchsia-500/20",
+  gemini: "bg-sky-500/10 text-sky-300 border-sky-500/20",
+  ollama: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
+};
+
 function ProviderBadge({ provider }) {
-  const color =
-    provider === "openrouter"
-      ? "bg-fuchsia-500/10 text-fuchsia-300 border-fuchsia-500/20"
-      : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20";
+  const color = PROVIDER_COLORS[provider] || "bg-white/5 text-white/50 border-white/10";
 
   return (
     <span className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded-full border ${color}`}>

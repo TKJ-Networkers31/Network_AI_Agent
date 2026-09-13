@@ -2,7 +2,12 @@
 core/model_registry.py — SQLite model registry untuk Phase 1.2 (Model
 Management System).
 
-Taruh file ini di: AIRA_ECOSYSTEM/core/model_registry.py
+Taruh file ini di: AIRA_ECOSYSTEM/core/model_registry.py (TIMPA file lama).
+
+Perubahan terbaru: VALID_PROVIDERS sekarang menyertakan "gemini" selain
+"openrouter" dan "ollama" — bukti bahwa menambah provider baru cukup nambah
+1 nama di sini + 2 adapter di agents/rei/provider_client.py, TIDAK perlu
+ubah skema tabel atau orchestrator sama sekali.
 
 Ini adalah lapisan CRUD MURNI (tidak tahu apa-apa soal HTTP/provider LLM
 apa pun) untuk tabel `model_registry`, disimpan di database/model_registry.db
@@ -34,7 +39,7 @@ _write_lock = threading.Lock()
 # Provider yang didukung saat ini. Menambah provider baru (mis. "anthropic",
 # "groq") CUKUP tambah nama di sini + adapter call/health-check di
 # agents/rei/provider_client.py - TIDAK perlu mengubah orchestrator/planner.
-VALID_PROVIDERS = {"openrouter", "ollama"}
+VALID_PROVIDERS = {"openrouter", "ollama", "gemini"}
 
 
 def _connect() -> sqlite3.Connection:

@@ -11,6 +11,14 @@ Provider config TIDAK LAGI hardcoded di file ini (PROVIDERS dict versi lama
 dihapus). Semua model diregistrasi di SQLite lewat core/model_registry.py
 dan dikelola oleh REI Model Manager (CRUD via api/routers/models.py).
 
+Provider yang didukung: "ollama", "openrouter", "gemini". OpenRouter dan
+Gemini sama-sama memakai format API "OpenAI-compatible" (endpoint
+/chat/completions, bentuk request/response identik), jadi keduanya berbagi
+satu fungsi _call_openai_compatible() — bedanya cuma endpoint default dan
+nama env var API key. Ini contoh nyata kenapa menambah provider baru TIDAK
+perlu mengubah orchestrator/planner: cukup tambah 1 baris di PROVIDER_ENV_KEYS
++ DEFAULT_ENDPOINTS, lalu daftarkan di _PROVIDER_CALLERS/_PROVIDER_HEALTH_CHECKS.
+
 File ini murni jadi EXECUTOR:
   1. Ambil model default dari registry -> panggil provider yang sesuai
      lewat adapter generik (_PROVIDER_CALLERS). Tambah provider baru
@@ -62,6 +70,21 @@ EMPTY_RESPONSE_MARKER = (
 # juga di model fallback (bukan masalah ketersediaan provider).
 FAILOVER_ERROR_TYPES = {"timeout", "connection", "rate_limit"}
 
+# Nama env var .env per provider - dibaca kalau kolom api_key di registry
+# dikosongkan. Tambah provider baru berbasis API key tinggal tambah 1 baris
+# di sini (dan di DEFAULT_ENDPOINTS kalau perlu endpoint default).
+PROVIDER_ENV_KEYS: dict[str, str] = {
+    "openrouter": "OPENROUTER_API",
+    "gemini": "GEMINI_API_KEY",
+}
+
+# Endpoint default per provider kalau kolom endpoint di registry dikosongkan.
+DEFAULT_ENDPOINTS: dict[str, str] = {
+    "ollama": "http://localhost:11434",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+}
+
 
 # ============================================================
 # HELPERS
@@ -70,17 +93,21 @@ FAILOVER_ERROR_TYPES = {"timeout", "connection", "rate_limit"}
 def _resolve_api_key(model: dict) -> Optional[str]:
     """
     Urutan resolusi API key: kolom api_key di registry dulu, kalau kosong
-    fallback ke .env (supaya kompatibel dengan setup lama yang menaruh
-    OPENROUTER_API di .env tanpa perlu isi ulang lewat UI).
+    fallback ke .env sesuai PROVIDER_ENV_KEYS (supaya kompatibel dengan
+    setup lama yang menaruh OPENROUTER_API di .env tanpa perlu isi ulang
+    lewat UI, dan berlaku sama untuk provider baru seperti Gemini).
     """
 
     if model.get("api_key"):
         return model["api_key"]
 
-    if model.get("provider") == "openrouter":
-        return os.getenv("OPENROUTER_API")
+    env_key = PROVIDER_ENV_KEYS.get(model.get("provider"))
 
-    return None
+    return os.getenv(env_key) if env_key else None
+
+
+def _resolve_endpoint(model: dict) -> str:
+    return (model.get("endpoint") or DEFAULT_ENDPOINTS.get(model["provider"], "")).rstrip("/")
 
 
 def _classify_request_exception(exc: Exception) -> str:
@@ -142,7 +169,7 @@ def _extract_ollama_usage(data: dict) -> Optional[dict]:
 # lalu daftarkan di _PROVIDER_CALLERS di bagian bawah file ini.
 
 def _call_ollama(model: dict, messages: list, tools: list) -> dict:
-    base_url = (model.get("endpoint") or "http://localhost:11434").rstrip("/")
+    base_url = _resolve_endpoint(model)
     url = f"{base_url}/api/chat"
 
     payload = {
@@ -178,27 +205,41 @@ def _call_ollama(model: dict, messages: list, tools: list) -> dict:
         }
 
 
-def _call_openrouter(model: dict, messages: list, tools: list) -> dict:
+def _call_openai_compatible(model: dict, messages: list, tools: list, provider_label: str) -> dict:
+    """
+    Dipakai bersama oleh OpenRouter DAN Gemini — keduanya menyediakan
+    endpoint bergaya OpenAI (/chat/completions, bentuk request/response
+    identik). Kalau nanti mau tambah provider lain yang juga OpenAI-
+    compatible (Groq, Together, DeepSeek, dst), cukup buat wrapper tipis
+    seperti _call_openrouter/_call_gemini di bawah, TANPA menulis ulang
+    logic HTTP-nya.
+    """
+
     api_key = _resolve_api_key(model)
 
     if not api_key:
+        env_key = PROVIDER_ENV_KEYS.get(model["provider"], "")
         return {
             "error": (
-                "API key OpenRouter belum diset (kolom api_key model atau "
-                ".env OPENROUTER_API)."
+                f"API key {provider_label} belum diset (kolom api_key model "
+                f"atau .env {env_key})."
             ),
             "error_type": "other",
         }
 
-    base_url = (model.get("endpoint") or "https://openrouter.ai/api/v1").rstrip("/")
+    base_url = _resolve_endpoint(model)
     url = f"{base_url}/chat/completions"
 
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost",
-        "X-Title": "AIRA Ecosystem",
     }
+
+    # Header tambahan khusus OpenRouter (opsional bagi provider lain,
+    # tidak masalah kalau diabaikan provider yang tidak butuh).
+    if model["provider"] == "openrouter":
+        headers["HTTP-Referer"] = "http://localhost"
+        headers["X-Title"] = "AIRA Ecosystem"
 
     payload = {"model": model["model_id"], "messages": messages, "tools": tools}
 
@@ -230,7 +271,7 @@ def _call_openrouter(model: dict, messages: list, tools: list) -> dict:
             except Exception:
                 pass
 
-        logger.error("call_openrouter gagal (%s): %s", error_type, detail)
+        logger.error("call_%s gagal (%s): %s", model["provider"], error_type, detail)
 
         return {
             "error": f"Tidak bisa menghubungi {base_url}: {detail}",
@@ -238,9 +279,18 @@ def _call_openrouter(model: dict, messages: list, tools: list) -> dict:
         }
 
 
+def _call_openrouter(model: dict, messages: list, tools: list) -> dict:
+    return _call_openai_compatible(model, messages, tools, provider_label="OpenRouter")
+
+
+def _call_gemini(model: dict, messages: list, tools: list) -> dict:
+    return _call_openai_compatible(model, messages, tools, provider_label="Gemini")
+
+
 _PROVIDER_CALLERS: dict[str, Callable[[dict, list, list], dict]] = {
     "ollama": _call_ollama,
     "openrouter": _call_openrouter,
+    "gemini": _call_gemini,
 }
 
 
@@ -250,7 +300,7 @@ _PROVIDER_CALLERS: dict[str, Callable[[dict, list, list], dict]] = {
 # Dipakai tombol "Test Connection" di UI. Return {"online": bool, "message": str}.
 
 def _health_check_ollama(model: dict) -> dict:
-    base_url = (model.get("endpoint") or "http://localhost:11434").rstrip("/")
+    base_url = _resolve_endpoint(model)
 
     try:
         response = requests.get(f"{base_url}/api/tags", timeout=5)
@@ -261,13 +311,17 @@ def _health_check_ollama(model: dict) -> dict:
         return {"online": False, "message": str(exc)}
 
 
-def _health_check_openrouter(model: dict) -> dict:
+def _health_check_openai_compatible(model: dict) -> dict:
+    """Dipakai bersama OpenRouter dan Gemini - keduanya mendukung GET
+    {endpoint}/models dengan Authorization Bearer untuk cek konektivitas
+    ringan tanpa memanggil model (tidak makan kuota generation)."""
+
     api_key = _resolve_api_key(model)
 
     if not api_key:
         return {"online": False, "message": "API key belum diset."}
 
-    base_url = (model.get("endpoint") or "https://openrouter.ai/api/v1").rstrip("/")
+    base_url = _resolve_endpoint(model)
 
     try:
         response = requests.get(
@@ -284,7 +338,8 @@ def _health_check_openrouter(model: dict) -> dict:
 
 _PROVIDER_HEALTH_CHECKS: dict[str, Callable[[dict], dict]] = {
     "ollama": _health_check_ollama,
-    "openrouter": _health_check_openrouter,
+    "openrouter": _health_check_openai_compatible,
+    "gemini": _health_check_openai_compatible,
 }
 
 
