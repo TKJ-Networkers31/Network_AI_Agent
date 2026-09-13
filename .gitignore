@@ -2,3 +2,5 @@
 .env
 data/
 logs/AIRA_ECOSYSTEM/.env
+AIRA_ECOSYSTEM/.env
+AIRA_ECOSYSTEM/models/

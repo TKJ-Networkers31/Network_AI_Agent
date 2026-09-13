@@ -373,3 +373,19 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-13 09:31:45 | ERROR    | aira.yuki.tts | tts_engine.py:31 (log_error) | ERROR | context=tts._get_kokoro | detail=Model Kokoro tidak ditemukan di D:\data\agent_ai\AIRA_ECOSYSTEM\models\kokoro\kokoro-v0_19.onnx - download dulu sesuai instruksi setup.
 2026-09-13 09:31:45 | WARNING  | aira.ws | ws.py:241 (chat_ws) | TTS gagal/tidak tersedia untuk session=e7a8664eff1b - jawaban tetap dikirim sebagai teks tanpa audio.
 2026-09-13 09:31:54 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=e7a8664eff1b
+2026-09-13 09:44:08 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 09:44:35 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 10:18:00 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 10:18:29 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=a64bacf7cfa0 | total_conn=1
+2026-09-13 10:18:31 | INFO     | aira.yuki.stt | stt_engine.py:74 (_get_model) | STT | loading model faster-whisper 'tiny' (compute_type=int8)...
+2026-09-13 10:18:35 | INFO     | aira.yuki.stt | stt_engine.py:85 (_get_model) | STT | model berhasil di-load.
+2026-09-13 10:18:40 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.00, confidence rendah): ' Terima kasih.'
+2026-09-13 10:18:47 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.06, confidence rendah): ' Bye'
+2026-09-13 10:18:52 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (13 char)
+2026-09-13 10:19:01 | INFO     | aira.yuki.tts | tts.py:82 (_get_kokoro) | TTS | model Kokoro berhasil dimuat dari D:\data\agent_ai\AIRA_ECOSYSTEM\models\kokoro
+2026-09-13 10:19:24 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=a64bacf7cfa0
+2026-09-13 10:19:32 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=9c95fffea0c6 | total_conn=1
+2026-09-13 10:19:40 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.39, confidence rendah): ' Bye!'
+2026-09-13 10:19:45 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (3 char)
+2026-09-13 10:19:57 | INFO     | aira.rei.auto_extract | auto_extract.py:100 (_extract) | AUTO MEMORY tersimpan otomatis: ['nama_panggilan']
+2026-09-13 10:20:11 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=9c95fffea0c6
