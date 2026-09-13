@@ -4,13 +4,23 @@ Text-to-speech via Kokoro (lokal/offline, ONNX runtime).
 Model file (kokoro-v0_19.onnx + voices.bin) HARUS didownload
 manual dan ditaruh di models/kokoro/ - lihat instruksi di
 requirements.txt. Modul ini gagal-aman: kalau model belum ada,
-speak() akan return False dan log error, bukan crash seluruh
-agent.
+speak()/synthesize_bytes() akan return False/None dan log error,
+bukan crash seluruh agent.
+
+FIX (Voice Call Mode - PWA):
+Menambahkan synthesize_bytes() yang mengembalikan audio sebagai bytes
+WAV, TANPA memutar lewat sounddevice. Dipakai oleh api/routers/ws.py
+untuk giliran suara dari PWA (audio dikirim ke browser client untuk
+diputar di sana), sedangkan speak() yang lama TETAP dipakai apa
+adanya oleh run_chat.py / agents/yuki/voice_io.py untuk mode
+terminal (audio diputar langsung di speaker laptop server).
 """
 
+import io
 from pathlib import Path
 
 import sounddevice as sd
+import soundfile as sf
 
 import logging
 
@@ -61,9 +71,12 @@ def _get_kokoro():
 def speak(text, voice=DEFAULT_VOICE, speed=1.0, on_start=None, on_end=None):
     """
     Sintesis teks jadi audio lalu langsung diputar (blocking sampai
-    selesai). on_start/on_end adalah callback opsional - dipakai
-    voice_io.py untuk pause/resume mic selama TTS bicara (barge-in
-    prevention).
+    selesai) LEWAT SPEAKER SERVER. Dipakai mode terminal
+    (run_chat.py, voice_io.py) - JANGAN dipakai untuk giliran PWA
+    karena akan bunyi di laptop server, bukan di browser user.
+
+    on_start/on_end adalah callback opsional - dipakai voice_io.py
+    untuk pause/resume mic selama TTS bicara (barge-in prevention).
 
     Return True kalau berhasil bicara, False kalau gagal (model
     belum ada / teks kosong / error runtime).
@@ -105,3 +118,43 @@ def speak(text, voice=DEFAULT_VOICE, speed=1.0, on_start=None, on_end=None):
             on_end()
 
         return False
+
+
+def synthesize_bytes(text, voice=DEFAULT_VOICE, speed=1.0):
+    """
+    Sama seperti speak(), tapi TIDAK memutar audio di server - hanya
+    mengembalikan bytes WAV siap kirim (mis. di-base64 lalu dikirim
+    lewat WebSocket ke browser untuk diputar di sisi client).
+
+    Dipakai SATU-SATUNYA oleh api/routers/ws.py untuk giliran suara
+    dari PWA. Return None kalau model belum ada / teks kosong / gagal
+    sintesis - pemanggil harus menangani None secara graceful (skip
+    audio, tetap kirim teks jawaban).
+    """
+
+    if not text or not text.strip():
+        return None
+
+    kokoro = _get_kokoro()
+
+    if kokoro is None:
+        return None
+
+    try:
+
+        samples, sample_rate = kokoro.create(
+            text,
+            voice=voice,
+            speed=speed,
+            lang="en-us",
+        )
+
+        buffer = io.BytesIO()
+        sf.write(buffer, samples, sample_rate, format="WAV")
+
+        return buffer.getvalue()
+
+    except Exception as exc:
+
+        log_error("tts.synthesize_bytes", exc)
+        return None

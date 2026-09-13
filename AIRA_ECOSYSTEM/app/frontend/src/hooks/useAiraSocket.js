@@ -16,6 +16,15 @@ function buildWsUrl(sessionId) {
  * connect sampai sessionId tersedia. status yang dikembalikan:
  * "idle" | "connecting" | "open" | "closed" - dipakai TopBar untuk
  * menampilkan badge Live/Menyambung/Terputus/Offline.
+ *
+ * FIX (Voice Call Mode):
+ * - sendRaw(payload): kirim objek JSON apa pun langsung ke socket
+ *   (dipakai voice call untuk {type:"voice_audio", ...}).
+ * - waitUntilOpen(timeoutMs): promise yang resolve begitu socket benar-
+ *   benar OPEN, reject kalau timeout. Dipakai voice call supaya mic
+ *   TIDAK mulai menangkap ucapan sebelum koneksi siap - ini yang
+ *   memperbaiki bug "Koneksi belum siap" yang muncul langsung setelah
+ *   user selesai bicara pada sesi/chat yang baru dibuka.
  */
 export function useAiraSocket(sessionId, { onEvent } = {}) {
   const [status, setStatus] = useState("idle");
@@ -130,5 +139,33 @@ export function useAiraSocket(sessionId, { onEvent } = {}) {
     return true;
   }, []);
 
-  return { status, send, isOpen: status === "open" };
+  const sendRaw = useCallback((payload) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(payload));
+    return true;
+  }, []);
+
+  const waitUntilOpen = useCallback((timeoutMs = 8000) => {
+    return new Promise((resolve, reject) => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        resolve();
+        return;
+      }
+
+      const startedAt = Date.now();
+
+      const interval = setInterval(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          clearInterval(interval);
+          resolve();
+        } else if (Date.now() - startedAt > timeoutMs) {
+          clearInterval(interval);
+          reject(new Error("Waktu menyambungkan ke server habis. Coba lagi."));
+        }
+      }, 100);
+    });
+  }, []);
+
+  return { status, send, sendRaw, waitUntilOpen, isOpen: status === "open" };
 }

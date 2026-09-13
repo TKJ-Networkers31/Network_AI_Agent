@@ -9,16 +9,11 @@ import { api } from "../api.js";
 import { useSessionsContext } from "../context/SessionsContext.jsx";
 import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
 import { useToast } from "../components/Toast.jsx";
-import { useVoice } from "../hooks/useVoice.js";
+import { useVoiceCall } from "../hooks/useVoiceCall.js";
 
 export default function ChatPage({ onOpenMenu }) {
-  const { sessions, activeId, setActiveId } = useSessionsContext();
+  const { sessions, activeId, setActiveId, loadSessions } = useSessionsContext();
 
-  // Koneksi WebSocket & seluruh state proses (loading/phase/liveTools)
-  // datang dari ChatRuntimeContext (dipasang di App.jsx level atas).
-  // ChatPage TIDAK membuat koneksi WebSocket sendiri - itu penting
-  // supaya wsStatus yang ditampilkan di TopBar konsisten dengan
-  // koneksi yang benar-benar dipakai untuk kirim/terima pesan.
   const {
     messages,
     loading,
@@ -27,18 +22,55 @@ export default function ChatPage({ onOpenMenu }) {
     switching,
     wsStatus,
     sendMessage,
+    sendRaw,
+    waitForConnection,
+    registerVoiceCallHandlers,
   } = useChatRuntime();
 
   const [tools, setTools] = useState([]);
+  const [voiceConnecting, setVoiceConnecting] = useState(false);
   const bottomRef = useRef(null);
-  const spokenCountRef = useRef(0);
 
   const { notify } = useToast();
 
-  const voice = useVoice({
-    onTranscript: (text) => handleSend(text),
+  // ------------------------------------------------------------
+  // VOICE CALL MODE (Whisper + Kokoro LOKAL via WebSocket, BUKAN Web
+  // Speech API browser). Mic capture + VAD ditangani hook ini; audio
+  // dikirim lewat sendRaw() ke WS yang sama dengan chat teks.
+  // ------------------------------------------------------------
+  const voiceCall = useVoiceCall({
+    onSendAudio: (payload) => {
+      const sent = sendRaw(payload);
+      if (!sent) {
+        notify({
+          type: "error",
+          message: "Koneksi terputus saat mengirim audio - menunggu tersambung ulang...",
+        });
+        voiceCall.cancelWaiting();
+      }
+    },
     notify,
   });
+
+  useEffect(() => {
+    registerVoiceCallHandlers({
+      playResponseAudio: voiceCall.playResponseAudio,
+      cancelWaiting: voiceCall.cancelWaiting,
+    });
+
+    return () => {
+      registerVoiceCallHandlers(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceCall.playResponseAudio, voiceCall.cancelWaiting]);
+
+  // Mic & speaker WAJIB mati kalau ChatPage ditinggalkan/ditutup.
+  useEffect(() => {
+    return () => {
+      voiceCall.endCall();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     api
@@ -51,24 +83,6 @@ export default function ChatPage({ onOpenMenu }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  useEffect(() => {
-    if (messages.length === 0) return;
-    if (messages.length <= spokenCountRef.current) return;
-
-    spokenCountRef.current = messages.length;
-
-    const last = messages[messages.length - 1];
-    if (last.role === "assistant" && last.content) {
-      voice.speak(last.content);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages]);
-
-  useEffect(() => {
-    spokenCountRef.current = messages.length;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId]);
-
   async function handleSend(text) {
     await sendMessage(text, {
       onNewSession: (newId) => {
@@ -77,15 +91,66 @@ export default function ChatPage({ onOpenMenu }) {
     });
   }
 
+  /**
+   * FIX bug "Koneksi belum siap - tidak bisa mengirim audio":
+   * sebelumnya voice call langsung mulai menangkap mic tanpa memastikan
+   * (1) sudah ada session_id, dan (2) WebSocket-nya benar-benar OPEN.
+   * Kalau user membuka "Chat baru" (activeId masih null) lalu langsung
+   * pencet mic, WS tidak pernah connect sama sekali - jadi begitu ada
+   * ucapan yang selesai (VAD deteksi jeda), pengiriman audio pasti gagal.
+   *
+   * Sekarang: sebelum mic mulai menangkap, kita PASTIKAN dulu sesi ada
+   * (buat via REST kalau belum ada) dan WS-nya open, baru voiceCall
+   * benar-benar dimulai. Kalau chat teks biasa tidak terpengaruh sama
+   * sekali oleh perubahan ini.
+   */
+  async function handleToggleVoiceCall() {
+    if (voiceCall.callActive) {
+      voiceCall.endCall();
+      return;
+    }
+
+    setVoiceConnecting(true);
+
+    try {
+      let sessionId = activeId;
+
+      if (!sessionId) {
+        const created = await api.sessions.create();
+        sessionId = created.id;
+        setActiveId(sessionId);
+        loadSessions?.();
+      }
+
+      await waitForConnection(8000);
+
+      voiceCall.startCall();
+    } catch (err) {
+      notify({
+        type: "error",
+        message: `Gagal memulai sesi suara: ${err.message || err}`,
+      });
+    } finally {
+      setVoiceConnecting(false);
+    }
+  }
+
   const activeTitle =
     sessions.find((s) => s.id === activeId)?.title || "Chat baru";
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      {voice.listening && (
+      {(voiceCall.callActive || voiceConnecting) && (
         <VoiceOverlay
-          interimText={voice.interimText}
-          onCancel={voice.stopListening}
+          connecting={voiceConnecting && !voiceCall.callActive}
+          interimText={voiceCall.listening ? "Mendengarkan..." : ""}
+          subtitle={voiceCall.subtitle}
+          speaking={voiceCall.speaking}
+          waitingReply={voiceCall.waitingReply}
+          onCancel={() => {
+            voiceCall.endCall();
+            setVoiceConnecting(false);
+          }}
         />
       )}
 
@@ -107,7 +172,7 @@ export default function ChatPage({ onOpenMenu }) {
           <p className="text-white/30 text-sm text-center mt-10 px-4">
             Mulai percakapan baru, ketik{" "}
             <span className="font-mono text-accent-light">/</span> untuk
-            pakai tool langsung, atau tekan mic untuk bicara.
+            pakai tool langsung, atau tekan mic untuk mulai sesi suara.
           </p>
         )}
 
@@ -138,12 +203,12 @@ export default function ChatPage({ onOpenMenu }) {
           tools={tools}
           voiceControls={
             <VoiceControls
-              supported={voice.supported}
-              listening={voice.listening}
-              speaking={voice.speaking}
-              speakEnabled={voice.speakEnabled}
-              onToggleListen={voice.toggleListening}
-              onToggleSpeak={voice.toggleSpeak}
+              supported={voiceCall.supported}
+              listening={voiceCall.callActive || voiceConnecting}
+              speaking={voiceCall.speaking}
+              speakEnabled={voiceCall.callActive}
+              onToggleListen={handleToggleVoiceCall}
+              onToggleSpeak={handleToggleVoiceCall}
             />
           }
         />

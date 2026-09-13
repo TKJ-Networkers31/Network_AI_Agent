@@ -1,3 +1,4 @@
 2026-09-13 00:54:48 | INFO     | aira.model_registry | model_registry.py:143 (_seed_defaults) | MODEL REGISTRY | seed default terisi (4 model).
 2026-09-13 00:59:28 | INFO     | aira.model_registry | model_registry.py:338 (delete_model) | MODEL DELETE | nickname=ollama-qwen3-4b
 2026-09-13 01:00:22 | INFO     | aira.model_registry | model_registry.py:364 (set_default) | MODEL SET DEFAULT | nickname=Nemotron 3 Super
+2026-09-13 08:52:52 | INFO     | aira.model_registry | model_registry.py:325 (update_model) | MODEL UPDATE | nickname=ollama-qwen3-1.7b fields=['provider', 'model_id', 'endpoint', 'enabled']

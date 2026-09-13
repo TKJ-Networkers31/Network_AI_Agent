@@ -344,3 +344,32 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-13 00:58:51 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
 2026-09-13 00:59:28 | INFO     | aira.model_registry | model_registry.py:338 (delete_model) | MODEL DELETE | nickname=ollama-qwen3-4b
 2026-09-13 01:00:22 | INFO     | aira.model_registry | model_registry.py:364 (set_default) | MODEL SET DEFAULT | nickname=Nemotron 3 Super
+2026-09-13 08:51:07 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 08:52:52 | INFO     | aira.model_registry | model_registry.py:325 (update_model) | MODEL UPDATE | nickname=ollama-qwen3-1.7b fields=['provider', 'model_id', 'endpoint', 'enabled']
+2026-09-13 08:56:12 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 09:11:56 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 09:12:01 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 09:12:05 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 09:13:29 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 09:13:31 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 09:13:34 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 09:21:14 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 09:21:46 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 09:21:55 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 09:22:09 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 09:24:38 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 09:25:11 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 09:25:15 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-13 09:30:03 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=a24c17439f37 | total_conn=1
+2026-09-13 09:30:14 | INFO     | aira.yuki.stt | stt_engine.py:44 (_get_model) | STT | loading model faster-whisper 'tiny' (compute_type=int8)...
+2026-09-13 09:30:19 | INFO     | aira.yuki.stt | stt_engine.py:55 (_get_model) | STT | model berhasil di-load.
+2026-09-13 09:30:21 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (6 char)
+2026-09-13 09:30:25 | ERROR    | aira.yuki.tts | tts_engine.py:31 (log_error) | ERROR | context=tts._get_kokoro | detail=Model Kokoro tidak ditemukan di D:\data\agent_ai\AIRA_ECOSYSTEM\models\kokoro\kokoro-v0_19.onnx - download dulu sesuai instruksi setup.
+2026-09-13 09:30:25 | WARNING  | aira.ws | ws.py:241 (chat_ws) | TTS gagal/tidak tersedia untuk session=a24c17439f37 - jawaban tetap dikirim sebagai teks tanpa audio.
+2026-09-13 09:30:35 | INFO     | aira.rei.auto_extract | auto_extract.py:100 (_extract) | AUTO MEMORY tersimpan otomatis: ['nickname']
+2026-09-13 09:30:42 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=a24c17439f37
+2026-09-13 09:31:23 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=e7a8664eff1b | total_conn=1
+2026-09-13 09:31:43 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (4 char)
+2026-09-13 09:31:45 | ERROR    | aira.yuki.tts | tts_engine.py:31 (log_error) | ERROR | context=tts._get_kokoro | detail=Model Kokoro tidak ditemukan di D:\data\agent_ai\AIRA_ECOSYSTEM\models\kokoro\kokoro-v0_19.onnx - download dulu sesuai instruksi setup.
+2026-09-13 09:31:45 | WARNING  | aira.ws | ws.py:241 (chat_ws) | TTS gagal/tidak tersedia untuk session=e7a8664eff1b - jawaban tetap dikirim sebagai teks tanpa audio.
+2026-09-13 09:31:54 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=e7a8664eff1b

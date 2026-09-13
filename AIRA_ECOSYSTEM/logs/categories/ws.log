@@ -217,3 +217,17 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-12 15:11:35 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
 2026-09-12 15:16:57 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
 2026-09-12 15:17:00 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 08:56:12 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 09:11:56 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 09:12:05 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 09:13:29 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 09:13:34 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 09:21:14 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 09:24:38 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 09:25:11 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 09:30:03 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=a24c17439f37 | total_conn=1
+2026-09-13 09:30:25 | WARNING  | aira.ws | ws.py:241 (chat_ws) | TTS gagal/tidak tersedia untuk session=a24c17439f37 - jawaban tetap dikirim sebagai teks tanpa audio.
+2026-09-13 09:30:42 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=a24c17439f37
+2026-09-13 09:31:23 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=e7a8664eff1b | total_conn=1
+2026-09-13 09:31:45 | WARNING  | aira.ws | ws.py:241 (chat_ws) | TTS gagal/tidak tersedia untuk session=e7a8664eff1b - jawaban tetap dikirim sebagai teks tanpa audio.
+2026-09-13 09:31:54 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=e7a8664eff1b

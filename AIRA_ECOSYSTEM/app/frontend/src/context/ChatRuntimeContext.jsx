@@ -42,13 +42,19 @@ function notifyBrowser(title, body) {
  *
  * PENTING: koneksi WebSocket dibuat SATU KALI di sini (lewat
  * useAiraSocket), TIDAK boleh dibuat lagi di ChatPage atau komponen
- * lain manapun untuk sessionId yang sama - kalau dibuat dua kali,
- * satu event dari server akan diproses dua kali (notifikasi dobel,
- * step tool dobel).
+ * lain manapun untuk sessionId yang sama.
  *
- * loading/phase/liveTools disimpan PER session_id (bukan state
- * tunggal/global), supaya proses di satu sesi tidak "bocor" ke UI
- * sesi lain yang sedang/baru dibuka.
+ * FIX (Voice Call Mode):
+ * - Event WS baru "transcript" (bubble user dari hasil STT server) dan
+ *   "transcript_empty" (beri tahu user + batalkan status menunggu di
+ *   voice call hook).
+ * - Event "response" bisa membawa "audio_base64" (giliran suara),
+ *   diteruskan ke voiceCallHandlersRef yang di-registrasi ChatPage.
+ * - sendRaw(payload): kirim payload mentah ke socket, dipakai voice call.
+ * - waitForConnection(): expose socket.waitUntilOpen supaya ChatPage bisa
+ *   menunggu WS benar-benar terbuka sebelum voice call mulai menangkap
+ *   audio - ini yang mencegah "Koneksi belum siap" muncul saat sesi
+ *   baru dibuka lalu langsung dipakai voice call.
  */
 export function ChatRuntimeProvider({ children, isOnChatPage }) {
   const { activeId, setActiveId, upsertSession } = useSessionsContext();
@@ -66,6 +72,12 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
 
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
+
+  const voiceCallHandlersRef = useRef(null);
+
+  const registerVoiceCallHandlers = useCallback((handlers) => {
+    voiceCallHandlersRef.current = handlers;
+  }, []);
 
   const messages = messagesBySession[activeId] || [];
   const loading = loadingBySession[activeId] || false;
@@ -88,19 +100,24 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
     });
   }, []);
 
-  // -----------------------------------------------------------------
-  // SATU-SATUNYA koneksi WebSocket untuk seluruh aplikasi, mengikuti
-  // activeId. Status koneksinya (idle/connecting/open/closed) di-expose
-  // lewat `wsStatus` di value provider, dikonsumsi TopBar via ChatPage.
-  // -----------------------------------------------------------------
   const socket = useAiraSocket(activeId, {
     onEvent: (evt) => {
       const sid = evt.data?.session_id || activeIdRef.current;
       if (!sid) return;
 
       if (evt.type === "ack") {
-        // tidak ada state khusus untuk ack, cukup diabaikan di sini
         return;
+      } else if (evt.type === "transcript") {
+        setMessagesForSession(sid, (prev) => [
+          ...prev,
+          { role: "user", content: evt.data.text },
+        ]);
+      } else if (evt.type === "transcript_empty") {
+        voiceCallHandlersRef.current?.cancelWaiting?.();
+        const isCurrentlyViewing = isOnChatPageRef.current && sid === activeIdRef.current;
+        if (isCurrentlyViewing) {
+          notify({ type: "warning", message: evt.data.message, duration: 2500 });
+        }
       } else if (evt.type === "thinking") {
         setPhaseBySession((prev) => ({ ...prev, [sid]: evt.data.message }));
       } else if (evt.type === "tool_start") {
@@ -140,6 +157,13 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
 
         const isCurrentlyViewing = isOnChatPageRef.current && sid === activeIdRef.current;
 
+        if (evt.data.audio_base64 !== undefined) {
+          voiceCallHandlersRef.current?.playResponseAudio?.(
+            evt.data.audio_base64,
+            evt.data.answer
+          );
+        }
+
         if (!isCurrentlyViewing) {
           markUnread(sid);
           notify({
@@ -153,6 +177,7 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
         setPhaseBySession((prev) => ({ ...prev, [sid]: null }));
         setLiveToolsBySession((prev) => ({ ...prev, [sid]: [] }));
         setLoadingBySession((prev) => ({ ...prev, [sid]: false }));
+        voiceCallHandlersRef.current?.cancelWaiting?.();
 
         const isCurrentlyViewing = isOnChatPageRef.current && sid === activeIdRef.current;
         if (!isCurrentlyViewing) {
@@ -260,6 +285,19 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
     [socket, upsertSession, notify, setMessagesForSession]
   );
 
+  const sendRaw = useCallback(
+    (payload) => {
+      if (!socket.isOpen) return false;
+      return socket.sendRaw(payload);
+    },
+    [socket]
+  );
+
+  const waitForConnection = useCallback(
+    (timeoutMs) => socket.waitUntilOpen(timeoutMs),
+    [socket]
+  );
+
   const value = {
     messages,
     loading,
@@ -268,6 +306,9 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
     switching,
     wsStatus: socket.status,
     sendMessage,
+    sendRaw,
+    waitForConnection,
+    registerVoiceCallHandlers,
     unreadSessionIds,
   };
 

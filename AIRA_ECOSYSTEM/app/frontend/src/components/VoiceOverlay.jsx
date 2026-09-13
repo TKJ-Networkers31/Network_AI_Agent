@@ -1,4 +1,20 @@
-export default function VoiceOverlay({ interimText, onCancel }) {
+export default function VoiceOverlay({ connecting, interimText, subtitle, speaking, waitingReply, onCancel }) {
+  const statusLabel = connecting
+    ? "Menyambungkan..."
+    : speaking
+    ? "AIRA menjawab..."
+    : waitingReply
+    ? "Memproses..."
+    : "Mendengarkan...";
+
+  const bodyText = connecting
+    ? "Menyiapkan sesi suara, tunggu sebentar."
+    : speaking
+    ? subtitle
+    : waitingReply
+    ? "Menunggu balasan AIRA."
+    : interimText || "Silakan bicara — otomatis terkirim setelah kamu berhenti sejenak.";
+
   return (
     <div className="fixed inset-0 z-[90] flex flex-col items-center justify-center bg-app/90 backdrop-blur-sm px-6">
       <div className="relative w-40 h-40 flex items-center justify-center mb-8">
@@ -27,16 +43,16 @@ export default function VoiceOverlay({ interimText, onCancel }) {
         </div>
       </div>
 
-      <p className="text-white font-medium mb-2">Mendengarkan...</p>
-      <p className="text-white/40 text-sm max-w-xs text-center min-h-[1.5rem]">
-        {interimText || "Silakan bicara — agent membalas otomatis setelah kamu selesai."}
+      <p className="text-white font-medium mb-2">{statusLabel}</p>
+      <p className="text-white/70 text-sm max-w-sm text-center min-h-[1.5rem] leading-relaxed px-2">
+        {bodyText}
       </p>
 
       <button
         onClick={onCancel}
         className="mt-8 px-5 py-2.5 rounded-full border border-border text-white/60 hover:text-white hover:border-red-400/40 text-sm transition"
       >
-        Batalkan
+        Akhiri sesi suara
       </button>
     </div>
   );
