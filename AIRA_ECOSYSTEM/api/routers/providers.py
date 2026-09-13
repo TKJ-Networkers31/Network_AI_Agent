@@ -1,42 +1,20 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
-from api.schemas import ProviderSelectRequest
-from agents.rei.provider_client import (
-    list_providers, get_active_provider, set_active_provider_key, get_openrouter_credits,
-)
+from agents.rei.provider_client import get_active_provider, get_openrouter_credits
 
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 
 
-@router.get("")
-def providers():
-    active_key, active_config = get_active_provider()
-    all_providers = list_providers()
-
-    return {
-        "active_key": active_key,
-        "providers": [
-            {"key": key, "label": cfg["label"], "type": cfg["type"]}
-            for key, cfg in all_providers.items()
-        ],
-    }
-
-
-@router.post("/select")
-def select(payload: ProviderSelectRequest):
-    result = set_active_provider_key(payload.key)
-
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
-
-    return result
-
-
 @router.get("/credits")
 def credits():
+    """
+    Saldo OpenRouter untuk model DEFAULT saat ini (diatur lewat halaman
+    Models). Endpoint list/select provider sudah dihapus dari sini -
+    lihat /api/models untuk manajemen model lengkap.
+    """
     _, active_config = get_active_provider()
 
-    if active_config["type"] != "openai":
-        return {"success": False, "error": "Provider aktif bukan API eksternal (tidak ada saldo)."}
+    if not active_config or active_config.get("type") != "openrouter":
+        return {"success": False, "error": "Provider aktif bukan OpenRouter (tidak ada saldo)."}
 
-    return get_openrouter_credits(active_config)
+    return get_openrouter_credits()

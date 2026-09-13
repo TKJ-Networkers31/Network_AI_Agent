@@ -1,6 +1,7 @@
 // AIRA_ECOSYSTEM/app/frontend/src/components/MessageBubble.jsx
 import { useState } from "react";
 import ToolStep from "./ToolStep.jsx";
+import Markdown from "./Markdown.jsx";
 
 function ProcessSteps({ steps }) {
   const [open, setOpen] = useState(false);
@@ -64,14 +65,14 @@ export default function MessageBubble({ role, content, steps, isNew }) {
         {!isUser && <ProcessSteps steps={steps} />}
 
         <div
-          className={`rounded-xl2 px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap break-words
+          className={`rounded-xl2 px-4 py-3 text-sm leading-relaxed break-words
             ${
               isUser
-                ? "bg-accent-gradient text-white"
+                ? "bg-accent-gradient text-white whitespace-pre-wrap"
                 : "bg-card border border-border text-white/90"
             }`}
         >
-          {content}
+          {isUser ? content : <Markdown content={content} />}
         </div>
       </div>
     </div>

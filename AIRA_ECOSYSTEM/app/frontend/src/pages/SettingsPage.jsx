@@ -1,80 +1,31 @@
 import { useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { api } from "../api.js";
-import { useToast } from "../components/Toast.jsx";
 
 export default function SettingsPage({ onOpenMenu }) {
-  const [providers, setProviders] = useState([]);
-  const [activeKey, setActiveKey] = useState(null);
   const [usage, setUsage] = useState(null);
   const [credits, setCredits] = useState(null);
-  const { notify } = useToast();
-
-  function load() {
-    api
-      .providers()
-      .then((res) => {
-        setProviders(res.providers);
-        setActiveKey(res.active_key);
-      })
-      .catch((e) => notify({ type: "error", message: e.message }));
-
-    api.tokenUsage().then(setUsage).catch(() => {});
-    api.credits().then(setCredits).catch(() => {});
-  }
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    api.tokenUsage().then(setUsage).catch(() => {});
+    api.credits().then(setCredits).catch(() => {});
   }, []);
-
-  async function handleSelect(key) {
-    try {
-      await api.selectProvider(key);
-      load();
-      notify({ type: "success", message: "Model aktif diganti.", duration: 2500 });
-    } catch (err) {
-      notify({ type: "error", message: err.message });
-    }
-  }
 
   return (
     <div>
       <TopBar
         title="Settings"
-        subtitle="Model aktif & pemakaian token"
+        subtitle="Pemakaian token & saldo provider"
         onMenuClick={onOpenMenu}
       />
 
-      <div className="bg-card border border-border rounded-xl2 p-5 mb-6">
-        <h3 className="font-semibold mb-4 text-white">Model / Provider Aktif</h3>
-        <div className="space-y-2">
-          {providers.map((p) => (
-            <label
-              key={p.key}
-              className={`flex items-center justify-between px-4 py-3 rounded-lg border cursor-pointer transition
-                ${
-                  p.key === activeKey
-                    ? "border-accent bg-accent/10"
-                    : "border-border hover:bg-white/5"
-                }`}
-            >
-              <div>
-                <div className="text-sm text-white/90">{p.label}</div>
-                <div className="text-[10px] uppercase tracking-wide text-white/40">
-                  {p.type}
-                </div>
-              </div>
-              <input
-                type="radio"
-                name="provider"
-                checked={p.key === activeKey}
-                onChange={() => handleSelect(p.key)}
-                className="accent-accent w-4 h-4"
-              />
-            </label>
-          ))}
-        </div>
+      <div className="bg-card border border-border rounded-xl2 p-4 mb-6 flex items-center gap-3">
+        <span className="text-lg">🧩</span>
+        <p className="text-sm text-white/60">
+          Mau ganti model aktif, atur fallback, atau cek status
+          online/offline model? Semua itu sekarang ada di halaman{" "}
+          <span className="text-accent-light font-medium">Models</span>.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -101,7 +52,7 @@ export default function SettingsPage({ onOpenMenu }) {
             </div>
           ) : (
             <p className="text-white/40 text-sm">
-              {credits?.error || "Provider aktif bukan API eksternal."}
+              {credits?.error || "Provider aktif (default) bukan API eksternal."}
             </p>
           )}
         </div>

@@ -1,6 +1,9 @@
 .venv
 .env
 data/
-logs/AIRA_ECOSYSTEM/.env
+logs/
+**/logs/
 AIRA_ECOSYSTEM/.env
-AIRA_ECOSYSTEM/models/
+AIRA_ECOSYSTEM/models/**
+*.onnx
+*.pt

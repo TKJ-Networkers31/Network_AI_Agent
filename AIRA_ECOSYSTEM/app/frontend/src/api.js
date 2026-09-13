@@ -1,7 +1,3 @@
-// Taruh file ini di: AIRA_ECOSYSTEM/app/frontend/src/api.js (TIMPA file lama)
-// Perubahan dari versi sebelumnya: menambahkan namespace `models` (Phase 1.2
-// - Model Management System). Namespace lain TIDAK diubah.
-
 const BASE = "/api";
 
 async function request(path, options = {}) {
@@ -34,14 +30,10 @@ export const api = {
 
   tokenUsage: () => request("/token-usage"),
 
-  providers: () => request("/providers"),
-
-  selectProvider: (key) =>
-    request("/providers/select", {
-      method: "POST",
-      body: JSON.stringify({ key }),
-    }),
-
+  // Manajemen model (list/select/default/fallback) sekarang HANYA lewat
+  // namespace `models` di bawah - dipakai ModelsPage. Endpoint lama
+  // /providers dan /providers/select sudah dihapus dari sini supaya
+  // tidak ada 2 cara berbeda untuk melakukan hal yang sama.
   credits: () => request("/providers/credits"),
 
   facts: () => request("/memory/facts"),
@@ -98,7 +90,8 @@ export const api = {
       }),
   },
 
-  // Phase 1.2 - Model Management System (REI Workspace)
+  // Model Management System (REI Workspace) - satu-satunya tempat untuk
+  // list/create/update/delete/set-default/set-fallback/enable/test-connection.
   models: {
     list: () => request("/models"),
 

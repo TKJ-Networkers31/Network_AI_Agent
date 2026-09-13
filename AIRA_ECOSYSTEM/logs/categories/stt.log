@@ -1,2 +1,12 @@
 2026-09-13 09:30:14 | INFO     | aira.yuki.stt | stt_engine.py:44 (_get_model) | STT | loading model faster-whisper 'tiny' (compute_type=int8)...
 2026-09-13 09:30:19 | INFO     | aira.yuki.stt | stt_engine.py:55 (_get_model) | STT | model berhasil di-load.
+2026-09-13 10:18:31 | INFO     | aira.yuki.stt | stt_engine.py:74 (_get_model) | STT | loading model faster-whisper 'tiny' (compute_type=int8)...
+2026-09-13 10:18:35 | INFO     | aira.yuki.stt | stt_engine.py:85 (_get_model) | STT | model berhasil di-load.
+2026-09-13 10:18:40 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.00, confidence rendah): ' Terima kasih.'
+2026-09-13 10:18:47 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.06, confidence rendah): ' Bye'
+2026-09-13 10:19:40 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.39, confidence rendah): ' Bye!'
+2026-09-13 12:25:25 | INFO     | aira.yuki.stt | stt_engine.py:74 (_get_model) | STT | loading model faster-whisper 'tiny' (compute_type=int8)...
+2026-09-13 12:25:28 | INFO     | aira.yuki.stt | stt_engine.py:85 (_get_model) | STT | model berhasil di-load.
+2026-09-13 12:25:36 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.22, confidence rendah): ' Ayo lah.'
+2026-09-13 12:30:13 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.02, confidence rendah): ' saya ingin cocoknya di bawah lu.'
+2026-09-13 12:30:24 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.02, confidence rendah): ' Tanya ini juga jadi bannung.'

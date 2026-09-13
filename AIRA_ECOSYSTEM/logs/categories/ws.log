@@ -231,3 +231,19 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-13 09:31:23 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=e7a8664eff1b | total_conn=1
 2026-09-13 09:31:45 | WARNING  | aira.ws | ws.py:241 (chat_ws) | TTS gagal/tidak tersedia untuk session=e7a8664eff1b - jawaban tetap dikirim sebagai teks tanpa audio.
 2026-09-13 09:31:54 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=e7a8664eff1b
+2026-09-13 10:18:29 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=a64bacf7cfa0 | total_conn=1
+2026-09-13 10:19:24 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=a64bacf7cfa0
+2026-09-13 10:19:32 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=9c95fffea0c6 | total_conn=1
+2026-09-13 10:20:11 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=9c95fffea0c6
+2026-09-13 11:20:19 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 11:32:45 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 11:32:49 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 11:46:11 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 11:47:08 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c1377722d051 | total_conn=1
+2026-09-13 11:47:11 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c1377722d051
+2026-09-13 11:47:24 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=21dd68ae2bde | total_conn=1
+2026-09-13 11:50:09 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=21dd68ae2bde
+2026-09-13 12:24:37 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=21dd68ae2bde | total_conn=1
+2026-09-13 12:24:46 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=21dd68ae2bde
+2026-09-13 12:25:23 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=b36aca49ed10 | total_conn=1
+2026-09-13 12:35:54 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=b36aca49ed10
