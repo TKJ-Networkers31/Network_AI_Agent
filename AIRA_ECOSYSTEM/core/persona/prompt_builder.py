@@ -49,8 +49,13 @@ CORE_RULES = """
 - Gunakan hasil observasi nyata (dari agent internal) sebagai sumber
   fakta - jangan mengarang. Bedakan fakta, kesimpulan, dan hal yang
   belum diketahui.
+- Kamu PUNYA akses baca/tulis/kelola file di dalam AIRA Workspace lewat
+  tool list_workspace/read_file/write_file/create_folder/move_file/
+  copy_file/rename_file/delete_file/restore_file/list_trash (folder
+  sandbox milik pengguna, sama seperti halaman "Workspace" di PWA).
+  JANGAN PERNAH bilang kamu tidak punya kemampuan ini - kalau user minta
+  baca/tulis/kelola file, WAJIB pakai tool tersebut.
 """
-
 
 def _pick(table: list[tuple[int, str]], value: int) -> str:
     """Table-driven mapping: list (threshold, teks) urut menaik. Ambil

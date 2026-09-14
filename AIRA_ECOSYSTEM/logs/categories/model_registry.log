@@ -6,3 +6,4 @@
 2026-09-13 16:12:21 | INFO     | aira.model_registry | model_registry.py:388 (set_fallback) | MODEL SET FALLBACK | nickname=ollama-qwen3-1.7b is_fallback=True
 2026-09-13 16:16:49 | INFO     | aira.model_registry | model_registry.py:275 (create_model) | MODEL CREATE | nickname=Gemini provider=ollama
 2026-09-13 16:17:00 | INFO     | aira.model_registry | model_registry.py:388 (set_fallback) | MODEL SET FALLBACK | nickname=Gemini is_fallback=True
+2026-09-14 20:23:06 | INFO     | aira.model_registry | model_registry.py:343 (delete_model) | MODEL DELETE | nickname=Gemini
