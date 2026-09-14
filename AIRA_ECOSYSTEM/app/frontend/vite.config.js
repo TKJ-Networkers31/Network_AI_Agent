@@ -6,9 +6,15 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Selama dev, request ke /api diteruskan ke FastAPI (port 8000)
-      // supaya tidak perlu urus CORS manual dari sisi kode React.
       "/api": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
+      "/host": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+      },
+      "/files": {
         target: "http://127.0.0.1:8000",
         changeOrigin: true,
       },

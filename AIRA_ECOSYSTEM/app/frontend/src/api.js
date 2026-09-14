@@ -14,6 +14,20 @@ async function request(path, options = {}) {
   return res.json();
 }
 
+async function rawRequest(path, options = {}) {
+  const res = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail || `Request gagal (${res.status})`);
+  }
+
+  return res.json();
+}
+
 export const api = {
   chat: (message, sessionId = null) =>
     request("/chat", {
@@ -170,5 +184,46 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ extra_context: extraContext }),
       }),
+  },
+   host: {
+    info: () => rawRequest("/host/info"),
+  },
+
+  workspace: {
+    tree: (path = "", maxDepth = 6) =>
+      rawRequest(`/files/tree?path=${encodeURIComponent(path)}&max_depth=${maxDepth}`),
+    read: (path) => rawRequest(`/files/read?path=${encodeURIComponent(path)}`),
+    write: (path, content, encoding = "utf-8") =>
+      rawRequest("/files/write", {
+        method: "POST",
+        body: JSON.stringify({ path, content, encoding }),
+      }),
+    mkdir: (path) =>
+      rawRequest("/files/mkdir", { method: "POST", body: JSON.stringify({ path }) }),
+    move: (source, destination) =>
+      rawRequest("/files/move", {
+        method: "POST",
+        body: JSON.stringify({ source, destination }),
+      }),
+    copy: (source, destination) =>
+      rawRequest("/files/copy", {
+        method: "POST",
+        body: JSON.stringify({ source, destination }),
+      }),
+    rename: (source, destination) =>
+      rawRequest("/files/rename", {
+        method: "POST",
+        body: JSON.stringify({ source, destination }),
+      }),
+    delete: (path) =>
+      rawRequest("/files/delete", { method: "DELETE", body: JSON.stringify({ path }) }),
+    restore: (trashId) =>
+      rawRequest("/files/restore", {
+        method: "POST",
+        body: JSON.stringify({ trash_id: trashId }),
+      }),
+    trashList: () => rawRequest("/files/trash"),
+    trashEmpty: () => rawRequest("/files/trash/empty", { method: "POST" }),
+    permissions: () => rawRequest("/files/permissions"),
   },
 };

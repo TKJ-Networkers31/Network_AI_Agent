@@ -2,6 +2,7 @@ import { useState } from "react";
 import Sidebar from "./components/Sidebar.jsx";
 import MobileNav from "./components/MobileNav.jsx";
 import ChatPage from "./pages/ChatPage.jsx";
+import WorkspacePage from "./pages/WorkspacePage.jsx";
 import DevicesPage from "./pages/DevicesPage.jsx";
 import AkaneWorkspace from "./pages/AkaneWorkspace.jsx";
 import ModelsPage from "./pages/ModelsPage.jsx";
@@ -17,6 +18,7 @@ import BootGate from "./components/boot/BootGate.jsx";
 
 const PAGES = {
   chat: ChatPage,
+  workspace: WorkspacePage,
   devices: DevicesPage,
   akane: AkaneWorkspace,
   models: ModelsPage,

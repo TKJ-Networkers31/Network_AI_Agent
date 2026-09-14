@@ -3,15 +3,15 @@
 
 const NAV_ITEMS = [
   { id: "chat", label: "Chat", icon: "💬" },
+  { id: "workspace", label: "Workspace", icon: "📁" },
   { id: "devices", label: "Devices", icon: "🖧" },
   { id: "akane", label: "AKANE", icon: "🔌" },
   { id: "models", label: "Models", icon: "🧩" },
-  { id: "persona", label: "Persona", icon: "🎭" }, 
+  { id: "persona", label: "Persona", icon: "🎭" },
   { id: "memory", label: "Memory", icon: "🧠" },
   { id: "logs", label: "Logs", icon: "📋" },
   { id: "settings", label: "Settings", icon: "⚙️" },
 ];
-
 export default function MobileNav({ active, onChange }) {
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-panel/95 backdrop-blur border-t border-border pb-[env(safe-area-inset-bottom)]">

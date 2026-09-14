@@ -9,10 +9,11 @@ import { useToast } from "./Toast.jsx";
 
 const NAV_ITEMS = [
   { id: "chat", label: "Chat", icon: "💬" },
+  { id: "workspace", label: "Workspace", icon: "📁" },
   { id: "devices", label: "Devices", icon: "🖧" },
   { id: "akane", label: "AKANE", icon: "🔌" },
   { id: "models", label: "Models", icon: "🧩" },
-  { id: "persona", label: "Persona", icon: "🎭" },   
+  { id: "persona", label: "Persona", icon: "🎭" },
   { id: "memory", label: "Memory", icon: "🧠" },
   { id: "logs", label: "Logs", icon: "📋" },
   { id: "settings", label: "Settings", icon: "⚙️" },
@@ -149,7 +150,9 @@ export default function Sidebar({ active, onChange, isOpen, onClose }) {
                       : "text-white/60 hover:text-white hover:bg-white/5"
                   }`}
               >
-                <span>{item.icon}</span>
+                <span className={item.id === "workspace" && isItemActive ? "text-pink-300" : ""}>
+                  {item.icon}
+                </span>
                 <span className="font-medium">{item.label}</span>
               </button>
             );
