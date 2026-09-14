@@ -13,6 +13,7 @@ import { SessionsProvider } from "./context/SessionsContext.jsx";
 import { ChatRuntimeProvider } from "./context/ChatRuntimeContext.jsx";
 import { ToastProvider } from "./components/Toast.jsx";
 import ConnectionIndicator from "./components/connection/ConnectionIndicator.jsx";
+import BootGate from "./components/boot/BootGate.jsx";
 
 const PAGES = {
   chat: ChatPage,
@@ -34,28 +35,30 @@ export default function App() {
     <ToastProvider>
       <SessionsProvider>
         <ChatRuntimeProvider isOnChatPage={active === "chat"}>
-          <div className="h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
-            <Sidebar
-              active={active}
-              onChange={setActive}
-              isOpen={drawerOpen}
-              onClose={() => setDrawerOpen(false)}
-            />
+          <BootGate>
+            <div className="h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
+              <Sidebar
+                active={active}
+                onChange={setActive}
+                isOpen={drawerOpen}
+                onClose={() => setDrawerOpen(false)}
+              />
 
-            <main className="flex-1 min-w-0 overflow-y-auto relative">
-              <div className="fixed top-3 right-3 z-30">
-                <ConnectionIndicator onClick={() => setActive("akane")} />
-              </div>
-
-              <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 h-full">
-                <div className="max-w-5xl mx-auto h-full flex flex-col">
-                  <Page onOpenMenu={() => setDrawerOpen(true)} />
+              <main className="flex-1 min-w-0 overflow-y-auto relative">
+                <div className="fixed top-3 right-3 z-30">
+                  <ConnectionIndicator onClick={() => setActive("akane")} />
                 </div>
-              </div>
-            </main>
 
-            <MobileNav active={active} onChange={setActive} />
-          </div>
+                <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 h-full">
+                  <div className="max-w-5xl mx-auto h-full flex flex-col">
+                    <Page onOpenMenu={() => setDrawerOpen(true)} />
+                  </div>
+                </div>
+              </main>
+
+              <MobileNav active={active} onChange={setActive} />
+            </div>
+          </BootGate>
         </ChatRuntimeProvider>
       </SessionsProvider>
     </ToastProvider>

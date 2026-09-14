@@ -1,0 +1,23 @@
+@keyframes aira-splash-fade {
+  0%   { opacity: 0; }
+  19%  { opacity: 1; }   /* fade in ~300ms dari total 1.6s */
+  81%  { opacity: 1; }
+  100% { opacity: 0; }   /* fade out ~300ms */
+}
+
+.aira-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0B1020;
+  animation: aira-splash-fade 1.6s ease-in-out forwards;
+}
+
+.aira-splash__image {
+  max-width: 60vw;
+  max-height: 60vh;
+  object-fit: contain;
+}

@@ -1,0 +1,110 @@
+@keyframes aira-boot-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@keyframes aira-boot-pulse-glow {
+  0%, 100% { opacity: 0.35; transform: scale(0.92); }
+  50% { opacity: 0.75; transform: scale(1.08); }
+}
+@keyframes aira-boot-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+.aira-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  background: #0B1020;
+}
+
+.aira-boot__emblem-wrap {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.aira-boot__emblem {
+  position: relative;
+  z-index: 1;
+  width: 72px;
+  height: 72px;
+  animation:
+    aira-boot-rotate 6s linear infinite,
+    aira-boot-breathe 2.4s ease-in-out infinite;
+}
+
+.aira-boot__glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.55) 0%, rgba(56, 189, 248, 0) 70%);
+  animation: aira-boot-pulse-glow 2.4s ease-in-out infinite;
+}
+
+.aira-boot__label {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.875rem;
+  letter-spacing: 0.02em;
+}
+
+/* FirstBoot (onboarding) - berbagi file ini sesuai struktur folder
+   yang diminta (hanya boot.css + splash.css di animations/). */
+@keyframes aira-firstboot-reveal {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.aira-firstboot {
+  position: fixed;
+  inset: 0;
+  z-index: 190;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  background: #0B1020;
+  padding: 2rem;
+  text-align: center;
+  animation: aira-firstboot-reveal 0.3s ease-out;
+}
+
+.aira-firstboot__image {
+  max-width: 70vw;
+  max-height: 40vh;
+  object-fit: contain;
+}
+
+.aira-firstboot__content h1 {
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.aira-firstboot__content p {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.875rem;
+  max-width: 26rem;
+  margin: 0 auto 1.5rem;
+}
+
+.aira-firstboot__button {
+  background: linear-gradient(90deg, #2563eb 0%, #06b6d4 100%);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding: 0.65rem 2rem;
+  border-radius: 0.75rem;
+  border: none;
+  cursor: pointer;
+}

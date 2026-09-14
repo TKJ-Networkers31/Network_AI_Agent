@@ -1,17 +1,19 @@
 {
-  "name": "Network AI Agent",
-  "short_name": "NetAgent",
-  "description": "Asisten AI untuk monitoring dan manajemen jaringan MikroTik.",
+  "name": "AIRA OS",
+  "short_name": "AIRA",
+  "description": "AIRA (Adaptive Intelligent Reasoning Assistant) — AI OS untuk monitoring dan manajemen jaringan.",
   "start_url": "/",
   "scope": "/",
   "id": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#0b0a14",
-  "theme_color": "#0b0a14",
+  "background_color": "#0B1020",
+  "theme_color": "#0B1020",
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/assets/brand/app-icon.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/brand/app-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/brand/app-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/assets/favicon/favicon-32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "/assets/favicon/favicon-16.png", "sizes": "16x16", "type": "image/png" }
   ]
 }
