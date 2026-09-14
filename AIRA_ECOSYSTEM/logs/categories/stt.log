@@ -10,3 +10,11 @@
 2026-09-13 12:25:36 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.22, confidence rendah): ' Ayo lah.'
 2026-09-13 12:30:13 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.02, confidence rendah): ' saya ingin cocoknya di bawah lu.'
 2026-09-13 12:30:24 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.02, confidence rendah): ' Tanya ini juga jadi bannung.'
+2026-09-14 13:46:48 | INFO     | aira.yuki.stt | stt_engine.py:74 (_get_model) | STT | loading model faster-whisper 'tiny' (compute_type=int8)...
+2026-09-14 13:46:53 | INFO     | aira.yuki.stt | stt_engine.py:85 (_get_model) | STT | model berhasil di-load.
+2026-09-14 13:47:02 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.07, confidence rendah): ' bagaimana coba Bandung hari ini?'
+2026-09-14 13:47:20 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.26, confidence rendah): ' bagaimana?'
+2026-09-14 13:47:20 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.26, confidence rendah): ' Cua cah, bando hari ini'
+2026-09-14 13:47:39 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.44, confidence rendah): ' Bagaimana kita bisa di sini?'
+2026-09-14 13:47:39 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.44, confidence rendah): ' Ya, anyer, masing yang bisa ada yang ini.'
+2026-09-14 13:47:39 | INFO     | aira.yuki.stt | stt_engine.py:150 (transcribe) | STT | segmen dibuang (avg_logprob=-1.44, confidence rendah): ' Saya sudah bisa ada yang sudah.'

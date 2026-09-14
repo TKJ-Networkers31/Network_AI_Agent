@@ -293,3 +293,41 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-13 16:12:36 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
 2026-09-13 23:31:48 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
 2026-09-13 23:32:07 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 05:49:56 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 05:50:24 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 05:50:24 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=c9dff0ec4872 | total_conn=1
+2026-09-14 05:50:29 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=c9dff0ec4872
+2026-09-14 05:50:29 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 05:50:34 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 06:21:15 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 06:21:30 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 06:21:31 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 06:59:28 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 08:03:17 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 08:03:32 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 08:19:16 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 08:25:17 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 08:33:32 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 08:36:51 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 10:01:26 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 10:14:47 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 10:30:35 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 10:31:12 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 10:52:15 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 10:52:22 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 10:52:24 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 10:52:31 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=2
+2026-09-14 10:52:57 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 10:58:35 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 11:02:05 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 11:24:52 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 13:43:57 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=1
+2026-09-14 13:44:01 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=2
+2026-09-14 13:44:12 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 13:44:15 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=43b9b84bb470 | total_conn=2
+2026-09-14 13:45:18 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 13:46:14 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=43b9b84bb470
+2026-09-14 13:46:32 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=a3b402e0c73f | total_conn=1
+2026-09-14 13:48:17 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=a3b402e0c73f
+2026-09-14 13:53:08 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=a3b402e0c73f | total_conn=1
+2026-09-14 20:22:35 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=a3b402e0c73f | total_conn=1
