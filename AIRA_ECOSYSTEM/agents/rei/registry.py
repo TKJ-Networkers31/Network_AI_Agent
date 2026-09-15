@@ -33,6 +33,7 @@ AKANE_DANGEROUS_TOOLS | HIKARI_DANGEROUS_TOOLS, REI belum diikutkan).
 from agents.rei import research_tools as rt
 from agents.rei import fs_tools as fs
 from core.memory import remember_fact, recall_facts, forget_fact
+from agents.rei import dio_tools as dio
 
 
 def recall(query: str) -> dict:
@@ -56,6 +57,7 @@ REI_TOOLS = {
     "delete_file": fs.delete_file,
     "restore_file": fs.restore_file,
     "list_trash": fs.list_trash,
+    "request_structured_input": dio.request_structured_input,
 }
 
 REI_TOOL_CATEGORY = {
@@ -74,6 +76,7 @@ REI_TOOL_CATEGORY = {
     "delete_file": "filesystem",
     "restore_file": "filesystem",
     "list_trash": "filesystem",
+    "request_structured_input": "interaction",
 }
 
 REI_TOOL_SCHEMAS = [
@@ -300,6 +303,90 @@ REI_TOOL_SCHEMAS = [
             "name": "list_trash",
             "description": "Menampilkan daftar file/folder yang ada di Trash workspace (hasil delete_file sebelumnya), lengkap dengan trash_id untuk restore_file().",
             "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+      {
+        "type": "function",
+        "function": {
+            "name": "request_structured_input",
+            "description": (
+                "WAJIB dipanggil SETIAP KALI informasi dari user KURANG, "
+                "AMBIGU, atau tidak cukup untuk menjalankan permintaan "
+                "dengan aman/akurat - misalnya nama device tidak "
+                "disebut, ada lebih dari satu pilihan yang masuk akal, "
+                "atau field wajib untuk suatu aksi belum diberikan user. "
+                "JANGAN PERNAH menjawab dengan menebak/mengasumsikan "
+                "nilai yang belum disebutkan user - panggil tool ini "
+                "supaya user diberi form/pilihan interaktif yang jelas. "
+                "Setelah memanggil tool ini, JANGAN menulis jawaban "
+                "teks panjang di giliran yang sama - cukup kalimat "
+                "pengantar singkat, karena antarmuka interaktif akan "
+                "ditampilkan otomatis ke user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "description": "Nama singkat maksud user, mis. 'create_folder', 'add_device', 'delete_firewall_rule'.",
+                    },
+                    "missing_fields": {
+                        "type": "array",
+                        "description": "Daftar field yang masih dibutuhkan dari user.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {"type": "string"},
+                                "label": {"type": "string"},
+                                "data_type": {
+                                    "type": "string",
+                                    "description": "string|number|boolean|date|time|file|choice",
+                                },
+                                "required": {"type": "boolean", "default": True},
+                                "placeholder": {"type": "string"},
+                                "helper_text": {"type": "string"},
+                                "options": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "value": {"type": "string"},
+                                            "label": {"type": "string"},
+                                        },
+                                        "required": ["value"],
+                                    },
+                                },
+                            },
+                            "required": ["key"],
+                        },
+                    },
+                    "choices": {
+                        "type": "array",
+                        "description": "Pilihan tingkat atas (kalau user perlu memilih satu dari beberapa opsi jelas), boleh dikosongkan.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "value": {"type": "string"},
+                                "label": {"type": "string"},
+                            },
+                            "required": ["value"],
+                        },
+                    },
+                    "danger": {
+                        "type": "boolean",
+                        "description": "True kalau aksi berpotensi merusak/tidak bisa dibatalkan (mis. hapus konfigurasi) - akan ditampilkan sebagai konfirmasi.",
+                        "default": False,
+                    },
+                    "needs_review": {
+                        "type": "boolean",
+                        "description": "True kalau user perlu meninjau data sebelum melanjutkan.",
+                        "default": False,
+                    },
+                    "title": {"type": "string", "description": "Judul singkat untuk ditampilkan di atas form."},
+                    "description": {"type": "string", "description": "Deskripsi singkat konteks permintaan."},
+                },
+                "required": ["intent"],
+            },
         },
     },
 ]

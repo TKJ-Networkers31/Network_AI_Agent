@@ -666,3 +666,17 @@ RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-14 22:38:55 | INFO     | aira.memory | memory.py:189 (_trim) | MEMORY TRIM | menghapus 2 pesan lama dari riwayat.
 2026-09-14 22:39:26 | INFO     | aira.rei.auto_extract | auto_extract.py:100 (_extract) | AUTO MEMORY tersimpan otomatis: ['preferred_illustration_format', 'diagram_style']
 2026-09-14 22:40:43 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=a128c68df6cb
+2026-09-15 22:47:52 | INFO     | aira | logger.py:224 (setup_logging) | LOGGING SETUP | console + aira.log + categories/ + logs.db
+2026-09-15 22:48:43 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=a128c68df6cb | total_conn=1
+2026-09-15 22:48:52 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=a128c68df6cb
+2026-09-15 22:48:57 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (4 char)
+2026-09-15 22:48:58 | INFO     | aira.rei.planner | planner.py:208 (_call_with_retry) | Provider balas kosong, mencoba ulang (1/1)...
+2026-09-15 22:49:04 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=5d09e44675a3 | total_conn=1
+2026-09-15 22:50:33 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (24 char)
+2026-09-15 22:50:46 | INFO     | aira.rei.planner | planner.py:208 (_call_with_retry) | Provider balas kosong, mencoba ulang (1/1)...
+2026-09-15 22:52:39 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (28 char)
+2026-09-15 22:53:18 | ERROR    | aira.connection_manager | connection_manager.py:146 (open_connection) | Gagal membuka koneksi ke 192.168.43.159: timed out
+2026-09-15 22:53:20 | INFO     | aira.rei.planner | planner.py:208 (_call_with_retry) | Provider balas kosong, mencoba ulang (1/1)...
+2026-09-15 23:32:27 | INFO     | aira.brain | brain.py:38 (think) | BRAIN | menerima input user (4 char)
+2026-09-15 23:32:29 | INFO     | aira.rei.planner | planner.py:208 (_call_with_retry) | Provider balas kosong, mencoba ulang (1/1)...
+2026-09-15 23:32:36 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=5d09e44675a3

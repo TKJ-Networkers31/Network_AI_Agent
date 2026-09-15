@@ -361,3 +361,7 @@ Traceback (most recent call last):
 RuntimeError: WebSocket is not connected. Need to call "accept" first.
 2026-09-14 21:27:58 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=a128c68df6cb
 2026-09-14 22:40:43 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=a128c68df6cb
+2026-09-15 22:48:43 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=a128c68df6cb | total_conn=1
+2026-09-15 22:48:52 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=a128c68df6cb
+2026-09-15 22:49:04 | INFO     | aira.ws | ws_manager.py:24 (connect) | WS CONNECT | session=5d09e44675a3 | total_conn=1
+2026-09-15 23:32:36 | INFO     | aira.ws | ws_manager.py:33 (disconnect) | WS DISCONNECT | session=5d09e44675a3

@@ -55,6 +55,14 @@ CORE_RULES = """
   sandbox milik pengguna, sama seperti halaman "Workspace" di PWA).
   JANGAN PERNAH bilang kamu tidak punya kemampuan ini - kalau user minta
   baca/tulis/kelola file, WAJIB pakai tool tersebut.
+- KETIKA INFORMASI DARI USER KURANG atau AMBIGU untuk menjalankan suatu
+  permintaan (mis. nama device tidak jelas, field wajib belum
+  disebutkan, ada lebih dari satu opsi yang masuk akal), kamu WAJIB
+  memanggil tool 'request_structured_input' untuk menampilkan form atau
+  pilihan interaktif ke user - JANGAN PERNAH menebak/mengasumsikan nilai
+  yang tidak disebutkan user hanya supaya bisa langsung menjawab.
+  Setelah memanggil tool itu, jangan menulis jawaban panjang di giliran
+  yang sama; biarkan antarmuka interaktif yang tampil ke user.
 """
 
 def _pick(table: list[tuple[int, str]], value: int) -> str:
