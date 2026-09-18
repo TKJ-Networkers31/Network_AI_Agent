@@ -11,7 +11,6 @@ import { useSessionsContext } from "../context/SessionsContext.jsx";
 import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { useVoiceCall } from "../hooks/useVoiceCall.js";
-import { buildGreeting } from "../utils/greeting.js";
 
 const QUICK_ACTIONS = [
   { label: "Create Image", icon: "✧" },
@@ -55,7 +54,6 @@ export default function ChatPage({ onOpenMenu }) {
     sendRaw,
     waitForConnection,
     registerVoiceCallHandlers,
-    persona,
     personaReady,
   } = useChatRuntime();
 
@@ -187,7 +185,9 @@ export default function ChatPage({ onOpenMenu }) {
             <span className="chat-empty-orb-core" />
           </div>
           <h1 className="chat-empty-title">Ready to create something new?</h1>
-          <p className="chat-empty-description">{buildGreeting(persona)}</p>
+          <p className="chat-empty-description">
+            Your AI workspace is ready. Ask anything, explore ideas, or start building.
+          </p>
 
           <div className="chat-quick-actions" aria-label="Quick actions">
             {QUICK_ACTIONS.map((action) => (
