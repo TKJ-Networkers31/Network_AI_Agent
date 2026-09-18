@@ -1,4 +1,4 @@
-// app/frontend/src/components/CopyButton.jsx  (FILE BARU)
+// app/frontend/src/components/CopyButton.jsx
 //
 // Tombol salin serbaguna. Tanpa `label` tampil sebagai tombol ikon bulat
 // (dipakai di aksi pesan); dengan `label` tampil sebagai tombol kecil

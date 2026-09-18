@@ -1,9 +1,4 @@
 // app/frontend/src/components/Sidebar.jsx
-// UI Redesign Sprint (Worker C) — visual refactor only. Same props,
-// same context hooks, same nav items (none removed) and same handlers
-// as before. Only markup/classes changed to the AIRA OS design system
-// (theme/colors.js, theme/radius.js) — floating rounded sidebar,
-// FEATURES / WORKSPACES sections, bottom user panel.
 
 import { useState } from "react";
 import { useSessionsContext } from "../context/SessionsContext.jsx";
@@ -33,17 +28,14 @@ function timeAgo(ts) {
 export default function Sidebar({ active, onChange, isOpen, onClose }) {
   const { sessions, activeId, setActiveId, startNewChat, renameSession, deleteSession } =
     useSessionsContext();
-  const { unreadSessionIds } = useChatRuntime();
-  const { notify } = useToast();
   const { unreadSessionIds, runningSessionIds } = useChatRuntime();
+  const { notify } = useToast();
 
   const [sessionsOpen, setSessionsOpen] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
-
-  
 
   function closeDrawer() {
     onClose?.();
@@ -182,6 +174,7 @@ export default function Sidebar({ active, onChange, isOpen, onClose }) {
                 const isEditing = editingId === s.id;
                 const isConfirming = confirmDeleteId === s.id;
                 const isUnread = unreadSessionIds.has(s.id);
+                const isRunning = runningSessionIds?.has(s.id);
 
                 return (
                   <div
@@ -227,7 +220,7 @@ export default function Sidebar({ active, onChange, isOpen, onClose }) {
                       <div className="flex items-center justify-between gap-2">
                         <span className="flex items-center gap-1.5 min-w-0">
                           {isUnread && <span className="shrink-0 w-1.5 h-1.5 rounded-pill bg-sakura" />}
-                          {runningSessionIds?.has(s.id) && (
+                          {isRunning && (
                             <span className="shrink-0 w-1.5 h-1.5 rounded-pill bg-cyan animate-pulse" title="Sedang diproses" />
                           )}
                           <span className="truncate">{s.title}</span>
