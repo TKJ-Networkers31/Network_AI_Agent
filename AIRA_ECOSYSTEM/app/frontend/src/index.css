@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -6,8 +8,28 @@ html, body, #root {
   height: 100%;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
 * {
   box-sizing: border-box;
+}
+
+/* Cegah auto-zoom di Safari iOS saat fokus input (butuh >=16px) */
+input, textarea, select {
+  font-size: 16px;
+}
+
+@media (min-width: 640px) {
+  input, textarea, select {
+    font-size: 14px;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -18,11 +40,11 @@ html, body, #root {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(56, 189, 248, 0.18);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(56, 189, 248, 0.32);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 @keyframes toast-in {
@@ -178,13 +200,12 @@ html, body, #root {
 
 /* ============================================================
    AIRA OS Redesign — additive CSS.
-   APPEND this block to the end of the existing
-   app/frontend/src/index.css. Nothing below removes or renames an
-   existing class — all current animations (mic-pulse, orb-ring,
-   thinking-dot, shimmer-text, etc.) stay exactly as they are.
+   Nothing below removes or renames an existing class — all current
+   animations (mic-pulse, orb-ring, thinking-dot, shimmer-text, etc.)
+   stay exactly as they are. Font @import moved to the top of this
+   file (CSS requires all @import statements to precede every other
+   rule, including @tailwind).
    ============================================================ */
-
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
 
 html, body {
   background: #070714;

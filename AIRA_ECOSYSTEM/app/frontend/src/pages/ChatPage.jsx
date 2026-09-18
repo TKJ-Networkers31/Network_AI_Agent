@@ -21,6 +21,7 @@ import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { useVoiceCall } from "../hooks/useVoiceCall.js";
 import { buildGreeting } from "../utils/greeting.js";
+import Hero from "../Hero.jsx";
 
 export default function ChatPage({ onOpenMenu }) {
   const { sessions, activeId, setActiveId, loadSessions, sessionsReady } =
@@ -192,18 +193,10 @@ export default function ChatPage({ onOpenMenu }) {
         )}
 
         {!switching && messages.length === 0 && !loading && (
-          <div className="mt-6 px-1">
-            <MessageBubble
-              role="assistant"
-              content={buildGreeting(persona)}
-              isNew
-            />
-            <p className="text-white/30 text-xs text-center mt-3 px-4">
-              Ketik <span className="font-mono text-accent-light">/</span>{" "}
-              untuk pakai tool langsung, atau tekan mic untuk mulai sesi
-              suara.
-            </p>
-          </div>
+          <Hero
+            greeting={buildGreeting(persona)}
+            onQuickPrompt={(text) => handleSend(text)}
+          />
         )}
 
         {!switching &&
