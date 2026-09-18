@@ -1,4 +1,0 @@
-2026-09-13 09:30:25 | ERROR    | aira.yuki.tts | tts_engine.py:31 (log_error) | ERROR | context=tts._get_kokoro | detail=Model Kokoro tidak ditemukan di D:\data\agent_ai\AIRA_ECOSYSTEM\models\kokoro\kokoro-v0_19.onnx - download dulu sesuai instruksi setup.
-2026-09-13 09:31:45 | ERROR    | aira.yuki.tts | tts_engine.py:31 (log_error) | ERROR | context=tts._get_kokoro | detail=Model Kokoro tidak ditemukan di D:\data\agent_ai\AIRA_ECOSYSTEM\models\kokoro\kokoro-v0_19.onnx - download dulu sesuai instruksi setup.
-2026-09-13 10:19:01 | INFO     | aira.yuki.tts | tts.py:82 (_get_kokoro) | TTS | model Kokoro berhasil dimuat dari D:\data\agent_ai\AIRA_ECOSYSTEM\models\kokoro
-2026-09-13 12:25:48 | INFO     | aira.yuki.tts | tts.py:82 (_get_kokoro) | TTS | model Kokoro berhasil dimuat dari D:\data\agent_ai\AIRA_ECOSYSTEM\models\kokoro

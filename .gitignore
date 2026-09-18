@@ -1,9 +1,94 @@
-.venv
+# =========================
+# Environment & Secrets
+# =========================
 .env
+.env.*
+!.env.example
+
+*.pem
+*.key
+*.secret
+credentials.json
+secrets/
+secrets.json
+
+# =========================
+# Python
+# =========================
+.venv/
+venv/
+env/
+
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Frontend / Node.js
+# =========================
+node_modules/
+**/node_modules/
+
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+dist/
+**/dist/
+build/
+coverage/
+.vite/
+
+# =========================
+# Runtime & Database
+# =========================
 data/
+**/data/
+
 logs/
 **/logs/
-AIRA_ECOSYSTEM/.env
-AIRA_ECOSYSTEM/models/**
-*.onnx
+
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# =========================
+# AI Models
+# =========================
+models/
+**/models/
+
 *.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+
+# =========================
+# Cache & Temporary
+# =========================
+.cache/
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+
+# =========================
+# Operating System
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# IDE
+# =========================
+.vscode/
+.idea/
+*.code-workspace
