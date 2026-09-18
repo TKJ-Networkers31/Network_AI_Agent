@@ -1,13 +1,22 @@
-// FIX (Optimalisasi DIO):
-// - sendDioSubmission diambil dari ChatRuntimeContext.
-// - resolvedInteractions (Set index pesan yang schema-nya sudah
-//   di-submit) mencegah form yang sama disubmit dua kali dalam satu
-//   sesi tampilan.
-// - handleInteractionSubmit menentukan cancelled dari style aksi yang
-//   ditekan (style "ghost" dipakai builder.py untuk semua aksi
-//   batal/tolak), membangun teks bubble ringkas, lalu memanggil
-//   sendDioSubmission - bukan sendMessage biasa.
-import { useEffect, useRef, useState } from "react";
+// AIRA_ECOSYSTEM/app/frontend/src/pages/ChatPage.jsx
+//
+// FIX (Optimalisasi Greeting):
+// - buildGreeting() sekarang dibungkus useMemo, key-nya `persona` saja.
+//   Sebelumnya dipanggil langsung di JSX setiap render (termasuk render
+//   yang dipicu state lain seperti loading/liveTools) - walau hasilnya
+//   deterministik per jam, pemanggilan berulang ini yang bikin greeting
+//   di Hero terasa "kedip"/berubah saat komponen re-render cepat
+//   (mis. saat liveTools streaming). Dengan useMemo, teks greeting HANYA
+//   dihitung ulang kalau object `persona` berubah (ganti profil/preset),
+//   bukan di setiap render.
+// - Tidak ada lagi pesan pembuka statis dari backend/LLM di sini - Hero
+//   murni client-side (tidak memanggil sendMessage/API apa pun), jadi
+//   user tidak pernah "dipaksa menyapa dulu" sebelum bisa chat normal.
+//
+// Sisanya (voice call mode, dio submission, tools slash-menu, dsb)
+// PERSIS seperti sebelumnya - tidak ada perubahan behavior lain.
+
+import { useEffect, useMemo, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import MessageBubble from "../components/MessageBubble.jsx";
 import ChatInput from "../components/ChatInput.jsx";
@@ -49,6 +58,11 @@ export default function ChatPage({ onOpenMenu }) {
   const bottomRef = useRef(null);
 
   const { notify } = useToast();
+
+  // FIX: dihitung sekali per perubahan `persona`, bukan tiap render -
+  // mencegah teks Hero berubah/kedip saat state chat lain (loading,
+  // liveTools) berubah selama render normal.
+  const greetingText = useMemo(() => buildGreeting(persona), [persona]);
 
   const voiceCall = useVoiceCall({
     onSendAudio: (payload) => {
@@ -194,7 +208,7 @@ export default function ChatPage({ onOpenMenu }) {
 
         {!switching && messages.length === 0 && !loading && (
           <Hero
-            greeting={buildGreeting(persona)}
+            greeting={greetingText}
             onQuickPrompt={(text) => handleSend(text)}
           />
         )}
