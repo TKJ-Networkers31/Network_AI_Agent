@@ -34,6 +34,14 @@
   .aira-gradient-text { background: linear-gradient(135deg, #f8fafc 10%, #d8b4fe 48%, #f472b6 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .aira-sakura-glow { box-shadow: 0 0 28px rgba(244,114,182,.16); }
   .aira-muted { color: #a1a1b5; }
+  .bg-panel { background: rgba(12, 12, 29, .78); }
+  .bg-card { background: linear-gradient(145deg, rgba(24, 20, 43, .82), rgba(14, 14, 31, .88)); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+  .border-border { border-color: rgba(255,255,255,.085); }
+  .bg-accent-gradient { background: linear-gradient(135deg, #8b5cf6 0%, #c084fc 46%, #f472b6 100%); }
+  .text-accent-light { color: #f0abfc; }
+  .bg-accent { background-color: #a78bfa; }
+  .shadow-accent\/20 { --tw-shadow-color: rgba(196, 132, 252, .20); box-shadow: 0 10px 30px var(--tw-shadow-color); }
+  .rounded-xl2 { border-radius: 20px; }
 }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
