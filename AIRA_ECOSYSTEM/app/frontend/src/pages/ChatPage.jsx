@@ -5,7 +5,7 @@ import ChatInput from "../components/ChatInput.jsx";
 import VoiceControls from "../components/VoiceControls.jsx";
 import VoiceOverlay from "../components/VoiceOverlay.jsx";
 import LiveSteps from "../components/LiveSteps.jsx";
-import BootScreen from "./BootScreen.jsx";
+import BootScreen from "../components/boot/BootScreen.jsx";
 import { api } from "../api.js";
 import { useSessionsContext } from "../context/SessionsContext.jsx";
 import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
