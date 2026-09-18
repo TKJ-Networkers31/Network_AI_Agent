@@ -43,6 +43,16 @@
   .shadow-accent\/20 { --tw-shadow-color: rgba(196, 132, 252, .20); box-shadow: 0 10px 30px var(--tw-shadow-color); }
   .rounded-xl2 { border-radius: 20px; }
 }
+
+/* AIRA OS shell refinements: presentation only; application behavior remains unchanged. */
+aside { background-image: linear-gradient(180deg, rgba(17, 17, 34, .94), rgba(7, 7, 20, .96)); }
+aside nav button { border: 1px solid transparent; }
+aside nav button:hover { border-color: rgba(244, 114, 182, .14); transform: translateX(2px); }
+aside nav button[class*="bg-accent-gradient"] { box-shadow: 0 8px 28px rgba(139, 92, 246, .18), inset 0 1px 0 rgba(255,255,255,.12); }
+aside > div:first-child { background: linear-gradient(135deg, rgba(255,255,255,.025), transparent); }
+aside .group { border: 1px solid transparent; }
+aside .group:hover { border-color: rgba(255,255,255,.06); }
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 999px; }
