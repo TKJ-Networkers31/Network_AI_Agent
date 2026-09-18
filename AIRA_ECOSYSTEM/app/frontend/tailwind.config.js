@@ -4,23 +4,32 @@ export default {
   theme: {
     extend: {
       colors: {
-        app: "#070b14",
-        panel: "#0c1220",
-        card: "#101a2c",
-        border: "rgba(148,197,255,0.10)",
+        app: "#070714",
+        panel: "#111122",
+        card: "#151528",
+        border: "rgba(255,255,255,0.08)",
         accent: {
-          DEFAULT: "#2563eb", // blue-600
-          light: "#38bdf8",   // sky-400
-          soft: "#1e3a8a",    // blue-900
+          DEFAULT: "#9F7AEA",
+          light: "#F472B6",
+          soft: "#5B3B78",
         },
+        sakura: "#F472B6",
+        cyan: "#60A5FA",
       },
       borderRadius: {
         xl2: "1rem",
+        panel: "1.25rem",
       },
       backgroundImage: {
-        "accent-gradient": "linear-gradient(90deg, #2563eb 0%, #06b6d4 100%)",
-        "hero-gradient":
-          "linear-gradient(135deg, #102341 0%, #0a1220 55%, #062033 100%)",
+        "accent-gradient": "linear-gradient(135deg, #9F7AEA 0%, #F472B6 100%)",
+        "hero-gradient": "radial-gradient(circle at 50% 0%, rgba(159,122,234,0.18), transparent 48%), linear-gradient(135deg, #111122 0%, #070714 62%, #180F24 100%)",
+      },
+      boxShadow: {
+        panel: "0 18px 60px rgba(0,0,0,0.28)",
+        sakura: "0 0 28px rgba(244,114,182,0.16)",
+      },
+      fontFamily: {
+        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
       },
     },
   },

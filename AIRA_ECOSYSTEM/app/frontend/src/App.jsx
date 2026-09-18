@@ -31,34 +31,50 @@ const PAGES = {
 export default function App() {
   const [active, setActive] = useState("chat");
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const Page = PAGES[active];
+  const Page = PAGES[active] || ChatPage;
 
   return (
     <ToastProvider>
       <SessionsProvider>
         <ChatRuntimeProvider isOnChatPage={active === "chat"}>
           <BootGate>
-            <div className="h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
-              <Sidebar
-                active={active}
-                onChange={setActive}
-                isOpen={drawerOpen}
-                onClose={() => setDrawerOpen(false)}
-              />
+            <div className="min-h-[100dvh] h-screen w-screen overflow-hidden overscroll-none bg-app text-white">
+              <div className="flex h-full">
+                <Sidebar
+                  active={active}
+                  onChange={setActive}
+                  isOpen={drawerOpen}
+                  onClose={() => setDrawerOpen(false)}
+                />
 
-              <main className="flex-1 min-w-0 overflow-y-auto relative">
-                <div className="fixed top-3 right-3 z-30">
-                  <ConnectionIndicator onClick={() => setActive("akane")} />
-                </div>
-
-                <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 h-full">
-                  <div className="max-w-5xl mx-auto h-full flex flex-col">
-                    <Page onOpenMenu={() => setDrawerOpen(true)} />
+                <main className="relative min-w-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_50%_0%,rgba(159,122,234,0.10),transparent_42%)]">
+                  <div className="sticky top-0 z-30 px-3 pt-3 sm:px-5 lg:px-7">
+                    <div className="aira-panel flex min-h-12 items-center justify-between gap-3 px-3 py-2 sm:px-4">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDrawerOpen(true)}
+                          className="aira-control rounded-full px-3 py-1.5 text-xs text-white/65 transition hover:bg-white/10 md:hidden"
+                          aria-label="Buka menu"
+                        >
+                          ☰
+                        </button>
+                        <span className="truncate text-xs font-medium text-white/60">AIRA OS</span>
+                        <span className="hidden rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-white/40 sm:inline-flex">AI Operating System</span>
+                      </div>
+                      <ConnectionIndicator onClick={() => setActive("akane")} />
+                    </div>
                   </div>
-                </div>
-              </main>
 
-              <MobileNav active={active} onChange={setActive} />
+                  <div className="min-h-full px-3 pb-24 pt-3 sm:px-5 sm:pb-8 lg:px-7">
+                    <div className="mx-auto flex min-h-full w-full max-w-[1100px] flex-col">
+                      <Page onOpenMenu={() => setDrawerOpen(true)} />
+                    </div>
+                  </div>
+                </main>
+
+                <MobileNav active={active} onChange={setActive} />
+              </div>
             </div>
           </BootGate>
         </ChatRuntimeProvider>
