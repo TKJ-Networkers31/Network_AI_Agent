@@ -3,6 +3,12 @@ api/main.py — entry point FastAPI untuk AIRA.
 
 Jalankan dari root AIRA_ECOSYSTEM/:
     uvicorn api.main:app --reload --port 8000
+
+FIX (Optimalisasi APCE):
+Menambahkan shutdown event yang memanggil ConnectionManager.shutdown() -
+sebelumnya method ini sudah ada tapi tidak pernah dipanggil siapa pun,
+sehingga channel SSH APCE tidak ditutup rapi saat server di-restart/
+reload (mis. lewat --reload saat development).
 """
 
 from pathlib import Path
@@ -17,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files
 from api.routers import ws
+from agents.akane.connection_manager import get_connection_manager
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -44,6 +51,11 @@ app.include_router(persona.router)
 app.include_router(connections.router)
 app.include_router(files.router)
 app.include_router(ws.router)
+
+
+@app.on_event("shutdown")
+def _shutdown_connections():
+    get_connection_manager().shutdown()
 
 
 @app.get("/api/health")

@@ -29,10 +29,17 @@ async function rawRequest(path, options = {}) {
 }
 
 export const api = {
-  chat: (message, sessionId = null) =>
+  // FIX (Optimalisasi DIO): parameter ke-3 opsional 'dioSubmission' -
+  // {schema_id, action_id, values, cancelled} - dikirim sebagai
+  // dio_submission ke backend saat user submit form/pilihan interaktif.
+  chat: (message, sessionId = null, dioSubmission = null) =>
     request("/chat", {
       method: "POST",
-      body: JSON.stringify({ message, session_id: sessionId }),
+      body: JSON.stringify({
+        message,
+        session_id: sessionId,
+        dio_submission: dioSubmission,
+      }),
     }),
 
   resetSession: (sessionId) =>
@@ -124,12 +131,6 @@ export const api = {
       request(`/models/${encodeURIComponent(nickname)}/test-connection`, { method: "POST" }),
   },
 
-  // FIX (P0 blank-screen bug): this block was previously nested INSIDE
-  // `models` above, so `api.connections` was `undefined`. Every caller
-  // (ConnectionIndicator.jsx, ConnectionPanel.jsx, AkaneWorkspace.jsx)
-  // does `api.connections.list()` / `.open()` / `.close()` / `.execute()`,
-  // which expects this to be a TOP-LEVEL key of `api`. Moved here as a
-  // sibling of `models`, `sessions`, `logs`, etc.
   connections: {
     list: () => request("/connections"),
     get: (sessionId) => request(`/connections/${encodeURIComponent(sessionId)}`),
@@ -185,7 +186,7 @@ export const api = {
         body: JSON.stringify({ extra_context: extraContext }),
       }),
   },
-   host: {
+  host: {
     info: () => rawRequest("/host/info"),
   },
 

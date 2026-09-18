@@ -7,30 +7,26 @@ tools/ssh/shell.py (PersistentShell / invoke_shell). REI dan
 network_tools TIDAK BOLEH memanggil paramiko atau tools/ssh/shell.py
 secara langsung - semua harus lewat ConnectionManager di file ini.
 
-Beda dengan tools/ssh/client.py (ssh_execute) yang lama:
-- client.py: connect -> exec_command -> (koneksi di-pool internal, tapi
-  TANPA shell interaktif) - TETAP dipakai apa adanya oleh modul lain
-  yang tidak disentuh Phase 2.2 ini (mis. get_system_info via SNMP tidak
-  tersentuh sama sekali).
-- connection_manager.py (BARU): satu invoke_shell() PERSISTEN dipakai
-  berulang untuk banyak command berurutan, session-nya terlihat dan bisa
-  dikontrol manual oleh user (lihat api/routers/connections.py dan
-  app/pages/AkaneWorkspace.jsx).
-
-Aturan keras:
-- Satu host (host:port:username) hanya boleh satu session aktif.
-- Maksimal MAX_CONCURRENT_SESSIONS session hidup bersamaan.
-- Command pada session yang sama diserialisasi (lock per session) -
-  tidak pernah membuka channel kedua untuk device yang sama.
-- Idle timeout otomatis menutup session yang tidak dipakai.
-- Auto-reconnect HANYA kalau transport terputus karena jaringan, TIDAK
-  PERNAH kalau user sudah menekan Close (status STATUS_CLOSED).
+FIX (Optimalisasi APCE):
+1. Race condition TOCTOU di open_connection(): sebelumnya cek
+   MAX_CONCURRENT_SESSIONS dilakukan DI DALAM lock, tapi shell.open()
+   (I/O lambat, blocking) dipanggil DI LUAR lock. Dua request
+   open_connection() untuk device BERBEDA yang datang bersamaan bisa
+   sama-sama lolos cek limit sebelum salah satu tercatat di
+   self._sessions, sehingga limit bisa terlampaui. Fix: slot direservasi
+   ke self._pending_hosts SAAT MASIH DALAM LOCK yang sama dengan
+   pengecekan limit, dilepas lagi di blok finally apa pun hasilnya.
+2. tools/ssh/shell.py::PersistentShell.execute() sekarang mengembalikan
+   dict {"output", "prompt_matched"} bukan string mentah - execute() di
+   sini diupdate untuk membaca bentuk baru itu dan menambahkan field
+   "warning" ke hasil kalau prompt_matched=False, supaya caller (REI/
+   LLM/UI) tahu output mungkin terpotong alih-alih diam-diam dianggap
+   sukses penuh.
 """
 
 import os
 import threading
 import time
-import logging
 from pathlib import Path
 from typing import Optional
 
@@ -64,6 +60,7 @@ class ConnectionManager:
     def __init__(self):
         self._sessions: dict[str, ConnectionSession] = {}
         self._host_index: dict[str, str] = {}  # "host:port:username" -> session_id
+        self._pending_hosts: set[str] = set()  # host_key sedang dibuka (reservasi slot)
         self._lock = threading.RLock()
         self._session_locks: dict[str, threading.Lock] = {}
 
@@ -131,47 +128,61 @@ class ConnectionManager:
                     return {"success": True, "session": session.to_dict(), "reused": True}
 
             active_count = sum(1 for s in self._sessions.values() if s.status != STATUS_CLOSED)
+            pending_count = len(self._pending_hosts)
 
-            if active_count >= MAX_CONCURRENT_SESSIONS:
+            # FIX: reservasi slot di sini, MASIH DALAM LOCK yang sama dengan
+            # pengecekan limit, sebelum shell.open() (I/O lambat) dipanggil
+            # di luar lock. `key` yang sudah pending untuk dirinya sendiri
+            # tidak dihitung dobel.
+            if key not in self._pending_hosts and (active_count + pending_count) >= MAX_CONCURRENT_SESSIONS:
                 return {
                     "success": False,
                     "error": f"Batas maksimal {MAX_CONCURRENT_SESSIONS} koneksi bersamaan tercapai.",
                 }
 
-        shell = PersistentShell()
+            self._pending_hosts.add(key)
 
         try:
-            shell.open(host=host, port=port, username=username, password=password)
-        except Exception as exc:
-            logger.error("Gagal membuka koneksi ke %s: %s", host, exc)
-            event_bus.publish(
-                "connection.error", agent="AKANE",
-                data={"host": host, "username": username, "error": str(exc)},
+            shell = PersistentShell()
+
+            try:
+                shell.open(host=host, port=port, username=username, password=password)
+            except Exception as exc:
+                logger.error("Gagal membuka koneksi ke %s: %s", host, exc)
+                event_bus.publish(
+                    "connection.error", agent="AKANE",
+                    data={"host": host, "username": username, "error": str(exc)},
+                )
+                return {"success": False, "error": str(exc)}
+
+            session_id = new_session_id()
+            session = ConnectionSession(
+                session_id=session_id, device_name=device_name,
+                host=host, port=port, username=username, shell=shell,
             )
-            return {"success": False, "error": str(exc)}
 
-        session_id = new_session_id()
-        session = ConnectionSession(
-            session_id=session_id, device_name=device_name,
-            host=host, port=port, username=username, shell=shell,
-        )
+            with self._lock:
+                self._sessions[session_id] = session
+                self._host_index[key] = session_id
 
-        with self._lock:
-            self._sessions[session_id] = session
-            self._host_index[key] = session_id
+            log_event(
+                logger, "INFO", f"Koneksi SSH persisten dibuka ke {host}",
+                category="connection_manager",
+                context={"session_id": session_id, "host": host, "username": username},
+            )
 
-        log_event(
-            logger, "INFO", f"Koneksi SSH persisten dibuka ke {host}",
-            category="connection_manager",
-            context={"session_id": session_id, "host": host, "username": username},
-        )
+            event_bus.publish(
+                "connection.opened", agent="AKANE",
+                data={"session_id": session_id, **session.to_dict()},
+            )
 
-        event_bus.publish(
-            "connection.opened", agent="AKANE",
-            data={"session_id": session_id, **session.to_dict()},
-        )
+            return {"success": True, "session": session.to_dict(), "reused": False}
 
-        return {"success": True, "session": session.to_dict(), "reused": False}
+        finally:
+            # Slot pending selalu dilepas apa pun hasilnya (sukses/gagal),
+            # supaya tidak "membocorkan" kuota MAX_CONCURRENT_SESSIONS.
+            with self._lock:
+                self._pending_hosts.discard(key)
 
     def open_connection_for_device(self, device_name: str) -> dict:
         device = self._resolve_device(device_name)
@@ -267,15 +278,36 @@ class ConnectionManager:
             session.status = STATUS_BUSY
 
             try:
-                output = session.shell.execute(command, timeout=timeout)
+                # FIX: shell.execute() sekarang mengembalikan dict
+                # {"output", "prompt_matched"} - lihat tools/ssh/shell.py.
+                exec_result = session.shell.execute(command, timeout=timeout)
+                output = exec_result["output"]
+                prompt_matched = exec_result["prompt_matched"]
+
                 session.touch()
 
                 event_bus.publish(
                     "connection.command", agent="AKANE", tool=session.device_name or session.host,
-                    data={"session_id": session_id, "command": command, "success": True},
+                    data={
+                        "session_id": session_id, "command": command,
+                        "success": True, "prompt_matched": prompt_matched,
+                    },
                 )
 
-                return {"success": True, "session_id": session_id, "command": command, "output": output}
+                result = {"success": True, "session_id": session_id, "command": command, "output": output}
+
+                if not prompt_matched:
+                    result["warning"] = (
+                        "Output mungkin terpotong: prompt RouterOS tidak terdeteksi "
+                        f"sebelum timeout ({timeout}s). Coba naikkan timeout atau "
+                        "jalankan ulang command ini."
+                    )
+                    logger.warning(
+                        "PROMPT TIDAK COCOK | session=%s command=%r - output "
+                        "kemungkinan terpotong.", session_id, command,
+                    )
+
+                return result
 
             except Exception as exc:
                 session.status = STATUS_ERROR
@@ -359,7 +391,8 @@ class ConnectionManager:
             event_bus.publish("connection.timeout", agent="AKANE", data={"session_id": session_id})
 
     def shutdown(self):
-        """Opsional dipanggil saat aplikasi shutdown - tutup semua session."""
+        """Dipanggil dari FastAPI shutdown event (lihat api/main.py) - tutup
+        semua session supaya channel SSH tidak menggantung saat restart/reload."""
         with self._lock:
             ids = list(self._sessions.keys())
 

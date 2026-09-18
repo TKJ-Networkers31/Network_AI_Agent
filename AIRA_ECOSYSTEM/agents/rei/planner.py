@@ -1,13 +1,17 @@
 """
 agents/rei/planner.py — REI (Reasoning & Executive Intelligence).
 
-FIX (Phase 1.3 - Dynamic Persona Engine):
-System prompt SEKARANG selalu diambil lewat core.persona.get_engine().build(),
-BUKAN lagi core.persona.build_system_prompt() statis. REI tidak tahu apa-apa
-soal preset/slider persona - dia cuma menerima system_prompt jadi dan
-mengirimkannya apa adanya ke provider LLM (lihat docs/architecture.md,
-Layer 1 vs Layer 2). Ganti model aktif TIDAK memengaruhi bagian ini sama
-sekali.
+FIX (Optimalisasi DIO - root cause "form tidak pernah tampil"):
+Sebelumnya, hasil tool 'request_structured_input' (berisi
+'interaction_schema') hanya ikut ke dalam 'result_preview' per-step
+(dipotong 400 karakter) - tidak ada jalur khusus yang membawanya keluar
+dari planner sebagai data terstruktur. Sekarang Planner.run() melacak
+'pending_interaction_schema' sepanjang giliran ini: begitu tool
+'request_structured_input' sukses, schema-nya disimpan, lalu disertakan
+di SETIAP titik return sebagai key 'interaction_schema' - mengalir ke
+core/orchestrator.py -> core/brain.py -> api/schemas.py::ChatResponse /
+event WebSocket "response", sampai akhirnya dirender frontend
+(MessageBubble.jsx).
 """
 
 import json
@@ -25,6 +29,8 @@ logger = logging.getLogger("aira.rei.planner")
 MAX_TOOL_CALLS = 10
 MAX_EMPTY_RESPONSE_RETRIES = 1
 MAX_REPEATED_IDENTICAL_CALLS = 2
+
+DIO_REQUEST_TOOL_NAME = "request_structured_input"
 
 
 class Planner:
@@ -45,9 +51,11 @@ class Planner:
         steps = []
         memory.add_user(user_input)
 
+        # FIX: dilacak sepanjang giliran ini, disertakan di setiap return.
+        pending_interaction_schema = None
+
         emit("thinking", {"message": "Menganalisis permintaan..."})
 
-        # FIX Phase 1.3: system prompt SELALU lewat Persona Engine.
         system_prompt = get_engine().build(time_context_block() + build_context_snippet())
 
         response = self._call_with_retry(memory.get_messages(system_prompt))
@@ -57,6 +65,7 @@ class Planner:
             return {
                 "answer": f"Terjadi error saat menghubungi model: {response['error']}",
                 "steps": steps, "token_usage": None, "error": True,
+                "interaction_schema": pending_interaction_schema,
             }
 
         self._track_usage(memory, response)
@@ -79,6 +88,7 @@ class Planner:
                     "token_usage": memory.token_tracker.last_usage,
                     "session_token_usage": memory.token_tracker.as_dict(),
                     "error": False,
+                    "interaction_schema": pending_interaction_schema,
                 }
 
             emit("thinking", {"message": f"Menggunakan {len(tool_calls)} tool..."})
@@ -93,6 +103,7 @@ class Planner:
                         "token_usage": memory.token_tracker.last_usage,
                         "session_token_usage": memory.token_tracker.as_dict(),
                         "error": False,
+                        "interaction_schema": pending_interaction_schema,
                     }
 
                 function = call.get("function", {})
@@ -160,6 +171,16 @@ class Planner:
 
                 tool_count += 1
 
+                # FIX: tangkap interaction_schema begitu request_structured_input
+                # sukses - inilah yang membuatnya bisa dikirim ke frontend
+                # lewat return value planner, alih-alih terkubur di result_preview.
+                if (
+                    name == DIO_REQUEST_TOOL_NAME
+                    and result.get("success")
+                    and result.get("interaction_schema")
+                ):
+                    pending_interaction_schema = result["interaction_schema"]
+
                 steps.append({
                     "type": "tool_call", "name": name, "category": category,
                     "arguments": arguments, "success": bool(result.get("success")),
@@ -186,6 +207,7 @@ class Planner:
                     "token_usage": memory.token_tracker.last_usage,
                     "session_token_usage": memory.token_tracker.as_dict(),
                     "error": True,
+                    "interaction_schema": pending_interaction_schema,
                 }
 
             self._track_usage(memory, response)

@@ -1,3 +1,12 @@
+// FIX (Optimalisasi DIO):
+// - sendDioSubmission diambil dari ChatRuntimeContext.
+// - resolvedInteractions (Set index pesan yang schema-nya sudah
+//   di-submit) mencegah form yang sama disubmit dua kali dalam satu
+//   sesi tampilan.
+// - handleInteractionSubmit menentukan cancelled dari style aksi yang
+//   ditekan (style "ghost" dipakai builder.py untuk semua aksi
+//   batal/tolak), membangun teks bubble ringkas, lalu memanggil
+//   sendDioSubmission - bukan sendMessage biasa.
 import { useEffect, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import MessageBubble from "../components/MessageBubble.jsx";
@@ -25,6 +34,7 @@ export default function ChatPage({ onOpenMenu }) {
     switching,
     wsStatus,
     sendMessage,
+    sendDioSubmission,
     sendRaw,
     waitForConnection,
     registerVoiceCallHandlers,
@@ -34,15 +44,11 @@ export default function ChatPage({ onOpenMenu }) {
 
   const [tools, setTools] = useState([]);
   const [voiceConnecting, setVoiceConnecting] = useState(false);
+  const [resolvedInteractions, setResolvedInteractions] = useState(() => new Set());
   const bottomRef = useRef(null);
 
   const { notify } = useToast();
 
-  // ------------------------------------------------------------
-  // VOICE CALL MODE (Whisper + Kokoro LOKAL via WebSocket, BUKAN Web
-  // Speech API browser). Mic capture + VAD ditangani hook ini; audio
-  // dikirim lewat sendRaw() ke WS yang sama dengan chat teks.
-  // ------------------------------------------------------------
   const voiceCall = useVoiceCall({
     onSendAudio: (payload) => {
       const sent = sendRaw(payload);
@@ -69,7 +75,6 @@ export default function ChatPage({ onOpenMenu }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voiceCall.playResponseAudio, voiceCall.cancelWaiting]);
 
-  // Mic & speaker WAJIB mati kalau ChatPage ditinggalkan/ditutup.
   useEffect(() => {
     return () => {
       voiceCall.endCall();
@@ -88,11 +93,6 @@ export default function ChatPage({ onOpenMenu }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  // FIX (Chat Session Lifecycle): jangan render ChatPage sampai sesi
-  // aktif ter-resolve (SessionsContext) DAN persona ter-load
-  // (ChatRuntimeContext). Ini titik "Ready" di lifecycle diagram -
-  // tidak ada blank screen, tidak butuh refresh. Semua hook di atas
-  // TETAP dipanggil sebelum early-return ini (Rules of Hooks).
   if (!sessionsReady || !personaReady) {
     return <BootScreen />;
   }
@@ -106,19 +106,27 @@ export default function ChatPage({ onOpenMenu }) {
     });
   }
 
-  /**
-   * FIX bug "Koneksi belum siap - tidak bisa mengirim audio":
-   * sebelumnya voice call langsung mulai menangkap mic tanpa memastikan
-   * (1) sudah ada session_id, dan (2) WebSocket-nya benar-benar OPEN.
-   * Kalau user membuka "Chat baru" (activeId masih null) lalu langsung
-   * pencet mic, WS tidak pernah connect sama sekali - jadi begitu ada
-   * ucapan yang selesai (VAD deteksi jeda), pengiriman audio pasti gagal.
-   *
-   * Sekarang: sebelum mic mulai menangkap, kita PASTIKAN dulu sesi ada
-   * (buat via REST kalau belum ada) dan WS-nya open, baru voiceCall
-   * benar-benar dimulai. Kalau chat teks biasa tidak terpengaruh sama
-   * sekali oleh perubahan ini.
-   */
+  function handleInteractionSubmit(index, actionId, values) {
+    const message = messages[index];
+    const schema = message?.interactionSchema;
+    if (!schema) return;
+
+    const action = (schema.actions || []).find((a) => a.id === actionId);
+    const cancelled = action ? action.style === "ghost" : false;
+    const displayText = cancelled ? "❌ Dibatalkan." : "📝 Form terkirim.";
+
+    setResolvedInteractions((prev) => {
+      const next = new Set(prev);
+      next.add(index);
+      return next;
+    });
+
+    sendDioSubmission(
+      { schema_id: schema.id, action_id: actionId, values, cancelled },
+      displayText
+    );
+  }
+
   async function handleToggleVoiceCall() {
     if (voiceCall.callActive) {
       voiceCall.endCall();
@@ -183,12 +191,6 @@ export default function ChatPage({ onOpenMenu }) {
           </p>
         )}
 
-        {/* FIX (Dynamic Greeting): greeting dibangun lokal dari Persona
-            + jam saat ini, HANYA muncul saat sesi belum punya pesan
-            sama sekali (sesi baru / pertama kali dibuka). Begitu
-            messages.length > 0, blok ini otomatis hilang dan tidak
-            pernah muncul lagi di sesi yang sama - bukan AI response,
-            tidak pernah memanggil backend/LLM. */}
         {!switching && messages.length === 0 && !loading && (
           <div className="mt-6 px-1">
             <MessageBubble
@@ -212,6 +214,11 @@ export default function ChatPage({ onOpenMenu }) {
               content={m.content}
               steps={m.steps}
               isNew={m.isNew}
+              interactionSchema={m.interactionSchema}
+              interactionResolved={resolvedInteractions.has(i)}
+              onSubmitInteraction={(actionId, values) =>
+                handleInteractionSubmit(i, actionId, values)
+              }
             />
           ))}
 

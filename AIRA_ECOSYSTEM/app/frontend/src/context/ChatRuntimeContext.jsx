@@ -1,341 +1,111 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import { api } from "../api.js";
-import { useSessionsContext } from "./SessionsContext.jsx";
-import { useToast } from "../components/Toast.jsx";
-import { useAiraSocket } from "../hooks/useAiraSocket.js";
+// AIRA_ECOSYSTEM/app/frontend/src/components/MessageBubble.jsx
+//
+// FIX (Optimalisasi DIO - root cause "form tidak pernah tampil"):
+// Sekarang menerima prop `interactionSchema` (Universal Interaction
+// Schema dari backend) + `interactionResolved` (sudah di-submit atau
+// belum) + `onSubmitInteraction`. Kalau schema ada dan belum resolved,
+// <Renderer> DIO dirender di atas/sebagai pengganti bubble teks kosong.
+import { useState } from "react";
+import ToolStep from "./ToolStep.jsx";
+import Markdown from "./Markdown.jsx";
+import Renderer from "./dio/Renderer.jsx";
 
-const ChatRuntimeContext = createContext(null);
+function ProcessSteps({ steps }) {
+  const [open, setOpen] = useState(false);
 
-const PENDING_KEY = "__new_session_pending__";
+  if (!steps || steps.length === 0) return null;
 
-function truncate(text, max) {
-  if (!text) return "";
-  return text.length > max ? `${text.slice(0, max)}…` : text;
+  const toolCallCount = steps.filter((s) => s.type === "tool_call").length;
+  const allOk = steps.every((s) => s.type !== "tool_call" || s.success);
+
+  const summary =
+    toolCallCount > 0
+      ? `${toolCallCount} tool${toolCallCount > 1 ? "s" : ""} digunakan`
+      : "Proses selesai";
+
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 text-xs text-white/50 hover:text-white/80 transition px-1 py-1"
+      >
+        <span
+          className={`inline-block w-1.5 h-1.5 rounded-full ${
+            allOk ? "bg-emerald-400" : "bg-amber-400"
+          }`}
+        />
+        <span>{summary}</span>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          className={`transition-transform ${open ? "rotate-180" : ""}`}
+          style={{ width: 12, height: 12 }}
+        >
+          <path
+            d="m6 9 6 6 6-6"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="mt-1.5 space-y-1.5">
+          {steps.map((step, i) => (
+            <ToolStep key={i} step={step} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
-function notifyBrowser(title, body) {
-  if (typeof window === "undefined" || !("Notification" in window)) return;
+export default function MessageBubble({
+  role,
+  content,
+  steps,
+  isNew,
+  interactionSchema,
+  interactionResolved,
+  onSubmitInteraction,
+}) {
+  const isUser = role === "user";
+  const hasInteraction = !isUser && Boolean(interactionSchema);
 
-  if (Notification.permission === "granted") {
-    new Notification(title, { body: truncate(body, 120) });
-  } else if (Notification.permission !== "denied") {
-    Notification.requestPermission().then((perm) => {
-      if (perm === "granted") {
-        new Notification(title, { body: truncate(body, 120) });
-      }
-    });
-  }
-}
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"} ${isNew ? "reveal-fade" : ""}`}>
+      <div className={`max-w-[88%] sm:max-w-[75%] ${isUser ? "" : "w-full"}`}>
+        {!isUser && <ProcessSteps steps={steps} />}
 
-/**
- * Provider ini dipasang di LEVEL APP (bukan di dalam ChatPage), supaya
- * state percakapan + koneksi WebSocket TIDAK ikut mati saat user
- * pindah ke halaman lain (Settings, Devices, dst). ChatPage jadi cuma
- * "jendela" yang menampilkan data dari sini, bukan pemilik datanya.
- *
- * FIX (Dynamic Greeting & Chat Session Lifecycle):
- * Persona profile sekarang di-load SEKALI di sini (bukan cuma di dalam
- * PersonaPage), supaya greeting dinamis di ChatPage bisa dibangun
- * sebelum chat dirender - lihat components/BootScreen.jsx dan
- * utils/greeting.js. Ini TIDAK memanggil LLM sama sekali (murni GET
- * /api/persona), jadi tidak menyentuh Provider Client/Model Registry.
- */
-export function ChatRuntimeProvider({ children, isOnChatPage }) {
-  const { activeId, setActiveId, upsertSession } = useSessionsContext();
-  const { notify } = useToast();
+        {hasInteraction && !interactionResolved && (
+          <div className="mb-2">
+            <Renderer schema={interactionSchema} onSubmitAction={onSubmitInteraction} />
+          </div>
+        )}
 
-  const [messagesBySession, setMessagesBySession] = useState({});
-  const [loadingBySession, setLoadingBySession] = useState({});
-  const [phaseBySession, setPhaseBySession] = useState({});
-  const [liveToolsBySession, setLiveToolsBySession] = useState({});
-  const [switching, setSwitching] = useState(false);
-  const [unreadSessionIds, setUnreadSessionIds] = useState(() => new Set());
+        {hasInteraction && interactionResolved && (
+          <div className="mb-2 flex items-center gap-2 text-xs text-white/40 italic px-1">
+            <span>✓</span>
+            <span>Form sudah dikirim.</span>
+          </div>
+        )}
 
-  const [persona, setPersona] = useState(null);
-  const [personaReady, setPersonaReady] = useState(false);
-
-  const isOnChatPageRef = useRef(isOnChatPage);
-  isOnChatPageRef.current = isOnChatPage;
-
-  const activeIdRef = useRef(activeId);
-  activeIdRef.current = activeId;
-
-  const voiceCallHandlersRef = useRef(null);
-
-  const registerVoiceCallHandlers = useCallback((handlers) => {
-    voiceCallHandlersRef.current = handlers;
-  }, []);
-
-  const messages = messagesBySession[activeId] || [];
-  const loading = loadingBySession[activeId] || false;
-  const phase = phaseBySession[activeId] || null;
-  const liveTools = liveToolsBySession[activeId] || [];
-
-  const setMessagesForSession = useCallback((sessionId, updater) => {
-    setMessagesBySession((prev) => {
-      const current = prev[sessionId] || [];
-      const next = typeof updater === "function" ? updater(current) : updater;
-      return { ...prev, [sessionId]: next };
-    });
-  }, []);
-
-  const markUnread = useCallback((sessionId) => {
-    setUnreadSessionIds((prev) => {
-      const next = new Set(prev);
-      next.add(sessionId);
-      return next;
-    });
-  }, []);
-
-  // Persona di-load sekali di boot app. Kegagalan tetap men-set
-  // personaReady=true (fallback ke "AIRA" tanpa nama user) supaya app
-  // tidak macet selamanya di BootScreen kalau backend persona error.
-  useEffect(() => {
-    let cancelled = false;
-
-    api.persona
-      .get()
-      .then((res) => {
-        if (!cancelled) setPersona(res.profile);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setPersonaReady(true);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const socket = useAiraSocket(activeId, {
-    onEvent: (evt) => {
-      const sid = evt.data?.session_id || activeIdRef.current;
-      if (!sid) return;
-
-      if (evt.type === "ack") {
-        return;
-      } else if (evt.type === "transcript") {
-        setMessagesForSession(sid, (prev) => [
-          ...prev,
-          { role: "user", content: evt.data.text },
-        ]);
-      } else if (evt.type === "transcript_empty") {
-        voiceCallHandlersRef.current?.cancelWaiting?.();
-        const isCurrentlyViewing = isOnChatPageRef.current && sid === activeIdRef.current;
-        if (isCurrentlyViewing) {
-          notify({ type: "warning", message: evt.data.message, duration: 2500 });
-        }
-      } else if (evt.type === "thinking") {
-        setPhaseBySession((prev) => ({ ...prev, [sid]: evt.data.message }));
-      } else if (evt.type === "tool_start") {
-        setPhaseBySession((prev) => ({ ...prev, [sid]: null }));
-        setLiveToolsBySession((prev) => ({
-          ...prev,
-          [sid]: [
-            ...(prev[sid] || []),
-            { type: "tool_call", name: evt.data.name, category: evt.data.category, success: null },
-          ],
-        }));
-      } else if (evt.type === "tool_finish") {
-        setLiveToolsBySession((prev) => ({
-          ...prev,
-          [sid]: (prev[sid] || []).map((s) =>
-            s.name === evt.data.name && s.success === null
-              ? { ...s, success: evt.data.success, duration: evt.data.duration }
-              : s
-          ),
-        }));
-      } else if (evt.type === "response") {
-        setPhaseBySession((prev) => ({ ...prev, [sid]: null }));
-        setLiveToolsBySession((prev) => ({ ...prev, [sid]: [] }));
-        setLoadingBySession((prev) => ({ ...prev, [sid]: false }));
-
-        setMessagesForSession(sid, (prev) => [
-          ...prev,
-          { role: "assistant", content: evt.data.answer, steps: evt.data.steps, isNew: true },
-        ]);
-
-        const now = Date.now() / 1000;
-        upsertSession({
-          id: evt.data.session_id,
-          title: evt.data.session_title,
-          updated_at: now,
-        });
-
-        const isCurrentlyViewing = isOnChatPageRef.current && sid === activeIdRef.current;
-
-        if (evt.data.audio_base64 !== undefined) {
-          voiceCallHandlersRef.current?.playResponseAudio?.(
-            evt.data.audio_base64,
-            evt.data.answer
-          );
-        }
-
-        if (!isCurrentlyViewing) {
-          markUnread(sid);
-          notify({
-            type: "success",
-            message: `AIRA selesai menjawab: "${truncate(evt.data.answer, 60)}"`,
-            duration: 5000,
-          });
-          notifyBrowser("AIRA selesai menjawab", evt.data.answer);
-        }
-      } else if (evt.type === "error") {
-        setPhaseBySession((prev) => ({ ...prev, [sid]: null }));
-        setLiveToolsBySession((prev) => ({ ...prev, [sid]: [] }));
-        setLoadingBySession((prev) => ({ ...prev, [sid]: false }));
-        voiceCallHandlersRef.current?.cancelWaiting?.();
-
-        const isCurrentlyViewing = isOnChatPageRef.current && sid === activeIdRef.current;
-        if (!isCurrentlyViewing) {
-          markUnread(sid);
-        }
-        notify({ type: "error", message: evt.data.message });
-      }
-    },
-  });
-
-  useEffect(() => {
-    if (!activeId) return;
-    if (messagesBySession[activeId]) return;
-
-    let cancelled = false;
-    setSwitching(true);
-
-    api.sessions
-      .messages(activeId)
-      .then((res) => {
-        if (cancelled) return;
-        setMessagesForSession(
-          activeId,
-          res.turns.map((t) => ({ role: t.role, content: t.content, steps: t.steps }))
-        );
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setSwitching(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId]);
-
-  useEffect(() => {
-    if (isOnChatPage && activeId && unreadSessionIds.has(activeId)) {
-      setUnreadSessionIds((prev) => {
-        const next = new Set(prev);
-        next.delete(activeId);
-        return next;
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOnChatPage, activeId]);
-
-  const sendMessage = useCallback(
-    async (text, { onNewSession } = {}) => {
-      const sessionId = activeIdRef.current;
-      const bucketKey = sessionId || PENDING_KEY;
-
-      setMessagesForSession(bucketKey, (prev) => [...prev, { role: "user", content: text }]);
-      setLoadingBySession((prev) => ({ ...prev, [bucketKey]: true }));
-      setPhaseBySession((prev) => ({ ...prev, [bucketKey]: "Menganalisis permintaan..." }));
-
-      if (sessionId && socket.isOpen) {
-        const sent = socket.send(text);
-        if (sent) return;
-      }
-
-      try {
-        const result = await api.chat(text, sessionId);
-        const finalId = result.session_id;
-
-        setMessagesBySession((prev) => {
-          const pending = prev[bucketKey] || [];
-          const merged = [
-            ...pending,
-            { role: "assistant", content: result.answer, steps: result.steps, isNew: true },
-          ];
-          const next = { ...prev, [finalId]: merged };
-          if (bucketKey !== finalId) delete next[bucketKey];
-          return next;
-        });
-
-        setLoadingBySession((prev) => {
-          const next = { ...prev, [finalId]: false };
-          if (bucketKey !== finalId) delete next[bucketKey];
-          return next;
-        });
-        setPhaseBySession((prev) => {
-          const next = { ...prev, [finalId]: null };
-          if (bucketKey !== finalId) delete next[bucketKey];
-          return next;
-        });
-
-        const now = Date.now() / 1000;
-        upsertSession({ id: finalId, title: result.session_title, updated_at: now });
-
-        if (finalId !== sessionId) {
-          onNewSession?.(finalId);
-        }
-
-        return result.answer;
-      } catch (err) {
-        notify({ type: "error", message: err.message });
-        return null;
-      } finally {
-        setLoadingBySession((prev) => ({ ...prev, [bucketKey]: false }));
-        setPhaseBySession((prev) => ({ ...prev, [bucketKey]: null }));
-      }
-    },
-    [socket, upsertSession, notify, setMessagesForSession]
+        {content && (
+          <div
+            className={`rounded-xl2 px-4 py-3 text-sm leading-relaxed break-words
+              ${
+                isUser
+                  ? "bg-accent-gradient text-white whitespace-pre-wrap"
+                  : "bg-card border border-border text-white/90"
+              }`}
+          >
+            {isUser ? content : <Markdown content={content} />}
+          </div>
+        )}
+      </div>
+    </div>
   );
-
-  const sendRaw = useCallback(
-    (payload) => {
-      if (!socket.isOpen) return false;
-      return socket.sendRaw(payload);
-    },
-    [socket]
-  );
-
-  const waitForConnection = useCallback(
-    (timeoutMs) => socket.waitUntilOpen(timeoutMs),
-    [socket]
-  );
-
-  const value = {
-    messages,
-    loading,
-    phase,
-    liveTools,
-    switching,
-    wsStatus: socket.status,
-    sendMessage,
-    sendRaw,
-    waitForConnection,
-    registerVoiceCallHandlers,
-    unreadSessionIds,
-    persona,
-    personaReady,
-  };
-
-  return <ChatRuntimeContext.Provider value={value}>{children}</ChatRuntimeContext.Provider>;
-}
-
-export function useChatRuntime() {
-  const ctx = useContext(ChatRuntimeContext);
-  if (!ctx) {
-    throw new Error("useChatRuntime must be used within a ChatRuntimeProvider");
-  }
-  return ctx;
 }

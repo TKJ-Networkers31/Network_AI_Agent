@@ -1,7 +1,14 @@
 // AIRA_ECOSYSTEM/app/frontend/src/components/MessageBubble.jsx
+//
+// FIX (Optimalisasi DIO - root cause "form tidak pernah tampil"):
+// Sekarang menerima prop `interactionSchema` (Universal Interaction
+// Schema dari backend) + `interactionResolved` (sudah di-submit atau
+// belum) + `onSubmitInteraction`. Kalau schema ada dan belum resolved,
+// <Renderer> DIO dirender di atas/sebagai pengganti bubble teks kosong.
 import { useState } from "react";
 import ToolStep from "./ToolStep.jsx";
 import Markdown from "./Markdown.jsx";
+import Renderer from "./dio/Renderer.jsx";
 
 function ProcessSteps({ steps }) {
   const [open, setOpen] = useState(false);
@@ -56,24 +63,48 @@ function ProcessSteps({ steps }) {
   );
 }
 
-export default function MessageBubble({ role, content, steps, isNew }) {
+export default function MessageBubble({
+  role,
+  content,
+  steps,
+  isNew,
+  interactionSchema,
+  interactionResolved,
+  onSubmitInteraction,
+}) {
   const isUser = role === "user";
+  const hasInteraction = !isUser && Boolean(interactionSchema);
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} ${isNew ? "reveal-fade" : ""}`}>
       <div className={`max-w-[88%] sm:max-w-[75%] ${isUser ? "" : "w-full"}`}>
         {!isUser && <ProcessSteps steps={steps} />}
 
-        <div
-          className={`rounded-xl2 px-4 py-3 text-sm leading-relaxed break-words
-            ${
-              isUser
-                ? "bg-accent-gradient text-white whitespace-pre-wrap"
-                : "bg-card border border-border text-white/90"
-            }`}
-        >
-          {isUser ? content : <Markdown content={content} />}
-        </div>
+        {hasInteraction && !interactionResolved && (
+          <div className="mb-2">
+            <Renderer schema={interactionSchema} onSubmitAction={onSubmitInteraction} />
+          </div>
+        )}
+
+        {hasInteraction && interactionResolved && (
+          <div className="mb-2 flex items-center gap-2 text-xs text-white/40 italic px-1">
+            <span>✓</span>
+            <span>Form sudah dikirim.</span>
+          </div>
+        )}
+
+        {content && (
+          <div
+            className={`rounded-xl2 px-4 py-3 text-sm leading-relaxed break-words
+              ${
+                isUser
+                  ? "bg-accent-gradient text-white whitespace-pre-wrap"
+                  : "bg-card border border-border text-white/90"
+              }`}
+          >
+            {isUser ? content : <Markdown content={content} />}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -174,3 +174,37 @@ html, body, #root {
 .status-blink {
   animation: status-blink 1.4s ease-in-out infinite;
 }
+
+
+/* ============================================================
+   AIRA OS Redesign — additive CSS.
+   APPEND this block to the end of the existing
+   app/frontend/src/index.css. Nothing below removes or renames an
+   existing class — all current animations (mic-pulse, orb-ring,
+   thinking-dot, shimmer-text, etc.) stay exactly as they are.
+   ============================================================ */
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
+
+html, body {
+  background: #070714;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Sakura pulse — the spec's required loading treatment
+   ("Loading memakai Sakura pulse"). Use on any spinner/skeleton that
+   isn't already covered by mic-pulse/orb-ring. */
+@keyframes sakura-pulse {
+  0%   { transform: scale(0.9); opacity: 0.6; box-shadow: 0 0 0 0 rgba(244,114,182,0.35); }
+  70%  { transform: scale(1.05); opacity: 1; box-shadow: 0 0 0 12px rgba(244,114,182,0); }
+  100% { transform: scale(0.9); opacity: 0.6; box-shadow: 0 0 0 0 rgba(244,114,182,0); }
+}
+.sakura-pulse {
+  animation: sakura-pulse 1.6s ease-in-out infinite;
+}
+
+/* Micro-animation durations per spec (180–250ms) for anything that
+   isn't already using an explicit duration utility. */
+.fade-scale-in {
+  animation: reveal-fade 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}

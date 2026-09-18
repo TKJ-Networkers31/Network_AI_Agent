@@ -1,10 +1,12 @@
 """
 core/chat_sessions.py — penyimpanan SESI CHAT untuk web UI.
 
-Port dari agent/memory_store/chat_sessions.py. Terpisah dari core/memory.py
-(facts/events) karena skema tabel dan tanggung jawabnya beda: sesi chat
-menyimpan riwayat mentah untuk LLM + transkrip untuk UI, bukan fakta
-lintas sesi.
+FIX (Optimalisasi DIO):
+Kolom baru 'interaction_schema_json' di tabel chat_turns, ditambahkan
+lewat migrasi ALTER TABLE idempotent (aman untuk database lama yang
+sudah ada tanpa kolom ini) - menyimpan Universal Interaction Schema DIO
+per giliran assistant, supaya begitu user reload/reopen sesi, form
+interaktif yang belum di-submit tetap bisa direkonstruksi frontend.
 """
 
 import json
@@ -50,10 +52,27 @@ def init_db():
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 steps_json TEXT,
+                interaction_schema_json TEXT,
                 created_at REAL NOT NULL
             )
         """)
         conn.commit()
+
+    _migrate_add_columns()
+
+
+def _migrate_add_columns() -> None:
+    """Migrasi idempotent untuk database lama yang dibuat sebelum kolom
+    interaction_schema_json ada. CREATE TABLE IF NOT EXISTS di atas TIDAK
+    menambah kolom ke tabel yang sudah ada - migrasi manual ini yang
+    melakukannya, aman dijalankan berkali-kali."""
+    with closing(_connect()) as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(chat_turns)").fetchall()]
+
+        if "interaction_schema_json" not in columns:
+            conn.execute("ALTER TABLE chat_turns ADD COLUMN interaction_schema_json TEXT")
+            conn.commit()
+            logger.info("MIGRATION | kolom interaction_schema_json ditambahkan ke chat_turns.")
 
 
 init_db()
@@ -149,15 +168,23 @@ def delete_session(session_id: str) -> bool:
         return cursor.rowcount > 0
 
 
-def add_turn(session_id: str, role: str, content: str, steps: list | None = None) -> None:
+def add_turn(
+    session_id: str,
+    role: str,
+    content: str,
+    steps: list | None = None,
+    interaction_schema: dict | None = None,
+) -> None:
     now = time.time()
     steps_json = json.dumps(steps, ensure_ascii=False) if steps is not None else None
+    schema_json = json.dumps(interaction_schema, ensure_ascii=False) if interaction_schema is not None else None
 
     with closing(_connect()) as conn:
         conn.execute(
-            "INSERT INTO chat_turns (session_id, role, content, steps_json, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (session_id, role, content, steps_json, now),
+            "INSERT INTO chat_turns "
+            "(session_id, role, content, steps_json, interaction_schema_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, role, content, steps_json, schema_json, now),
         )
         conn.commit()
 
@@ -165,7 +192,7 @@ def add_turn(session_id: str, role: str, content: str, steps: list | None = None
 def get_turns(session_id: str) -> list[dict]:
     with closing(_connect()) as conn:
         rows = conn.execute(
-            "SELECT role, content, steps_json, created_at FROM chat_turns "
+            "SELECT role, content, steps_json, interaction_schema_json, created_at FROM chat_turns "
             "WHERE session_id = ? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
@@ -174,7 +201,9 @@ def get_turns(session_id: str) -> list[dict]:
     for row in rows:
         item = dict(row)
         raw_steps = item.pop("steps_json")
+        raw_schema = item.pop("interaction_schema_json")
         item["steps"] = json.loads(raw_steps) if raw_steps else []
+        item["interaction_schema"] = json.loads(raw_schema) if raw_schema else None
         turns.append(item)
 
     return turns

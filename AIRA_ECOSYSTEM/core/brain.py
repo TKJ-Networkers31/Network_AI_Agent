@@ -1,11 +1,11 @@
 """
 core/brain.py — satu-satunya pintu masuk publik ke AIRA.
 
-FIX (Phase 0 Stabilization - token tracker):
-BrainResponse sekarang juga membawa 'session_token_usage' (kumulatif
-sejak sesi ini dimulai/direset), selain 'token_usage' (giliran
-terakhir saja) yang sudah ada sebelumnya. Dipakai run_chat.py untuk
-menampilkan ringkasan token sesi seperti perilaku sistem lama.
+FIX (Optimalisasi DIO):
+BrainResponse sekarang membawa 'interaction_schema' (dict atau None),
+diteruskan apa adanya dari hasil Planner.run() lewat Orchestrator.route()
+- ini yang membuat form/pilihan interaktif DIO bisa sampai ke
+api/routers/chat.py & ws.py, lalu ke frontend.
 """
 
 import logging
@@ -26,6 +26,7 @@ class BrainResponse:
     session_token_usage: Optional[dict] = None
     error: bool = False
     duration: float = 0.0
+    interaction_schema: Optional[dict] = None
 
 
 class Brain:
@@ -46,4 +47,5 @@ class Brain:
             session_token_usage=result.get("session_token_usage"),
             error=result.get("error", False),
             duration=result.get("duration", 0.0),
+            interaction_schema=result.get("interaction_schema"),
         )

@@ -1,29 +1,15 @@
 """
 api/routers/ws.py — WebSocket realtime streaming untuk AIRA.
 
-FIX (Voice Call Mode - PWA):
-Menambahkan dukungan pesan bertipe "voice_audio" selain "text" (default,
-untuk kompatibilitas mundur dengan client yang cuma kirim {"message": "..."}
-tanpa field "type" sama sekali).
+FIX (Optimalisasi DIO):
+Pesan client sekarang boleh menyertakan field "dio_submission" (di luar
+"type": "voice_audio") - dipakai untuk hasil submit form/pilihan
+interaktif DIO. Efek sampingnya dijalankan lewat
+agents.rei.dio_tools.submit_structured_input() sebelum Brain.think(),
+dan interaction_schema hasil giliran ini disertakan di event "response"
++ disimpan ke chat_turns, sama seperti jalur REST (chat.py).
 
-Alur voice_audio:
-  1. Client kirim {"type": "voice_audio", "audio_base64": "...", "sample_rate": 16000}
-     - audio adalah PCM 16-bit mono, hasil VAD di browser (satu utterance utuh).
-  2. Server decode base64 -> numpy int16 -> agents/yuki/stt.py::transcribe()
-     (faster-whisper, LOKAL, tidak butuh internet).
-  3. Kalau transkrip kosong -> kirim event "transcript_empty", lanjut loop
-     (TIDAK memanggil Brain.think() untuk teks kosong).
-  4. Kalau ada teks -> kirim event "transcript" (supaya UI bisa tampilkan
-     bubble "kamu bilang: ...") lalu diproses PERSIS SAMA seperti pesan teks
-     biasa lewat Brain.think() - tidak ada chatbot kedua, cuma sumber input
-     yang beda (lihat docs/constitution.md aturan #5).
-  5. Kalau giliran ini berasal dari suara DAN jawaban berhasil -> sintesis
-     balasan lewat agents/yuki/tts.py::synthesize_bytes() (Kokoro, LOKAL),
-     lalu disisipkan sebagai "audio_base64" di event "response" supaya
-     browser client yang memutarnya (BUKAN speaker server).
-
-Pesan bertipe "text" (atau tanpa "type" sama sekali) berjalan identik
-seperti sebelumnya - tidak ada perubahan perilaku untuk chat teks biasa.
+Sisanya (voice call mode, slash command teks biasa) TIDAK BERUBAH.
 """
 
 import asyncio
@@ -37,6 +23,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from agents.yuki.stt import transcribe
 from agents.yuki.tts import synthesize_bytes
+from agents.rei.dio_tools import submit_structured_input, build_submission_message
 from api.state import get_memory, persist_memory, add_global_usage
 from api.ws_manager import manager
 from core.brain import Brain
@@ -72,11 +59,6 @@ def _apply_slash_command(raw_message: str) -> str:
 
 
 def _decode_voice_audio(raw: dict) -> "np.ndarray | None":
-    """
-    Decode field audio_base64 (PCM16 mono, little-endian) jadi numpy
-    int16 array. Return None kalau field kosong/rusak - pemanggil
-    bertanggung jawab mengirim event error ke client.
-    """
     audio_b64 = raw.get("audio_base64")
 
     if not audio_b64:
@@ -120,6 +102,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             msg_type = raw.get("type", "text")
 
             is_voice_turn = False
+            dio_submission = raw.get("dio_submission") if msg_type != "voice_audio" else None
 
             # --------------------------------------------------
             # SUMBER PESAN: audio (voice call mode) vs teks biasa
@@ -136,7 +119,6 @@ async def chat_ws(websocket: WebSocket, session_id: str):
 
                 sample_rate = int(raw.get("sample_rate") or 16000)
 
-                # faster-whisper (LOKAL) - tidak menyentuh internet sama sekali.
                 text = await asyncio.to_thread(transcribe, audio_int16, sample_rate)
 
                 if not text:
@@ -152,8 +134,6 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 display_message = text
                 is_voice_turn = True
 
-                # Kirim transkrip duluan supaya UI bisa langsung menampilkan
-                # bubble "kamu bilang: ..." sebelum jawaban AI datang.
                 await manager.send(session_id, {
                     "type": "transcript",
                     "data": {"text": display_message, "session_id": session_id},
@@ -170,11 +150,24 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                     continue
 
             # --------------------------------------------------
-            # PROSES: SAMA PERSIS untuk teks maupun suara - satu
-            # jalur reasoning (Brain.think()), tidak ada percabangan
-            # logic bisnis di sini.
+            # DIO SUBMISSION: efek samping dulu, lalu bangun
+            # instruksi LLM dari data form - alih-alih slash command.
             # --------------------------------------------------
-            llm_message = _apply_slash_command(display_message)
+            if dio_submission:
+                submit_structured_input(
+                    schema_id=dio_submission.get("schema_id", ""),
+                    action_id=dio_submission.get("action_id", ""),
+                    values=dio_submission.get("values"),
+                    cancelled=bool(dio_submission.get("cancelled")),
+                )
+                _, llm_message = build_submission_message(dio_submission)
+            else:
+                llm_message = _apply_slash_command(display_message)
+
+            # --------------------------------------------------
+            # PROSES: SAMA PERSIS untuk teks/suara/dio_submission -
+            # satu jalur reasoning (Brain.think()).
+            # --------------------------------------------------
             memory = get_memory(session_id)
             brain = Brain(memory)
 
@@ -219,16 +212,17 @@ async def chat_ws(websocket: WebSocket, session_id: str):
             add_global_usage(result.token_usage)
 
             store.add_turn(session_id, "user", display_message)
-            store.add_turn(session_id, "assistant", result.answer, steps=result.steps)
+            store.add_turn(
+                session_id, "assistant", result.answer,
+                steps=result.steps, interaction_schema=result.interaction_schema,
+            )
             store.maybe_autotitle(session_id, display_message)
 
             row = store.get_session_row(session_id)
 
             # --------------------------------------------------
-            # SINTESIS SUARA BALASAN: HANYA kalau giliran ini berasal
-            # dari audio DAN jawaban sukses. Giliran teks biasa TIDAK
-            # pernah memicu TTS (audio_base64 = None), supaya chat teks
-            # murni tidak berubah perilaku sama sekali.
+            # SINTESIS SUARA BALASAN: HANYA kalau giliran ini
+            # berasal dari audio DAN jawaban sukses.
             # --------------------------------------------------
             audio_b64_out = None
 
@@ -254,6 +248,7 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                     "session_id": session_id,
                     "session_title": row["title"] if row else "Chat baru",
                     "audio_base64": audio_b64_out,
+                    "interaction_schema": result.interaction_schema,
                 },
             })
 

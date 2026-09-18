@@ -6,6 +6,28 @@ berurutan, TANPA login ulang tiap command.
 Low-level client MURNI (tidak ada reasoning/keputusan) - satu-satunya
 pemanggil yang sah adalah agents/akane/connection_manager.py, sesuai
 aturan tools/README.md dan docs/architecture.md.
+
+FIX (Optimalisasi APCE):
+1. PROMPT_RE sebelumnya HANYA cocok dengan prompt RouterOS polos
+   "[user@identity] > ". Begitu router masuk Safe Mode (menampilkan
+   "[user@identity] <SAFE> > ") atau punya tag tambahan lain di antara
+   "]" dan ">" akhir, regex lama GAGAL COCOK SAMA SEKALI - karena
+   "[^\\r\\n>]*" tidak boleh melewati karakter ">" apa pun, termasuk ">"
+   penutup tag "<SAFE>". Akibatnya _read_until_prompt() SELALU timeout
+   penuh (25s default) setiap kali Safe Mode aktif, dan mengembalikan
+   output PARSIAL tanpa ada tanda apa pun ke pemanggil bahwa itu
+   terpotong. Regex diganti jadi lebih toleran: apa pun boleh muncul di
+   antara "]" dan ">" akhir (termasuk ">" tag lain), selama akhir baris
+   tetap "> " (ditemukan lewat backtracking greedy).
+2. Deteksi paginasi & prompt sekarang dijalankan terhadap versi buffer
+   yang SUDAH dibersihkan dari escape code ANSI (bukan buffer mentah) -
+   sebelumnya kode warna terminal di sekitar prompt bisa ikut merusak
+   pencocokan regex.
+3. execute() sekarang mengembalikan dict {"output", "prompt_matched"}
+   bukan string mentah, supaya pemanggil (connection_manager.py) bisa
+   tahu dan melaporkan ke user kalau output KEMUNGKINAN terpotong
+   karena prompt tidak pernah cocok sebelum timeout - alih-alih diam-
+   diam melaporkan sukses dengan data yang mungkin tidak lengkap.
 """
 
 import re
@@ -16,7 +38,11 @@ import paramiko
 
 logger = logging.getLogger("aira.tools.ssh.shell")
 
-PROMPT_RE = re.compile(r"\[[^\]\r\n]*@[^\]\r\n]*\][^\r\n>]*>\s*$")
+# FIX: sebelumnya "[^\r\n>]*" antara "]" dan ">" akhir - tidak toleran
+# terhadap tag tambahan (mis. "<SAFE>") yang mengandung karakter ">".
+# Sekarang pakai ".*" (greedy, backtracking) supaya regex mencari ">"
+# TERAKHIR di baris sebagai penutup prompt, apa pun yang ada sebelumnya.
+PROMPT_RE = re.compile(r"\[[^\]\r\n]+@[^\]\r\n]+\].*>\s*$")
 PAGINATE_MARKERS = ("-- [Q quit", "[Q quit|D dump", "--more--")
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
 
@@ -91,7 +117,14 @@ class PersistentShell:
             and not self.channel.closed
         )
 
-    def execute(self, command: str, timeout: float = 25.0) -> str:
+    def execute(self, command: str, timeout: float = 25.0) -> dict:
+        """
+        Return: {"output": str, "prompt_matched": bool}
+
+        prompt_matched=False artinya prompt RouterOS tidak pernah
+        terdeteksi sebelum timeout - output yang dikembalikan tetap
+        yang berhasil terbaca sejauh itu, tapi KEMUNGKINAN terpotong.
+        """
         if not self.is_alive():
             raise ShellNotConnectedError(
                 f"Shell channel ke {self.host} tidak aktif/sudah terputus."
@@ -103,9 +136,10 @@ class PersistentShell:
 
         self.channel.send(command.strip() + "\r\n")
 
-        raw = self._read_until_prompt(timeout=timeout)
+        raw, prompt_matched = self._read_until_prompt(timeout=timeout)
+        cleaned = self._clean_output(raw, command)
 
-        return self._clean_output(raw, command)
+        return {"output": cleaned, "prompt_matched": prompt_matched}
 
     def close(self) -> None:
         try:
@@ -150,10 +184,11 @@ class PersistentShell:
 
         return buffer
 
-    def _read_until_prompt(self, timeout: float) -> str:
+    def _read_until_prompt(self, timeout: float) -> "tuple[str, bool]":
         buffer = ""
         start = time.time()
         last_data = time.time()
+        prompt_matched = False
 
         while True:
             if self.channel.recv_ready():
@@ -161,13 +196,19 @@ class PersistentShell:
                 buffer += chunk
                 last_data = time.time()
 
+                # FIX: cek paginasi & prompt terhadap versi TANPA escape
+                # ANSI, bukan buffer mentah - kode warna di sekitar
+                # prompt sebelumnya bisa merusak pencocokan regex.
+                probe = ANSI_ESCAPE_RE.sub("", buffer)
+
                 # RouterOS paginasi hasil panjang - kirim 'Q' supaya
                 # keluar dari mode paging alih-alih macet menunggu prompt
                 # yang tidak akan pernah muncul.
-                if any(marker in buffer for marker in PAGINATE_MARKERS):
+                if any(marker in probe for marker in PAGINATE_MARKERS):
                     self.channel.send("Q")
 
-                if PROMPT_RE.search(buffer):
+                if PROMPT_RE.search(probe):
+                    prompt_matched = True
                     break
 
             else:
@@ -175,18 +216,22 @@ class PersistentShell:
 
                 if elapsed > timeout:
                     logger.warning(
-                        "Timeout menunggu prompt (%.1fs) untuk host=%s.", timeout, self.host
+                        "Timeout menunggu prompt (%.1fs) untuk host=%s - output "
+                        "kemungkinan TERPOTONG (prompt tidak pernah cocok dengan "
+                        "pola yang diharapkan).",
+                        timeout, self.host,
                     )
                     break
 
                 # Tidak ada prompt match tapi sudah lama tidak ada data
-                # baru -> anggap output sudah selesai.
+                # baru -> anggap output sudah selesai (bukan timeout,
+                # tapi tetap tidak match - prompt_matched tetap False).
                 if buffer and (time.time() - last_data) > 1.5:
                     break
 
                 time.sleep(0.05)
 
-        return buffer
+        return buffer, prompt_matched
 
     def _clean_output(self, raw: str, command: str) -> str:
         text = ANSI_ESCAPE_RE.sub("", raw)
