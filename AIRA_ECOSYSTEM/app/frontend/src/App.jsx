@@ -38,7 +38,7 @@ export default function App() {
       <SessionsProvider>
         <ChatRuntimeProvider isOnChatPage={active === "chat"}>
           <BootGate>
-            <div className="h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
+            <div className="min-h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
               <Sidebar
                 active={active}
                 onChange={setActive}
@@ -46,13 +46,13 @@ export default function App() {
                 onClose={() => setDrawerOpen(false)}
               />
 
-              <main className="flex-1 min-w-0 overflow-y-auto relative">
+              <main className="flex-1 min-w-0 overflow-y-auto relative bg-[radial-gradient(circle_at_50%_0%,rgba(159,122,234,0.08),transparent_42%)]">
                 <div className="fixed top-3 right-3 z-30">
                   <ConnectionIndicator onClick={() => setActive("akane")} />
                 </div>
 
-                <div className="p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 h-full">
-                  <div className="max-w-5xl mx-auto h-full flex flex-col">
+                <div className="p-3 sm:p-5 lg:p-7 pb-24 md:pb-8 min-h-full">
+                  <div className="max-w-[1100px] mx-auto min-h-full flex flex-col">
                     <Page onOpenMenu={() => setDrawerOpen(true)} />
                   </div>
                 </div>
