@@ -35,12 +35,15 @@ export default function Sidebar({ active, onChange, isOpen, onClose }) {
     useSessionsContext();
   const { unreadSessionIds } = useChatRuntime();
   const { notify } = useToast();
+  const { unreadSessionIds, runningSessionIds } = useChatRuntime();
 
   const [sessionsOpen, setSessionsOpen] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+
+  
 
   function closeDrawer() {
     onClose?.();
@@ -224,6 +227,9 @@ export default function Sidebar({ active, onChange, isOpen, onClose }) {
                       <div className="flex items-center justify-between gap-2">
                         <span className="flex items-center gap-1.5 min-w-0">
                           {isUnread && <span className="shrink-0 w-1.5 h-1.5 rounded-pill bg-sakura" />}
+                          {runningSessionIds?.has(s.id) && (
+                            <span className="shrink-0 w-1.5 h-1.5 rounded-pill bg-cyan animate-pulse" title="Sedang diproses" />
+                          )}
                           <span className="truncate">{s.title}</span>
                         </span>
                         <div className="hidden group-hover:flex items-center gap-1 shrink-0">

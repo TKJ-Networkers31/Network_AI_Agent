@@ -6,6 +6,11 @@ BrainResponse sekarang membawa 'interaction_schema' (dict atau None),
 diteruskan apa adanya dari hasil Planner.run() lewat Orchestrator.route()
 - ini yang membuat form/pilihan interaktif DIO bisa sampai ke
 api/routers/chat.py & ws.py, lalu ke frontend.
+
+PERUBAHAN (Chat Session: tombol Stop):
+- think() menerima 'cancel_event' opsional (threading.Event).
+- BrainResponse punya field 'cancelled' (default False) - True kalau
+  giliran ini dihentikan user sebelum selesai.
 """
 
 import logging
@@ -27,6 +32,7 @@ class BrainResponse:
     error: bool = False
     duration: float = 0.0
     interaction_schema: Optional[dict] = None
+    cancelled: bool = False
 
 
 class Brain:
@@ -35,10 +41,12 @@ class Brain:
         self.memory = memory
         self.orchestrator = Orchestrator()
 
-    def think(self, user_input: str, on_event=None) -> BrainResponse:
+    def think(self, user_input: str, on_event=None, cancel_event=None) -> BrainResponse:
         logger.info("BRAIN | menerima input user (%d char)", len(user_input))
 
-        result = self.orchestrator.route(user_input, self.memory, on_event=on_event)
+        result = self.orchestrator.route(
+            user_input, self.memory, on_event=on_event, cancel_event=cancel_event,
+        )
 
         return BrainResponse(
             answer=result.get("answer", ""),
@@ -48,4 +56,5 @@ class Brain:
             error=result.get("error", False),
             duration=result.get("duration", 0.0),
             interaction_schema=result.get("interaction_schema"),
+            cancelled=bool(result.get("cancelled", False)),
         )

@@ -1,7 +1,20 @@
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import DOMPurify from "dompurify";
+import CopyButton from "./CopyButton.jsx";
+import { copyText } from "../utils/clipboard.js";
+import { useToast } from "./Toast.jsx";
+
+// PERUBAHAN (Chat Session: salin bagian penting output):
+// - Blok kode (```...```) sekarang punya header dengan tombol "Salin".
+// - Kode inline (`perintah`) bisa DIKLIK untuk menyalin isinya - cocok
+//   untuk command penting yang di-highlight AI di tengah kalimat.
+// - FIX react-markdown v9: prop `inline` pada komponen `code` sudah
+//   DIHAPUS di v9, jadi cek `inline` selalu undefined dan kode inline ikut
+//   dirender sebagai blok. Sekarang inline/blok dibedakan lewat ada-tidaknya
+//   class `language-*` atau newline di isi kode. Pembungkus <pre> bawaan
+//   dibuang lewat override `pre` supaya tidak ada <pre><div> bersarang.
 
 // Blok kode ```svg ...``` dirender langsung jadi gambar, bukan teks
 // mentah - cocok kalau AIRA butuh menjelaskan sesuatu dengan ilustrasi
@@ -25,38 +38,88 @@ function SvgBlock({ code }) {
   );
 }
 
-function CodeBlock({ inline, className, children, ...props }) {
-  const match = /language-(\w+)/.exec(className || "");
-  const lang = match?.[1];
-  const raw = String(children).replace(/\n$/, "");
+function InlineCode({ children }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef(null);
+  const { notify } = useToast();
 
-  if (!inline && lang === "svg") {
-    return <SvgBlock code={raw} />;
-  }
+  useEffect(() => () => clearTimeout(timerRef.current), []);
 
-  if (inline) {
-    return (
-      <code
-        className="bg-white/10 text-accent-light rounded px-1.5 py-0.5 text-[0.85em] font-mono"
-        {...props}
-      >
-        {children}
-      </code>
-    );
+  async function handleCopy() {
+    // Kalau user sedang menyeleksi teks (drag), jangan timpa clipboard-nya.
+    if (window.getSelection?.()?.toString()) return;
+
+    const ok = await copyText(String(children));
+
+    if (!ok) {
+      notify({ type: "error", message: "Gagal menyalin ke clipboard.", duration: 2500 });
+      return;
+    }
+
+    setCopied(true);
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 1200);
   }
 
   return (
+    <code
+      role="button"
+      tabIndex={0}
+      title="Klik untuk menyalin"
+      onClick={handleCopy}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleCopy();
+        }
+      }}
+      className={`rounded px-1.5 py-0.5 text-[0.85em] font-mono cursor-pointer transition break-words
+        ${
+          copied
+            ? "bg-emerald-500/15 text-emerald-300"
+            : "bg-white/10 text-accent-light hover:bg-accent/20"
+        }`}
+    >
+      {children}
+      {copied && <span className="ml-1">✓</span>}
+    </code>
+  );
+}
+
+function BlockCode({ lang, raw }) {
+  return (
     <div className="my-3 rounded-xl2 border border-border overflow-hidden">
-      {lang && (
-        <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-white/40 bg-white/5 border-b border-border">
-          {lang}
-        </div>
-      )}
+      <div className="flex items-center justify-between pl-3 pr-1.5 py-1 bg-white/5 border-b border-border">
+        <span className="text-[10px] uppercase tracking-wide text-white/40">{lang || "kode"}</span>
+        <CopyButton text={raw} label="Salin" title="Salin seluruh blok" />
+      </div>
       <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed bg-black/30">
         <code className="font-mono text-white/85">{raw}</code>
       </pre>
     </div>
   );
+}
+
+function CodeBlock({ className, children }) {
+  const match = /language-(\w+)/.exec(className || "");
+  const lang = match?.[1];
+  const text = String(children);
+
+  // react-markdown v9: blok berpagar selalu berakhiran "\n" atau punya
+  // class language-*; kode inline tidak punya keduanya.
+  const isBlock = Boolean(lang) || text.includes("\n");
+
+  if (!isBlock) {
+    return <InlineCode>{children}</InlineCode>;
+  }
+
+  const raw = text.replace(/\n$/, "");
+
+  if (lang === "svg") {
+    return <SvgBlock code={raw} />;
+  }
+
+  return <BlockCode lang={lang} raw={raw} />;
 }
 
 const components = {
@@ -116,6 +179,8 @@ const components = {
   td: ({ children }) => (
     <td className="px-3 py-2 text-white/80 align-top">{children}</td>
   ),
+  // Buang <pre> bawaan react-markdown - BlockCode sudah punya <pre> sendiri.
+  pre: ({ children }) => <>{children}</>,
   code: CodeBlock,
 };
 

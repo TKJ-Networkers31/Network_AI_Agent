@@ -5,10 +5,17 @@
 // Schema dari backend) + `interactionResolved` (sudah di-submit atau
 // belum) + `onSubmitInteraction`. Kalau schema ada dan belum resolved,
 // <Renderer> DIO dirender di atas/sebagai pengganti bubble teks kosong.
-import { useState } from "react";
+//
+// PERUBAHAN (Chat Session): aksi per pesan.
+// - Pesan user      : Salin, Edit (edit di tempat, lalu "Kirim ulang").
+// - Pesan assistant : Salin, Buat ulang (hanya di jawaban terakhir).
+// Tombol aksi muncul saat hover (desktop) dan selalu terlihat di layar
+// sentuh. Edit/Buat ulang dinonaktifkan selama ada proses berjalan (`busy`).
+import { useEffect, useRef, useState } from "react";
 import ToolStep from "./ToolStep.jsx";
 import Markdown from "./Markdown.jsx";
 import Renderer from "./dio/Renderer.jsx";
+import CopyButton from "./CopyButton.jsx";
 
 function ProcessSteps({ steps }) {
   const [open, setOpen] = useState(false);
@@ -63,21 +70,162 @@ function ProcessSteps({ steps }) {
   );
 }
 
+function ActionButton({ title, onClick, disabled, children }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      disabled={disabled}
+      className="w-7 h-7 inline-flex items-center justify-center rounded-pill text-white/40 hover:text-white hover:bg-white/10 transition disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/40"
+    >
+      {children}
+    </button>
+  );
+}
+
+function EditIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" style={{ width: 14, height: 14 }}>
+      <path
+        d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="m14 7 3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function RegenerateIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" style={{ width: 14, height: 14 }}>
+      <path
+        d="M20 11a8 8 0 1 0-2.3 5.7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M20 5v6h-6"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function EditBox({ initial, hasFollowing, onCancel, onSubmit }) {
+  const [value, setValue] = useState(initial);
+  const areaRef = useRef(null);
+
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
+
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
+  }, [value]);
+
+  function submit() {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    onSubmit(trimmed);
+  }
+
+  return (
+    <div className="rounded-xl2 border border-sakura/40 bg-surface/80 p-3 space-y-2.5">
+      <textarea
+        ref={areaRef}
+        value={value}
+        rows={1}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            submit();
+          }
+          if (e.key === "Escape") onCancel();
+        }}
+        className="w-full bg-transparent resize-none outline-none text-sm text-text-primary leading-relaxed"
+      />
+
+      {hasFollowing && (
+        <p className="text-[11px] text-amber-300/80">
+          Balasan setelah pesan ini akan diganti dengan jawaban baru.
+        </p>
+      )}
+
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-xs px-3 py-1.5 rounded-pill bg-white/5 text-text-secondary hover:text-text-primary transition"
+        >
+          Batal
+        </button>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={!value.trim()}
+          className="text-xs px-3.5 py-1.5 rounded-pill bg-sakura-gradient text-white font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Kirim ulang
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Pesan yang dibuat otomatis dari submit form DIO - mengedit teksnya tidak
+// masuk akal (data form-nya tidak ikut terkirim), jadi tombol Edit disembunyikan.
+function isDioSubmissionText(text) {
+  return /^(📝|❌)/.test(text || "");
+}
+
 export default function MessageBubble({
   role,
   content,
   steps,
   isNew,
+  local,
   interactionSchema,
   interactionResolved,
   onSubmitInteraction,
+  busy,
+  canRegenerate,
+  onRegenerate,
+  hasFollowing,
+  onEdit,
 }) {
   const isUser = role === "user";
   const hasInteraction = !isUser && Boolean(interactionSchema);
+  const [editing, setEditing] = useState(false);
+
+  const canEdit = isUser && Boolean(content) && !isDioSubmissionText(content) && Boolean(onEdit);
+  const showAssistantActions = !isUser && !local && Boolean(content);
+  const showActions = !editing && (isUser ? Boolean(content) : showAssistantActions);
+
+  const widthClass = isUser
+    ? editing
+      ? "w-full"
+      : ""
+    : "w-full";
 
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"} ${isNew ? "reveal-fade" : ""}`}>
-      <div className={`max-w-[88%] sm:max-w-[75%] ${isUser ? "" : "w-full"}`}>
+    <div className={`group flex ${isUser ? "justify-end" : "justify-start"} ${isNew ? "reveal-fade" : ""}`}>
+      <div className={`max-w-[88%] sm:max-w-[75%] ${widthClass}`}>
         {!isUser && <ProcessSteps steps={steps} />}
 
         {hasInteraction && !interactionResolved && (
@@ -93,16 +241,59 @@ export default function MessageBubble({
           </div>
         )}
 
-        {content && (
+        {isUser && editing ? (
+          <EditBox
+            initial={content}
+            hasFollowing={hasFollowing}
+            onCancel={() => setEditing(false)}
+            onSubmit={(text) => {
+              setEditing(false);
+              onEdit?.(text);
+            }}
+          />
+        ) : (
+          content && (
+            <div
+              className={`rounded-xl2 px-4 py-3 text-sm leading-relaxed break-words
+                ${
+                  isUser
+                    ? "bg-accent-gradient text-white whitespace-pre-wrap"
+                    : local
+                    ? "bg-white/[0.03] border border-border text-white/60"
+                    : "bg-card border border-border text-white/90"
+                }`}
+            >
+              {isUser ? content : <Markdown content={content} />}
+            </div>
+          )
+        )}
+
+        {showActions && (
           <div
-            className={`rounded-xl2 px-4 py-3 text-sm leading-relaxed break-words
-              ${
-                isUser
-                  ? "bg-accent-gradient text-white whitespace-pre-wrap"
-                  : "bg-card border border-border text-white/90"
-              }`}
+            className={`mt-1 flex items-center gap-0.5 ${isUser ? "justify-end" : "justify-start"}
+              md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100 transition-opacity`}
           >
-            {isUser ? content : <Markdown content={content} />}
+            <CopyButton text={content} title={isUser ? "Salin prompt" : "Salin jawaban"} />
+
+            {canEdit && (
+              <ActionButton
+                title={busy ? "Tunggu proses selesai" : "Edit prompt"}
+                disabled={busy}
+                onClick={() => setEditing(true)}
+              >
+                <EditIcon />
+              </ActionButton>
+            )}
+
+            {!isUser && canRegenerate && (
+              <ActionButton
+                title={busy ? "Tunggu proses selesai" : "Buat ulang jawaban"}
+                disabled={busy}
+                onClick={() => onRegenerate?.()}
+              >
+                <RegenerateIcon />
+              </ActionButton>
+            )}
           </div>
         )}
       </div>

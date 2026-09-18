@@ -13,8 +13,19 @@
 //   murni client-side (tidak memanggil sendMessage/API apa pun), jadi
 //   user tidak pernah "dipaksa menyapa dulu" sebelum bisa chat normal.
 //
-// Sisanya (voice call mode, dio submission, tools slash-menu, dsb)
-// PERSIS seperti sebelumnya - tidak ada perubahan behavior lain.
+// PERUBAHAN (Chat Session):
+// - Tombol Stop (ChatInput), Edit prompt, Salin, dan Buat ulang jawaban
+//   (MessageBubble) disambungkan ke ChatRuntimeContext.
+// - `loading` / `switching` sekarang milik SESI AKTIF saja (lihat
+//   ChatRuntimeContext) - input tidak lagi terkunci gara-gara sesi lain.
+// - FIX: status "form sudah dikirim" dulu disimpan di Set index milik
+//   halaman ini - dipakai bersama SEMUA sesi dan bergeser saat pesan
+//   berubah, jadi form di sesi/posisi lain bisa salah tampil "sudah
+//   dikirim". Sekarang flag itu disimpan di pesannya sendiri.
+// - Key bubble menyertakan session id supaya state lokal bubble (mis.
+//   kotak edit yang sedang terbuka) tidak terbawa ke sesi lain.
+//
+// Sisanya (voice call mode, tools slash-menu, dsb) PERSIS seperti sebelumnya.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
@@ -50,11 +61,14 @@ export default function ChatPage({ onOpenMenu }) {
     registerVoiceCallHandlers,
     persona,
     personaReady,
+    stopRun,
+    regenerate,
+    editMessage,
+    markInteractionResolved,
   } = useChatRuntime();
 
   const [tools, setTools] = useState([]);
   const [voiceConnecting, setVoiceConnecting] = useState(false);
-  const [resolvedInteractions, setResolvedInteractions] = useState(() => new Set());
   const bottomRef = useRef(null);
 
   const { notify } = useToast();
@@ -63,6 +77,32 @@ export default function ChatPage({ onOpenMenu }) {
   // mencegah teks Hero berubah/kedip saat state chat lain (loading,
   // liveTools) berubah selama render normal.
   const greetingText = useMemo(() => buildGreeting(persona), [persona]);
+
+  // Posisi pesan user terakhir, pesan non-lokal terakhir, dan pesan
+  // assistant yang boleh menampilkan tombol "Buat ulang" (jawaban atas
+  // pesan user terakhir, sebelum ada pesan user lain sesudahnya).
+  const { lastNonLocalIdx, regenIdx } = useMemo(() => {
+    let lastUser = -1;
+    let lastNonLocal = -1;
+
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (lastUser === -1 && messages[i].role === "user") lastUser = i;
+      if (lastNonLocal === -1 && !messages[i].local) lastNonLocal = i;
+      if (lastUser !== -1 && lastNonLocal !== -1) break;
+    }
+
+    let regen = -1;
+    if (lastUser !== -1) {
+      for (let i = messages.length - 1; i > lastUser; i -= 1) {
+        if (messages[i].role === "assistant" && !messages[i].local) {
+          regen = i;
+          break;
+        }
+      }
+    }
+
+    return { lastNonLocalIdx: lastNonLocal, regenIdx: regen };
+  }, [messages]);
 
   const voiceCall = useVoiceCall({
     onSendAudio: (payload) => {
@@ -130,11 +170,7 @@ export default function ChatPage({ onOpenMenu }) {
     const cancelled = action ? action.style === "ghost" : false;
     const displayText = cancelled ? "❌ Dibatalkan." : "📝 Form terkirim.";
 
-    setResolvedInteractions((prev) => {
-      const next = new Set(prev);
-      next.add(index);
-      return next;
-    });
+    markInteractionResolved(index);
 
     sendDioSubmission(
       { schema_id: schema.id, action_id: actionId, values, cancelled },
@@ -216,16 +252,22 @@ export default function ChatPage({ onOpenMenu }) {
         {!switching &&
           messages.map((m, i) => (
             <MessageBubble
-              key={i}
+              key={`${activeId || "baru"}-${i}`}
               role={m.role}
               content={m.content}
               steps={m.steps}
               isNew={m.isNew}
+              local={m.local}
               interactionSchema={m.interactionSchema}
-              interactionResolved={resolvedInteractions.has(i)}
+              interactionResolved={Boolean(m.interactionResolved)}
               onSubmitInteraction={(actionId, values) =>
                 handleInteractionSubmit(i, actionId, values)
               }
+              busy={loading}
+              canRegenerate={i === regenIdx}
+              onRegenerate={regenerate}
+              hasFollowing={i < lastNonLocalIdx}
+              onEdit={m.role === "user" ? (text) => editMessage(i, text) : undefined}
             />
           ))}
 
@@ -241,7 +283,9 @@ export default function ChatPage({ onOpenMenu }) {
       <div className="mt-2 sm:mt-3 mb-1">
         <ChatInput
           onSend={handleSend}
-          disabled={loading}
+          disabled={loading || switching}
+          isRunning={loading}
+          onStop={() => stopRun()}
           tools={tools}
           voiceControls={
             <VoiceControls

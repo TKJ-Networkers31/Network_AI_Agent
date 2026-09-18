@@ -1,6 +1,10 @@
 """
 core/orchestrator.py — otak routing AIRA.
 User -> AIRA -> REI (Planning) -> AKANE/HIKARI/REI-tools -> AIRA -> User
+
+PERUBAHAN (Chat Session: tombol Stop):
+route() menerima 'cancel_event' opsional dan meneruskannya ke
+Planner.run(). Tanpa argumen itu, perilaku sama persis seperti sebelumnya.
 """
 
 import logging
@@ -33,9 +37,14 @@ class Orchestrator:
             dangerous_tools=DANGEROUS_TOOLS,
         )
 
-    def route(self, user_input: str, memory, on_event=None) -> dict:
+    def route(self, user_input: str, memory, on_event=None, cancel_event=None) -> dict:
         start = time.perf_counter()
-        result = self.planner.run(user_input, memory, tool_executor=self._execute_tool, on_event=on_event)
+        result = self.planner.run(
+            user_input, memory,
+            tool_executor=self._execute_tool,
+            on_event=on_event,
+            cancel_event=cancel_event,
+        )
         result["duration"] = round(time.perf_counter() - start, 3)
         return result
 

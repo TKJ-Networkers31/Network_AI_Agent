@@ -12,6 +12,16 @@ di SETIAP titik return sebagai key 'interaction_schema' - mengalir ke
 core/orchestrator.py -> core/brain.py -> api/schemas.py::ChatResponse /
 event WebSocket "response", sampai akhirnya dirender frontend
 (MessageBubble.jsx).
+
+PERUBAHAN (Chat Session: tombol Stop):
+Planner.run() menerima parameter opsional 'cancel_event' (threading.Event).
+Dicek di titik-titik AMAN: sebelum/ sesudah tiap panggilan LLM dan sebelum
+tiap tool dijalankan. Kalau sudah di-set, run() langsung return dict
+dengan "cancelled": True - tanpa memanggil LLM/tool lagi dan tanpa
+menjalankan ekstraksi memori otomatis. Catatan: panggilan LLM/tool yang
+SEDANG berlangsung (HTTP/SSH) tidak bisa diputus di tengah jalan; stop
+berlaku begitu panggilan itu selesai. Tanpa cancel_event (REST /api/chat,
+run_chat.py) perilakunya PERSIS seperti sebelumnya.
 """
 
 import json
@@ -40,7 +50,7 @@ class Planner:
         self.tool_category = tool_category or {}
         self.dangerous_tools = dangerous_tools or set()
 
-    def run(self, user_input, memory, tool_executor, on_event=None):
+    def run(self, user_input, memory, tool_executor, on_event=None, cancel_event=None):
         def emit(event_type, payload):
             if on_event:
                 try:
@@ -48,13 +58,31 @@ class Planner:
                 except Exception:
                     logger.exception("on_event callback error (diabaikan)")
 
+        def is_cancelled():
+            return cancel_event is not None and cancel_event.is_set()
+
         steps = []
         memory.add_user(user_input)
 
         # FIX: dilacak sepanjang giliran ini, disertakan di setiap return.
         pending_interaction_schema = None
 
+        def cancelled_result():
+            logger.info("Planner dihentikan oleh user (cancel_event).")
+            return {
+                "answer": "",
+                "steps": steps,
+                "token_usage": memory.token_tracker.last_usage,
+                "session_token_usage": memory.token_tracker.as_dict(),
+                "error": False,
+                "interaction_schema": None,
+                "cancelled": True,
+            }
+
         emit("thinking", {"message": "Menganalisis permintaan..."})
+
+        if is_cancelled():
+            return cancelled_result()
 
         system_prompt = get_engine().build(time_context_block() + build_context_snippet())
 
@@ -74,6 +102,10 @@ class Planner:
         call_signatures = {}
 
         while True:
+            # Titik cek utama: setelah tiap jawaban LLM, sebelum tool jalan.
+            if is_cancelled():
+                return cancelled_result()
+
             message = response.get("message", {})
             memory.add_message(message)
 
@@ -94,6 +126,9 @@ class Planner:
             emit("thinking", {"message": f"Menggunakan {len(tool_calls)} tool..."})
 
             for call in tool_calls:
+                if is_cancelled():
+                    return cancelled_result()
+
                 if tool_count >= MAX_TOOL_CALLS:
                     steps.append({"type": "limit_reached", "message": "Batas jumlah tool call tercapai."})
                     emit("error", {"message": "Batas jumlah tool call tercapai."})
@@ -194,6 +229,9 @@ class Planner:
                 })
 
                 memory.add_tool_result(json.dumps(result, ensure_ascii=False), tool_call_id=call.get("id"))
+
+            if is_cancelled():
+                return cancelled_result()
 
             emit("thinking", {"message": "Menyusun jawaban..."})
 
