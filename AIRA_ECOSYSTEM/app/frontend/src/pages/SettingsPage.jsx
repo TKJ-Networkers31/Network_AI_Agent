@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
+import LocationPanel from "../components/location/LocationPanel.jsx";
 import { api } from "../api.js";
 
 export default function SettingsPage({ onOpenMenu }) {
@@ -15,7 +16,7 @@ export default function SettingsPage({ onOpenMenu }) {
     <div>
       <TopBar
         title="Settings"
-        subtitle="Pemakaian token & saldo provider"
+        subtitle="Pemakaian token, saldo provider & lokasi"
         onMenuClick={onOpenMenu}
       />
 
@@ -56,6 +57,10 @@ export default function SettingsPage({ onOpenMenu }) {
             </p>
           )}
         </div>
+      </div>
+
+      <div className="mt-6">
+        <LocationPanel />
       </div>
     </div>
   );

@@ -15,6 +15,15 @@ FIX (optimasi token + hilangkan "greeting bleed"):
 3. CORE_RULES dan FORMATTING_RULES dipangkas ke poin-poin penting
    saja - instruksi yang bisa disimpulkan model dari deskripsi tool
    (mis. detail super teknis soal request_structured_input) diringkas.
+
+FIX (Ilustrasi visual - root cause "SVG renderer tidak pernah dipakai"):
+Frontend (Markdown.jsx) sudah bisa merender blok ```svg, tapi TIDAK ADA
+satu pun instruksi di system prompt yang memberi tahu model bahwa
+kemampuan itu ada - jadi model hanya menjawab teks/ASCII art. Sekarang
+ILLUSTRATION_RULES (di bawah) mengajarkan: (a) diagram/skema -> blok
+```svg buatan sendiri dengan kontrak yang cocok dengan renderer, (b)
+foto nyata -> tool web_image_search + Markdown ![alt](url). Aturan ini
+ditulis padat supaya tetap hemat token.
 """
 
 CORE_RULES = """
@@ -22,6 +31,7 @@ CORE_RULES = """
 - Kamu SATU-SATUNYA AI yang bicara ke user. Jangan sebut nama agent internal (AKANE/REI/HIKARI/YUKI) kecuali user tanya arsitektur.
 - Pakai hasil observasi nyata dari tool sebagai fakta - jangan mengarang.
 - Kamu punya akses file di AIRA Workspace lewat tool list_workspace/read_file/write_file/dll - jangan pernah bilang tidak bisa.
+- Kamu bisa mencari foto di internet lewat tool web_image_search dan menggambar diagram sendiri lewat blok ```svg - jangan pernah bilang tidak bisa menampilkan gambar/ilustrasi.
 - Kalau info dari user kurang/ambigu untuk eksekusi suatu aksi, panggil tool 'request_structured_input' (jangan menebak). Setelah memanggilnya, jangan tulis jawaban panjang di giliran yang sama.
 """
 
@@ -33,6 +43,14 @@ Frontend merender Markdown (GFM) penuh. Pakai sesuai isi:
 - Beberapa topik dalam satu balasan -> pisah dengan `---` + heading pendek.
 - Istilah/command/nilai konfig -> inline code. Command panjang/output mentah -> code block berpagar.
 - Jangan paksakan tabel/list/heading untuk jawaban singkat atau obrolan santai.
+"""
+
+ILLUSTRATION_RULES = """
+=== ILUSTRASI VISUAL ===
+Kalau penjelasan jadi lebih mudah dipahami dengan gambar, TAMPILKAN gambar - jangan hanya teks atau ASCII art.
+- Diagram/skema/alur/topologi jaringan/arsitektur/perbandingan/langkah berurutan/konsep abstrak -> buat SVG sendiri dalam blok berpagar ```svg ... ```. Kontrak SVG (renderer akan menolak yang menyimpang): satu elemen <svg> lengkap dengan xmlns="http://www.w3.org/2000/svg" dan viewBox (mis. 0 0 720 400), tanpa width/height tetap; mulai dengan <rect> latar putih penuh; teks gelap, font-family="sans-serif", ukuran minimal 13; warna isi solid; label singkat; tanpa <script>, tanpa gambar/font eksternal. Setelah blok, jelaskan diagramnya dalam 1-3 kalimat.
+- Foto/gambar nyata (perangkat, produk, kabel/konektor, tempat, tampilan aplikasi) -> panggil tool web_image_search dengan kata kunci spesifik, lalu tampilkan 2-4 gambar terbaik dengan ![deskripsi singkat](image_url). Pakai image_url PERSIS dari hasil tool, jangan mengarang/mengubah URL. Sebut sumbernya (field 'source') di teks. Kalau tool gagal/kosong, bilang apa adanya dan tawarkan diagram SVG.
+- Jangan membuat ilustrasi untuk jawaban singkat, sapaan, atau hal yang sudah jelas lewat teks.
 """
 
 
@@ -139,6 +157,7 @@ def build_prompt(profile: dict, behavior: dict, persona_text: dict, extra_contex
 
     sections.append(_behavior_narrative(behavior))
     sections.append(FORMATTING_RULES.strip())
+    sections.append(ILLUSTRATION_RULES.strip())
 
     if extra_context:
         sections.append(extra_context.strip())

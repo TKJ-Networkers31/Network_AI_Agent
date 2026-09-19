@@ -9,8 +9,14 @@ Menambahkan shutdown event yang memanggil ConnectionManager.shutdown() -
 sebelumnya method ini sudah ada tapi tidak pernah dipanggil siapa pun,
 sehingga channel SSH APCE tidak ditutup rapi saat server di-restart/
 reload (mis. lewat --reload saat development).
+
+PERUBAHAN (Lokasi hosting & akses):
+- Router location di-include (sebelumnya file-nya salah isi & tidak terdaftar).
+- Startup: lokasi hosting dihangatkan di thread terpisah, supaya giliran chat
+  pertama tidak menunggu deteksi IP.
 """
 
+import threading
 from pathlib import Path
 
 from core.logger import setup_logging
@@ -21,9 +27,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files
+from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files, location
 from api.routers import ws
 from agents.akane.connection_manager import get_connection_manager
+from core.location import location_service
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -50,7 +57,20 @@ app.include_router(models.router)
 app.include_router(persona.router)
 app.include_router(connections.router)
 app.include_router(files.router)
+app.include_router(location.router)
 app.include_router(ws.router)
+
+
+def _warm_host_location() -> None:
+    try:
+        location_service.get_host()
+    except Exception:
+        pass
+
+
+@app.on_event("startup")
+def _startup_location():
+    threading.Thread(target=_warm_host_location, daemon=True).start()
 
 
 @app.on_event("shutdown")

@@ -11,7 +11,7 @@ a PWA (`manifest.json`, `service-worker.js`, install icons).
 | Devices | `pages/DevicesPage.jsx` | Read-only view of `inventory/router.yaml` |
 | Memory | `pages/MemoryPage.jsx` | View/add/delete long-term facts |
 | Logs | `pages/LogsPage.jsx` | Filterable structured log viewer with per-entry detail panel |
-| Settings | `pages/SettingsPage.jsx` | Switch active LLM provider, view token usage / OpenRouter credits |
+| Settings | `pages/SettingsPage.jsx` | Token usage / OpenRouter credits |
 
 Navigation: `Sidebar.jsx` (desktop drawer) and `MobileNav.jsx` (bottom tab
 bar on small screens).
@@ -22,23 +22,37 @@ bar on small screens).
 - `context/ChatRuntimeContext.jsx` — mounted at the **App level** (not inside
   ChatPage) so the WebSocket connection and message state survive
   navigating away from the Chat page (e.g. to Settings) and back
-- `hooks/useAiraSocket.js` — WebSocket client with exponential backoff reconnect
-- `hooks/useVoice.js` — Web Speech API wrapper (STT via `SpeechRecognition`,
-  TTS via `speechSynthesis`) — this is browser-native and **separate** from
-  the backend YUKI voice pipeline (which is for the terminal/local
-  microphone flow, not the web client)
+- `hooks/useAiraSocketPool.js` — one WebSocket per needed session, exponential backoff reconnect
+- `hooks/useVoiceCall.js` — client-side mic capture + VAD; STT/TTS run on the server
 
 ## Design tokens
 
-Defined in `tailwind.config.js`:
+Defined in `src/theme/*` and consumed by `tailwind.config.js`.
+Category colors for tool steps (`ToolStep.jsx`, `LiveSteps.jsx`):
+network=sky, mikrotik=emerald, snmp=amber, web=fuchsia, memory=violet,
+inventory=cyan, vision=pink
 
-- Background: `app` (`#070b14`), `panel` (`#0c1220`), `card` (`#101a2c`)
-- Accent: blue-tech gradient, `accent.DEFAULT` (`#2563eb`), `accent.light`
-  (`#38bdf8`), `accent.soft` (`#1e3a8a`)
-- Border radius: `xl2` (`1rem`) used consistently for cards
-- Category colors for tool steps (`ToolStep.jsx`, `LiveSteps.jsx`):
-  network=sky, mikrotik=emerald, snmp=amber, web=fuchsia, memory=violet,
-  inventory=cyan, vision=pink
+## Markdown & illustration rendering (`components/Markdown.jsx`)
+
+Assistant messages are rendered as GFM Markdown. Two illustration paths:
+
+- **SVG diagrams.** A fenced ```` ```svg ```` block (also ```` ```xml ````/
+  ```` ```html ````/unlabeled blocks whose content is a complete
+  `<svg>...</svg>`) is rendered as a card:
+  DOMPurify (svg profile) -> viewBox normalisation -> XML re-serialisation
+  (adds `xmlns`) -> `<img src="data:image/svg+xml,...">`. Rendering through
+  `<img>` isolates the SVG (no scripts, no CSS leaking into the app, no
+  external requests). The card has a light background because models draw
+  for white paper. Actions: click to enlarge, view code, download `.svg`,
+  copy. Invalid/truncated SVG falls back to a normal code block with a note.
+- **Photos.** Markdown `![alt](url)` (the model emits these from
+  `web_image_search` results) renders as a small gallery: lazy-loaded,
+  `referrerPolicy="no-referrer"`, click to enlarge, and a link fallback if
+  the image fails to load.
+
+The model is taught both paths in `core/persona/prompt_builder.py`
+(`ILLUSTRATION_RULES`); the SVG contract there must stay in sync with
+`buildSvg()`.
 
 ## Realtime feedback components
 
@@ -54,10 +68,8 @@ Defined in `tailwind.config.js`:
 
 ## Voice UI
 
-- `VoiceControls.jsx` — mic toggle (pulses red while listening) and
-  speaker toggle (pulses blue while speaking)
-- `VoiceOverlay.jsx` — full-screen "listening" overlay with live interim
-  transcript, shown while the mic is active
+- `VoiceControls.jsx` — mic toggle and speaker toggle (voice call mode)
+- `VoiceOverlay.jsx` — full-screen "listening" overlay, shown while a voice call is active
 
 ## Conventions
 

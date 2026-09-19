@@ -1,8 +1,9 @@
 """
 agents/rei/registry.py — pintu masuk kemampuan riset, memori, dan File
-System Engine (FSE) milik REI: web_search, web_fetch, remember, recall,
-forget, list_workspace, read_file, write_file, create_folder, move_file,
-copy_file, rename_file, delete_file, restore_file, list_trash.
+System Engine (FSE) milik REI: web_search, web_fetch, web_image_search,
+remember, recall, forget, list_workspace, read_file, write_file,
+create_folder, move_file, copy_file, rename_file, delete_file,
+restore_file, list_trash.
 
 FIX (root cause "AI bilang tidak punya fitur file"):
 FSE didaftarkan lewat agents/rei/fs_tools.py (wrapper tipis di atas
@@ -28,6 +29,13 @@ FSE. Kalau nanti mau menambah konfirmasi interaktif, tambahkan
 REI_DANGEROUS_TOOLS di sini DAN gabungkan ke DANGEROUS_TOOLS di
 core/orchestrator.py (saat ini orchestrator.py hanya menggabungkan
 AKANE_DANGEROUS_TOOLS | HIKARI_DANGEROUS_TOOLS, REI belum diikutkan).
+
+FIX (Ilustrasi visual):
+'web_image_search' didaftarkan di sini (kategori "web", sama dengan
+web_search/web_fetch). Tanpa registrasi ini LLM tidak akan pernah tahu
+tool pencarian gambar ada. Cara menampilkannya diatur di
+core/persona/prompt_builder.py (aturan ILUSTRASI VISUAL) dan dirender
+oleh frontend Markdown.jsx.
 """
 
 from agents.rei import research_tools as rt
@@ -44,6 +52,7 @@ def recall(query: str) -> dict:
 REI_TOOLS = {
     "web_search": rt.web_search,
     "web_fetch": rt.web_fetch,
+    "web_image_search": rt.web_image_search,
     "remember": remember_fact,
     "recall": recall,
     "forget": forget_fact,
@@ -63,6 +72,7 @@ REI_TOOLS = {
 REI_TOOL_CATEGORY = {
     "web_search": "web",
     "web_fetch": "web",
+    "web_image_search": "web",
     "remember": "memory",
     "recall": "memory",
     "forget": "memory",
@@ -104,6 +114,38 @@ REI_TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {"url": {"type": "string", "description": "URL halaman yang ingin dibaca."}},
                 "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_image_search",
+            "description": (
+                "Mencari FOTO/gambar nyata di internet (Google Images kalau "
+                "dikonfigurasi, jika tidak DuckDuckGo Images) untuk "
+                "memperjelas penjelasan: perangkat/hardware, produk, tempat, "
+                "kabel/konektor, tampilan aplikasi, dsb. Hasilnya WAJIB "
+                "ditampilkan ke user dengan Markdown ![deskripsi](image_url), "
+                "memakai image_url PERSIS dari hasil tool - jangan mengarang "
+                "URL. Untuk diagram/skema/alur/topologi JANGAN pakai tool ini "
+                "- buat sendiri dengan blok ```svg. Untuk isi teks halaman "
+                "pakai web_search/web_fetch."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Kata kunci gambar yang spesifik, mis. 'MikroTik hAP ax3 router' atau 'konektor SFP+ module'.",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Jumlah gambar (1-6, default 4).",
+                        "default": 4,
+                    },
+                },
+                "required": ["query"],
             },
         },
     },
@@ -305,7 +347,7 @@ REI_TOOL_SCHEMAS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
-      {
+    {
         "type": "function",
         "function": {
             "name": "request_structured_input",

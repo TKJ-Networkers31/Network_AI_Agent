@@ -2,11 +2,16 @@
 
 ## AIRA (public identity)
 
-Defined in `core/persona.py`. AIRA is the **only** identity the user ever
+Defined in `core/persona/`. AIRA is the **only** identity the user ever
 sees. It never refers to internal agents by name unless the user
-explicitly asks about internal architecture. `core/persona.py::build_system_prompt()`
+explicitly asks about internal architecture. `core/persona/prompt_builder.py`
 combines the AIRA identity block with runtime context (current time, long-term
 memory snippet from `core/memory.py::build_context_snippet()`).
+
+The prompt builder also teaches the model how to illustrate answers
+(`ILLUSTRATION_RULES`): diagrams as fenced ```` ```svg ```` blocks, real
+photos via the `web_image_search` tool + Markdown images. See
+[`ui_ux.md`](ui_ux.md) for how the frontend renders them.
 
 ## AKANE — Adaptive Knowledge & Autonomous Network Engine
 
@@ -26,8 +31,16 @@ memory snippet from `core/memory.py::build_context_snippet()`).
 - **Files:** `agents/rei/planner.py`, `agents/rei/provider_client.py`,
   `agents/rei/research_tools.py`, `agents/rei/registry.py`, `agents/rei/auto_extract.py`
 - **Domain:** LLM planning/tool-call loop, the only LLM provider gateway,
-  web search/fetch, long-term memory (`remember` / `recall` / `forget`)
-- **Tools:** `web_search`, `web_fetch`, `remember`, `recall`, `forget`
+  web research, long-term memory (`remember` / `recall` / `forget`)
+- **Tools:** `web_search`, `web_fetch`, `web_image_search`, `remember`,
+  `recall`, `forget`, filesystem tools (`list_workspace`, `read_file`, ...),
+  `request_structured_input`
+- **`web_image_search`:** searches real photos. Uses Google Custom Search
+  (image) when `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_ID` are set, otherwise
+  falls back to DuckDuckGo Images (no key needed). Returns `image_url`
+  (thumbnail, hotlink-safe — this is what gets displayed), `original_url`,
+  `source`, `page_url`. The model must display results with Markdown
+  `![alt](image_url)` using the URL verbatim.
 - REI is also the orchestration brain: `Planner.run()` drives the
   think -> tool-call -> think loop (max 10 tool calls per turn, one retry
   on an empty/invalid provider response).

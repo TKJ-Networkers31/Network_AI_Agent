@@ -11,6 +11,9 @@
 //   Halaman lain memakai min-h-full (menyatu dengan scroll <main>).
 // - ConnectionIndicator dipindah ke TopBar (klik -> event "aira:navigate").
 // - Ruang bawah untuk MobileNav (h-14 + safe area) dipindah ke <main>.
+//
+// PERUBAHAN (Lokasi): AccessLocationReporter melapor "diakses dari mana" ke
+// server tiap sesi aktif berganti.
 
 import { useCallback, useEffect, useState } from "react";
 import Sidebar from "./components/Sidebar.jsx";
@@ -28,6 +31,7 @@ import { SessionsProvider } from "./context/SessionsContext.jsx";
 import { ChatRuntimeProvider } from "./context/ChatRuntimeContext.jsx";
 import { ToastProvider } from "./components/Toast.jsx";
 import BootGate from "./components/boot/BootGate.jsx";
+import AccessLocationReporter from "./components/location/AccessLocationReporter.jsx";
 
 const PAGES = {
   chat: ChatPage,
@@ -106,6 +110,7 @@ export default function App() {
     <ToastProvider>
       <SessionsProvider>
         <ChatRuntimeProvider isOnChatPage={active === "chat"}>
+          <AccessLocationReporter />
           <BootGate>
             <div className="h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
               <Sidebar
