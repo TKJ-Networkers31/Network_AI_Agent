@@ -1,18 +1,3 @@
-"""
-core/dio/interaction_memory.py — InteractionMemory, Phase 2.4.
-
-BERBEDA dari Chat Memory (core/memory.py::ConversationMemory / tabel
-facts) — itu TIDAK disentuh sama sekali. InteractionMemory murni
-menyimpan CONTEXT INTERAKSI lintas sesi yang generik lintas domain
-(last_project, last_workspace, last_date, recent_choice, last_file,
-dst) - key/value apa pun yang caller (REI Planner / agent mana pun)
-ingin diingat supaya DIOAnalyzer bisa menutup 'missing_data' tanpa
-selalu bertanya ulang ke user.
-
-SQLite terpisah (database/interaction_memory.db) — satu .db, satu
-pemilik modul, sesuai konvensi docs/database.md.
-"""
-
 import json
 import sqlite3
 import threading
@@ -31,12 +16,6 @@ DEFAULT_DB_FILE = BASE_DIR / "database" / "interaction_memory.db"
 
 
 class InteractionMemory:
-    """
-    Satu instance = satu koneksi logis ke database/interaction_memory.db
-    (atau path custom, dipakai unit test lewat parameter db_path). TTL
-    per-key configurable saat save(); default
-    DEFAULT_INTERACTION_MEMORY_TTL_SECONDS kalau tidak diisi.
-    """
 
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = Path(db_path) if db_path else DEFAULT_DB_FILE
@@ -60,8 +39,6 @@ class InteractionMemory:
                 )
             """)
             conn.commit()
-
-    # -------------------------- SAVE --------------------------
 
     def save(self, key: str, value: Any, ttl_seconds: Optional[float] = None) -> dict:
         if not key:
@@ -88,12 +65,7 @@ class InteractionMemory:
         logger.debug("INTERACTION MEMORY SAVE | key=%s ttl=%s", key, ttl)
         return {"success": True, "key": key}
 
-    # -------------------------- LOAD --------------------------
-
     def load(self, key: str) -> Any:
-        """Return value tersimpan, atau None kalau tidak ada / sudah
-        expired (baris expired otomatis dihapus saat ditemukan)."""
-
         with closing(self._connect()) as conn:
             row = conn.execute(
                 "SELECT value, expires_at FROM interaction_context WHERE key = ?", (key,)
@@ -111,17 +83,10 @@ class InteractionMemory:
         except (json.JSONDecodeError, TypeError):
             return None
 
-    # -------------------------- UPDATE --------------------------
-
     def update(self, key: str, partial: dict, ttl_seconds: Optional[float] = None) -> dict:
-        """Merge dict parsial ke value yang sudah ada (kalau value bukan
-        dict, ditimpa total oleh 'partial')."""
-
         current = self.load(key)
         merged = {**current, **partial} if isinstance(current, dict) else dict(partial)
         return self.save(key, merged, ttl_seconds=ttl_seconds)
-
-    # -------------------------- CLEAR --------------------------
 
     def clear(self, key: Optional[str] = None) -> dict:
         with self._lock:
@@ -142,13 +107,7 @@ class InteractionMemory:
                 conn.execute("DELETE FROM interaction_context WHERE key = ?", (key,))
                 conn.commit()
 
-    # -------------------------- MAINTENANCE --------------------------
-
     def purge_expired(self) -> int:
-        """Hapus semua baris yang sudah lewat TTL. Opsional dipanggil
-        core/scheduler.py secara periodik — TIDAK dipanggil otomatis
-        oleh load()/save() di luar key yang diakses langsung."""
-
         now = time.time()
 
         with self._lock:

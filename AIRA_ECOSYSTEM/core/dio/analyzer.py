@@ -1,29 +1,3 @@
-"""
-core/dio/analyzer.py — DIOAnalyzer, Phase 2.1 (Intent Analyzer).
-
-Analyzer TIDAK memanggil LLM apa pun (itu tetap wewenang
-agents/rei/provider_client.py) dan TIDAK menghasilkan UI apa pun — ia
-murni menyusun ulang keluaran reasoning planner (planner_output) jadi
-InteractionPlan yang konsisten, sambil menutup gap dengan data yang
-sudah diketahui dari InteractionMemory (preferensi lintas sesi seperti
-last_project/last_workspace) dan available_capability (kontrak field
-yang dimengerti capability/tool tujuan).
-
-planner_output diharapkan berbentuk dict longgar, contoh:
-    {
-        "intent": "create_folder",
-        "confidence": 0.9,
-        "known_data": {"workspace": "Projects"},
-        "missing_data": [{"key": "folder_name", "label": "Nama Folder"}],
-        "choices": [],
-        "danger": False,
-        "needs_review": False,
-        "priority": "normal",
-    }
-REI Planner (agents/rei/planner.py) yang bertugas menyusun dict ini -
-DIOAnalyzer HANYA menormalkan bentuknya, tidak tahu domain apa pun.
-"""
-
 from typing import Any, Optional
 
 from core.dio.models import InteractionPlan, MissingField, ChoiceOption
@@ -54,9 +28,6 @@ class DIOAnalyzer:
 
         missing_fields = [self._to_missing_field(m) for m in raw_missing]
 
-        # Tutup gap pakai InteractionMemory (context lintas sesi, lintas
-        # domain) - field yang sudah diketahui pindah dari missing ke
-        # known, TANPA menyentuh Chat Memory (core/memory.py) sama sekali.
         if self.memory is not None:
             still_missing = []
             for missing in missing_fields:

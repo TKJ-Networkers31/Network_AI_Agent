@@ -1,15 +1,3 @@
-"""
-core/dio/schema.py — Dynamic Interaction Orchestrator (DIO), Phase 2.0.
-
-Titik masuk publik tunggal yang merangkai:
-    DIOAnalyzer -> SchemaBuilder -> SchemaValidator -> InteractionMemory
-lalu publish event lifecycle (interaction.started/generated/completed/
-cancelled) lewat core/events.py::event_bus (TIDAK diubah sama sekali).
-
-DIO tidak tahu domain apa pun (Router/Docker/OCR/dst) — semua domain
-berasal dari REI Planner (agents/rei/planner.py) via planner_output.
-"""
-
 import logging
 import time
 from typing import Any, Optional
@@ -31,13 +19,6 @@ logger = logging.getLogger("aira.dio")
 
 
 class DIO:
-    """
-    Public API Phase 2.0. Method utama: generate_schema().
-    Input: InteractionPlan. Output: InteractionSchema (TETAP
-    dikembalikan meski tidak valid — lihat metadata['validation'];
-    DIO tidak pernah crash hanya karena schema tidak valid, sesuai
-    Phase 2.5 "jangan crash").
-    """
 
     def __init__(
         self,
@@ -50,10 +31,6 @@ class DIO:
         self.analyzer = analyzer or DIOAnalyzer(memory=self.memory)
         self.builder = builder or SchemaBuilder()
         self.validator = validator or SchemaValidator()
-
-    # ------------------------------------------------------------
-    # JALUR PINTAS: planner_output mentah -> InteractionSchema
-    # ------------------------------------------------------------
 
     def analyze_and_generate(
         self,
@@ -71,10 +48,6 @@ class DIO:
             context=context,
         )
         return self.generate_schema(plan, title=title, description=description)
-
-    # ------------------------------------------------------------
-    # METHOD UTAMA (Public API Phase 2.0)
-    # ------------------------------------------------------------
 
     def generate_schema(
         self,
@@ -108,11 +81,6 @@ class DIO:
 
         return schema
 
-    # ------------------------------------------------------------
-    # LIFECYCLE: dipanggil caller setelah user menyelesaikan /
-    # membatalkan interaksi.
-    # ------------------------------------------------------------
-
     def complete(self, schema: InteractionSchema, plan: InteractionPlan, result_values: dict) -> None:
         self._publish(EVENT_INTERACTION_COMPLETED, plan,
                        extra={"schema_id": schema.id, "values": result_values})
@@ -120,10 +88,6 @@ class DIO:
     def cancel(self, schema: InteractionSchema, plan: InteractionPlan, reason: str = "user_cancelled") -> None:
         self._publish(EVENT_INTERACTION_CANCELLED, plan,
                        extra={"schema_id": schema.id, "reason": reason})
-
-    # ------------------------------------------------------------
-    # INTERNAL
-    # ------------------------------------------------------------
 
     def _publish(self, event_name: str, plan: InteractionPlan, extra: Optional[dict] = None) -> None:
         data: dict[str, Any] = {

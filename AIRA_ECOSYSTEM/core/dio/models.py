@@ -1,13 +1,3 @@
-"""
-core/dio/models.py — dataclass murni untuk Dynamic Interaction
-Orchestrator (DIO), Phase 2.0.
-
-TIDAK ADA import React/JSX/HTML di sini (dan di seluruh core/dio/) -
-Universal Interaction Schema harus 100% serializable (dict/JSON biasa),
-sesuai success criteria Phase 2.0. Rendering jadi tanggung jawab
-Companion Renderer (Sprint 03.5, app/frontend/src/components/dio/).
-"""
-
 from __future__ import annotations
 
 import time
@@ -21,14 +11,8 @@ def _new_id(prefix: str) -> str:
 
 
 def _clean(data: dict) -> dict:
-    """Buang key bernilai None dari hasil asdict() supaya JSON yang
-    dikirim ke Renderer ringkas."""
     return {k: v for k, v in data.items() if v is not None}
 
-
-# ============================================================
-# INTERACTION PLAN (output DIOAnalyzer, input SchemaBuilder)
-# ============================================================
 
 @dataclass
 class ChoiceOption:
@@ -41,9 +25,6 @@ class ChoiceOption:
 
 @dataclass
 class MissingField:
-    """Satu keping data yang REI Planner butuh dari user, sebelum
-    intent bisa dieksekusi sepenuhnya."""
-
     key: str
     data_type: str = "string"
     label: Optional[str] = None
@@ -64,17 +45,12 @@ class MissingField:
 
 @dataclass
 class InteractionPlan:
-    """
-    Hasil reasoning DIOAnalyzer. TIDAK mengandung apa pun soal UI -
-    murni "apa yang diketahui, apa yang kurang, seberapa yakin".
-    """
-
     intent: str
     confidence: float = 0.0
     known_data: dict[str, Any] = field(default_factory=dict)
     missing_data: list[MissingField] = field(default_factory=list)
     suggested_mode: Optional[str] = None
-    priority: str = "normal"  # "low" | "normal" | "high" | "critical"
+    priority: str = "normal"
     danger: bool = False
     needs_review: bool = False
     choices: list[ChoiceOption] = field(default_factory=list)
@@ -88,10 +64,6 @@ class InteractionPlan:
         data["choices"] = [c.to_dict() for c in self.choices]
         return _clean(data)
 
-
-# ============================================================
-# UNIVERSAL INTERACTION SCHEMA (output SchemaBuilder)
-# ============================================================
 
 @dataclass
 class Field:
@@ -110,14 +82,14 @@ class Field:
     max_length: Optional[int] = None
     pattern: Optional[str] = None
     step: Optional[float] = None
-    span: Optional[str] = None          # "full" | None
-    columns: Optional[list[dict]] = None  # untuk type="table"
-    rows: Optional[list[dict]] = None     # untuk type="table"
-    selectable: Optional[bool] = None     # untuk type="table"
-    variant: Optional[str] = None         # untuk type="info"
-    text: Optional[str] = None            # untuk type="info"
-    style: Optional[str] = None           # untuk type="button"
-    action_id: Optional[str] = None       # untuk type="button"
+    span: Optional[str] = None
+    columns: Optional[list[dict]] = None
+    rows: Optional[list[dict]] = None
+    selectable: Optional[bool] = None
+    variant: Optional[str] = None
+    text: Optional[str] = None
+    style: Optional[str] = None
+    action_id: Optional[str] = None
     disabled: bool = False
 
     def to_dict(self) -> dict:
@@ -150,7 +122,7 @@ class Section:
 class Action:
     id: str
     label: str
-    style: str = "secondary"  # "primary" | "secondary" | "danger" | "ghost"
+    style: str = "secondary"
     disabled: bool = False
 
     def to_dict(self) -> dict:
@@ -182,10 +154,6 @@ class InteractionSchema:
             "created_at": self.created_at,
         })
 
-
-# ============================================================
-# VALIDATION RESULT (output SchemaValidator)
-# ============================================================
 
 @dataclass
 class ValidationIssue:

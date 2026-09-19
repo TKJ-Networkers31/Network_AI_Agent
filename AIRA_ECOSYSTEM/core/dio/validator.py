@@ -1,11 +1,3 @@
-"""
-core/dio/validator.py — SchemaValidator, Phase 2.5.
-
-Validasi InteractionSchema SEBELUM dikirim ke Companion Renderer.
-TIDAK PERNAH raise/crash — selalu mengembalikan ValidationResult, bahkan
-untuk schema yang parah rusak (defense-in-depth via try/except).
-"""
-
 from core.dio.models import InteractionSchema, ValidationIssue, ValidationResult
 from core.dio.constants import (
     SUPPORTED_MODES, SUPPORTED_COMPONENTS,
@@ -21,7 +13,7 @@ class SchemaValidator:
         try:
             self._check_mode(schema, issues)
             self._check_sections(schema, issues)
-        except Exception as exc:  # validator TIDAK PERNAH crash caller
+        except Exception as exc:
             issues.append(ValidationIssue(code="internal_error", message=str(exc)))
 
         return ValidationResult(is_valid=len(issues) == 0, issues=issues)

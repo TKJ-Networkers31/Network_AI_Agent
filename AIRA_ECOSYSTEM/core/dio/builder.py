@@ -1,21 +1,3 @@
-"""
-core/dio/builder.py — SchemaBuilder, Phase 2.3 (Schema Builder).
-
-Mengubah InteractionPlan (reasoning murni) jadi Universal Interaction
-Schema (serializable dict-able), TANPA tahu apa pun soal domain
-(Router/Docker/OCR/dst) — hanya membaca field generik
-plan.missing_data / plan.known_data / plan.choices, sesuai prinsip
-"DIO tidak mengetahui domain" (Phase 2.0).
-
-TAMBAHAN (Worker 3 — Location):
-_build_location_permission() menangani mode MODE_LOCATION_PERMISSION -
-satu field khusus tipe "location_permission" yang di frontend menangani
-sendiri alur izin GPS browser (lihat LocationPermissionField.jsx) dan
-langsung memanggil onAction("grant_location"/"deny_location") tanpa
-lewat ActionBar - jadi actions dikosongkan di sini supaya tidak ada
-tombol duplikat.
-"""
-
 from typing import Any, Optional
 
 from core.dio.models import (
@@ -49,7 +31,7 @@ class SchemaBuilder:
             MODE_CHOICE: self._build_choice,
             MODE_MIXED: self._build_mixed,
             MODE_FORM: self._build_form,
-            MODE_WIZARD: self._build_form,  # satu langkah wizard = bentuk form biasa
+            MODE_WIZARD: self._build_form,
             MODE_APPROVAL: self._build_approval,
             MODE_REVIEW: self._build_review,
             MODE_LOCATION_PERMISSION: self._build_location_permission,
@@ -72,8 +54,6 @@ class SchemaBuilder:
                 "priority": plan.priority,
             },
         )
-
-    # ---------------- per-mode builders ----------------
 
     def _build_display(self, plan: InteractionPlan):
         fields = [self._known_data_field(k, v) for k, v in plan.known_data.items()]
@@ -185,13 +165,6 @@ class SchemaBuilder:
         return [section], actions
 
     def _build_location_permission(self, plan: InteractionPlan):
-        """
-        Satu field khusus yang MENGURUS SENDIRI alur izin GPS browser
-        (lihat LocationPermissionField.jsx) - field itu langsung memanggil
-        onAction("grant_location"/"deny_location") begitu browser
-        merespons, jadi tombol ActionBar generik SENGAJA dikosongkan
-        supaya tidak ada tombol duplikat/membingungkan.
-        """
         reason = plan.context.get("reason") or (
             "AIRA butuh mengetahui lokasimu sekarang untuk menjawab permintaan ini."
         )
@@ -206,8 +179,6 @@ class SchemaBuilder:
         section = Section(id="location", fields=[field])
 
         return [section], []
-
-    # ---------------- helpers ----------------
 
     @staticmethod
     def _humanize(text: str) -> str:
