@@ -1,40 +1,52 @@
-// Taruh file ini di: AIRA_ECOSYSTEM/app/frontend/src/components/MobileNav.jsx
-// (TIMPA file lama). Perubahan: menambahkan nav item "Models" (Phase 1.2).
+// src/components/MobileNav.jsx
+//
+// PERUBAHAN (UI Layout): bar bawah tidak lagi berisi 9 item yang di-scroll.
+// Hanya 4 tab utama + tombol "Menu" yang membuka drawer sidebar (berisi
+// semua menu terklasifikasi). Tombol "Menu" menyala kalau halaman aktif
+// bukan salah satu dari 4 tab utama.
+// Tinggi bar (h-14) HARUS sama dengan padding bawah <main> di App.jsx.
 
-const NAV_ITEMS = [
-  { id: "chat", label: "Chat", icon: "💬" },
-  { id: "workspace", label: "Workspace", icon: "📁" },
-  { id: "devices", label: "Devices", icon: "🖧" },
-  { id: "akane", label: "AKANE", icon: "🔌" },
-  { id: "models", label: "Models", icon: "🧩" },
-  { id: "persona", label: "Persona", icon: "🎭" },
-  { id: "memory", label: "Memory", icon: "🧠" },
-  { id: "logs", label: "Logs", icon: "📋" },
-  { id: "settings", label: "Settings", icon: "⚙️" },
-];
-export default function MobileNav({ active, onChange }) {
+import { Menu } from "lucide-react";
+import { ALL_NAV_ITEMS } from "./navConfig.js";
+
+const PRIMARY_IDS = ["chat", "workspace", "devices", "akane"];
+
+const PRIMARY_ITEMS = PRIMARY_IDS.map((id) => ALL_NAV_ITEMS.find((item) => item.id === id)).filter(
+  Boolean
+);
+
+function TabButton({ icon: Icon, label, isActive, onClick }) {
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-panel/95 backdrop-blur border-t border-border pb-[env(safe-area-inset-bottom)]">
-      <div className="flex items-stretch justify-around overflow-x-auto">
-        {NAV_ITEMS.map((item) => {
-          const isActive = active === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => onChange(item.id)}
-              className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-medium transition min-w-[56px]
-                ${isActive ? "text-accent-light" : "text-white/40"}`}
-            >
-              <span className={`text-lg transition-transform ${isActive ? "scale-110" : ""}`}>
-                {item.icon}
-              </span>
-              <span>{item.label}</span>
-              {isActive && (
-                <span className="w-1 h-1 rounded-full bg-accent-light mt-0.5" />
-              )}
-            </button>
-          );
-        })}
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={isActive ? "page" : undefined}
+      className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition
+        ${isActive ? "text-sakura" : "text-text-secondary"}`}
+    >
+      <Icon size={20} strokeWidth={isActive ? 2.3 : 1.9} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+export default function MobileNav({ active, onChange, onOpenMenu }) {
+  const moreActive = !PRIMARY_IDS.includes(active);
+
+  return (
+    <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface/95 backdrop-blur-xl border-t border-border pb-[env(safe-area-inset-bottom)]">
+      <div className="grid grid-cols-5 h-14">
+        {PRIMARY_ITEMS.map((item) => (
+          <TabButton
+            key={item.id}
+            icon={item.icon}
+            label={item.label}
+            isActive={active === item.id}
+            onClick={() => onChange(item.id)}
+          />
+        ))}
+
+        <TabButton icon={Menu} label="Menu" isActive={moreActive} onClick={onOpenMenu} />
       </div>
     </nav>
   );

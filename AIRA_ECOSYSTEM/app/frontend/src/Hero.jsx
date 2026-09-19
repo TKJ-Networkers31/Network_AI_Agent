@@ -1,4 +1,11 @@
 // app/frontend/src/Hero.jsx
+//
+// PERUBAHAN: lingkaran gradient berisi emoji 🌸 diganti emblem core sakura
+// (BrandEmblem). Emblem di Hero diperbesar (size={130} x EMBLEM_SCALE = ~169px)
+// dan wadah glow-nya (w-44 h-44) ikut dibesarkan.
+
+import BrandEmblem from "./components/BrandEmblem.jsx";
+
 const DEFAULT_PROMPTS = [
   { label: "Cek resource device", icon: "📊" },
   { label: "Apa isi Workspace-ku?", icon: "📁" },
@@ -32,14 +39,12 @@ const QUICK_START_CARDS = [
 export default function Hero({ greeting, onQuickPrompt, prompts = DEFAULT_PROMPTS }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center text-center px-4 py-10 min-h-[50vh]">
-      <div className="relative w-24 h-24 mb-6">
+      <div className="relative w-44 h-44 mb-4 flex items-center justify-center">
         <span
-          className="absolute inset-0 rounded-pill bg-core-glow blur-xl opacity-70"
+          className="absolute inset-0 rounded-pill bg-core-glow blur-xl opacity-60"
           aria-hidden="true"
         />
-        <div className="relative w-24 h-24 rounded-pill bg-sakura-gradient shadow-sakura-glow flex items-center justify-center text-3xl">
-          🌸
-        </div>
+        <BrandEmblem size={130} glow className="relative" />
       </div>
 
       <h2 className="text-hero font-semibold text-text-primary max-w-lg">

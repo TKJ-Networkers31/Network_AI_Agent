@@ -1,31 +1,20 @@
 // AIRA_ECOSYSTEM/app/frontend/src/pages/ChatPage.jsx
 //
 // FIX (Optimalisasi Greeting):
-// - buildGreeting() sekarang dibungkus useMemo, key-nya `persona` saja.
-//   Sebelumnya dipanggil langsung di JSX setiap render (termasuk render
-//   yang dipicu state lain seperti loading/liveTools) - walau hasilnya
-//   deterministik per jam, pemanggilan berulang ini yang bikin greeting
-//   di Hero terasa "kedip"/berubah saat komponen re-render cepat
-//   (mis. saat liveTools streaming). Dengan useMemo, teks greeting HANYA
-//   dihitung ulang kalau object `persona` berubah (ganti profil/preset),
-//   bukan di setiap render.
-// - Tidak ada lagi pesan pembuka statis dari backend/LLM di sini - Hero
-//   murni client-side (tidak memanggil sendMessage/API apa pun), jadi
-//   user tidak pernah "dipaksa menyapa dulu" sebelum bisa chat normal.
+// - buildGreeting() dibungkus useMemo, key-nya `persona` saja, supaya greeting
+//   di Hero tidak "kedip" saat komponen re-render (loading/liveTools).
+// - Tidak ada pesan pembuka statis dari backend/LLM - Hero murni client-side.
 //
 // PERUBAHAN (Chat Session):
 // - Tombol Stop (ChatInput), Edit prompt, Salin, dan Buat ulang jawaban
 //   (MessageBubble) disambungkan ke ChatRuntimeContext.
-// - `loading` / `switching` sekarang milik SESI AKTIF saja (lihat
-//   ChatRuntimeContext) - input tidak lagi terkunci gara-gara sesi lain.
-// - FIX: status "form sudah dikirim" dulu disimpan di Set index milik
-//   halaman ini - dipakai bersama SEMUA sesi dan bergeser saat pesan
-//   berubah, jadi form di sesi/posisi lain bisa salah tampil "sudah
-//   dikirim". Sekarang flag itu disimpan di pesannya sendiri.
-// - Key bubble menyertakan session id supaya state lokal bubble (mis.
-//   kotak edit yang sedang terbuka) tidak terbawa ke sesi lain.
+// - `loading` / `switching` milik SESI AKTIF saja.
+// - Status "form sudah dikirim" disimpan di pesannya sendiri.
+// - Key bubble menyertakan session id.
 //
-// Sisanya (voice call mode, tools slash-menu, dsb) PERSIS seperti sebelumnya.
+// PERUBAHAN (UI Layout): area pesan full-width (scrollbar di tepi kanan)
+// dengan konten dibatasi max-w-4xl di tengah; ChatInput menempel ke bawah.
+// Logic TIDAK berubah.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
@@ -73,14 +62,11 @@ export default function ChatPage({ onOpenMenu }) {
 
   const { notify } = useToast();
 
-  // FIX: dihitung sekali per perubahan `persona`, bukan tiap render -
-  // mencegah teks Hero berubah/kedip saat state chat lain (loading,
-  // liveTools) berubah selama render normal.
   const greetingText = useMemo(() => buildGreeting(persona), [persona]);
 
-  // Posisi pesan user terakhir, pesan non-lokal terakhir, dan pesan
-  // assistant yang boleh menampilkan tombol "Buat ulang" (jawaban atas
-  // pesan user terakhir, sebelum ada pesan user lain sesudahnya).
+  // Posisi pesan non-lokal terakhir, dan pesan assistant yang boleh
+  // menampilkan tombol "Buat ulang" (jawaban atas pesan user terakhir,
+  // sebelum ada pesan user lain sesudahnya).
   const { lastNonLocalIdx, regenIdx } = useMemo(() => {
     let lastUser = -1;
     let lastNonLocal = -1;
@@ -235,70 +221,72 @@ export default function ChatPage({ onOpenMenu }) {
         wsStatus={wsStatus}
       />
 
-      <div className="flex-1 overflow-y-auto min-h-0 space-y-3 sm:space-y-4 pr-1 pb-3">
-        {switching && (
-          <p className="text-white/30 text-sm text-center mt-10">
-            Memuat percakapan...
-          </p>
-        )}
+      {/* Area pesan: full-width (scrollbar di tepi kanan), konten di tengah */}
+      <div className="flex-1 overflow-y-auto min-h-0 -mx-3 sm:-mx-5 lg:-mx-6 px-3 sm:px-5 lg:px-6">
+        <div className="max-w-4xl mx-auto w-full space-y-3 sm:space-y-4 pb-3">
+          {switching && (
+            <p className="text-white/30 text-sm text-center mt-10">
+              Memuat percakapan...
+            </p>
+          )}
 
-        {!switching && messages.length === 0 && !loading && (
-          <Hero
-            greeting={greetingText}
-            onQuickPrompt={(text) => handleSend(text)}
+          {!switching && messages.length === 0 && !loading && (
+            <Hero
+              greeting={greetingText}
+              onQuickPrompt={(text) => handleSend(text)}
+            />
+          )}
+
+          {!switching &&
+            messages.map((m, i) => (
+              <MessageBubble
+                key={`${activeId || "baru"}-${i}`}
+                role={m.role}
+                content={m.content}
+                steps={m.steps}
+                isNew={m.isNew}
+                local={m.local}
+                interactionSchema={m.interactionSchema}
+                interactionResolved={Boolean(m.interactionResolved)}
+                onSubmitInteraction={(actionId, values) =>
+                  handleInteractionSubmit(i, actionId, values)
+                }
+                busy={loading}
+                canRegenerate={i === regenIdx}
+                onRegenerate={regenerate}
+                hasFollowing={i < lastNonLocalIdx}
+                onEdit={m.role === "user" ? (text) => editMessage(i, text) : undefined}
+              />
+            ))}
+
+          {loading && (
+            <div className="flex justify-start">
+              <LiveSteps phase={phase} liveTools={liveTools} />
+            </div>
+          )}
+
+          <div ref={bottomRef} />
+        </div>
+      </div>
+
+      {/* Input menempel ke bawah (full-bleed diatur di dalam ChatInput) */}
+      <ChatInput
+        onSend={handleSend}
+        disabled={loading || switching}
+        isRunning={loading}
+        onStop={() => stopRun()}
+        tools={tools}
+        voiceControls={
+          <VoiceControls
+            supported={voiceCall.supported}
+            listening={voiceCall.callActive || voiceConnecting}
+            speaking={voiceCall.speaking}
+            speakEnabled={voiceCall.callActive}
+            onToggleListen={handleToggleVoiceCall}
+            onToggleSpeak={handleToggleVoiceCall}
           />
-        )}
-
-        {!switching &&
-          messages.map((m, i) => (
-            <MessageBubble
-              key={`${activeId || "baru"}-${i}`}
-              role={m.role}
-              content={m.content}
-              steps={m.steps}
-              isNew={m.isNew}
-              local={m.local}
-              interactionSchema={m.interactionSchema}
-              interactionResolved={Boolean(m.interactionResolved)}
-              onSubmitInteraction={(actionId, values) =>
-                handleInteractionSubmit(i, actionId, values)
-              }
-              busy={loading}
-              canRegenerate={i === regenIdx}
-              onRegenerate={regenerate}
-              hasFollowing={i < lastNonLocalIdx}
-              onEdit={m.role === "user" ? (text) => editMessage(i, text) : undefined}
-            />
-          ))}
-
-        {loading && (
-          <div className="flex justify-start">
-            <LiveSteps phase={phase} liveTools={liveTools} />
-          </div>
-        )}
-
-        <div ref={bottomRef} />
-      </div>
-
-      <div className="mt-2 sm:mt-3 mb-1">
-        <ChatInput
-          onSend={handleSend}
-          disabled={loading || switching}
-          isRunning={loading}
-          onStop={() => stopRun()}
-          tools={tools}
-          voiceControls={
-            <VoiceControls
-              supported={voiceCall.supported}
-              listening={voiceCall.callActive || voiceConnecting}
-              speaking={voiceCall.speaking}
-              speakEnabled={voiceCall.callActive}
-              onToggleListen={handleToggleVoiceCall}
-              onToggleSpeak={handleToggleVoiceCall}
-            />
-          }
-        />
-      </div>
+        }
+      />
     </div>
   );
 }
