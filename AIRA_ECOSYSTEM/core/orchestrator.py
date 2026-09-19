@@ -2,13 +2,11 @@
 core/orchestrator.py — otak routing AIRA.
 User -> AIRA -> REI (Planning) -> AKANE/HIKARI/REI-tools -> AIRA -> User
 
-PERUBAHAN (Chat Session: tombol Stop):
-route() menerima 'cancel_event' opsional dan meneruskannya ke
-Planner.run(). Tanpa argumen itu, perilaku sama persis seperti sebelumnya.
-
-PERUBAHAN (Sprint 1 - Model Router):
-route() menerima 'selected_model' (SelectedModel dari Model Router, dipilih
-Brain) dan meneruskannya ke Planner.run(). Orchestrator tidak memilih model.
+route() menerima:
+  - cancel_event   : threading.Event untuk tombol Stop (diteruskan ke Planner)
+  - selected_model : SelectedModel dari Model Router (dipilih Brain)
+Orchestrator tidak memilih model. Tidak ada lagi callback on_event: event
+realtime lewat Event Bus.
 """
 
 import logging
@@ -41,12 +39,11 @@ class Orchestrator:
             dangerous_tools=DANGEROUS_TOOLS,
         )
 
-    def route(self, user_input: str, memory, on_event=None, cancel_event=None, selected_model=None) -> dict:
+    def route(self, user_input: str, memory, cancel_event=None, selected_model=None) -> dict:
         start = time.perf_counter()
         result = self.planner.run(
             user_input, memory,
             tool_executor=self._execute_tool,
-            on_event=on_event,
             cancel_event=cancel_event,
             selected_model=selected_model,
         )

@@ -118,12 +118,10 @@ WILDCARD = "*"
 
 class EventNames:
     """
-    Nama event standar AIRA OS.
+    Nama event standar AIRA OS. Konvensi: <domain>.<action>
 
-    Konvensi: <domain>.<action>
-
-    Catatan kompatibilitas: string di bawah SAMA PERSIS dengan yang sudah
-    dipakai modul lain (core/model_types.py, core/dio/constants.py, dst).
+    SATU sumber kebenaran: modul lain (core/dio/constants.py,
+    core/model_types.py, dst) mengimpor dari sini, bukan menulis ulang string.
     """
 
     # CHAT
@@ -170,6 +168,24 @@ class EventNames:
     # LOCATION
     LOCATION_UPDATED = "location.updated"
     LOCATION_CLEARED = "location.cleared"
+
+    # CONNECTION (AKANE)
+    CONNECTION_OPENED = "connection.opened"
+    CONNECTION_CLOSED = "connection.closed"
+    CONNECTION_COMMAND = "connection.command"
+    CONNECTION_ERROR = "connection.error"
+    CONNECTION_TIMEOUT = "connection.timeout"
+
+    # FILESYSTEM (FSE)
+    FILE_CREATED = "file.created"
+    FILE_UPDATED = "file.updated"
+    FILE_DELETED = "file.deleted"
+    FILE_RESTORED = "file.restored"
+    PERMISSION_DENIED = "permission.denied"
+    WORKSPACE_INITIALIZED = "workspace.initialized"
+
+    # HOST (HAL)
+    HOST_DETECTED = "host.detected"
 
 
 STANDARD_EVENTS: frozenset[str] = frozenset(

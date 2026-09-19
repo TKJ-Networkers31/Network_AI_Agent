@@ -2,32 +2,27 @@
 agents/rei/dio_tools.py — wrapper tipis REI di atas Dynamic Interaction
 Orchestrator (core/dio/*).
 
-request_structured_input() TIDAK BERUBAH dari sebelumnya.
+Tool untuk LLM:
+  - request_structured_input(): form/pilihan interaktif umum.
+  - request_location_permission(): izin GPS browser + menyimpan permintaan
+    asli user supaya dilanjutkan otomatis setelah izin diberikan.
 
-TAMBAHAN (Worker 3 — DIO + Location):
-1. request_location_permission() - dipanggil LLM saat perlu tahu lokasi
-   presisi user SEKARANG tapi lokasi akses sesi ini belum diketahui dari
-   GPS browser. Membuat schema DIO mode "location_permission" DAN
-   menyimpan "pending location request" (session_id, permintaan asli
-   user, created_at) lewat InteractionMemory (TTL 10 menit) - inilah
-   yang membuat permintaan asli user bisa DILANJUTKAN OTOMATIS begitu
-   izin diberikan, TANPA user perlu mengetik ulang.
-2. submit_structured_input() diperluas: kalau schema_id yang di-submit
-   cocok dengan pending location request, validasi koordinat lalu simpan
-   lewat core/location/service.py::LocationService.update_access() (yang
-   SUDAH mempublish event "location.updated" ke event_bus - tidak ada
-   event bus baru dibuat di sini).
-3. build_submission_message() diperluas: kalau submission ini adalah
-   hasil location grant/deny, balas dengan instruksi yang membawa
-   permintaan asli user (original_request) supaya LLM melanjutkan
-   permintaan itu, bukan menjawab form kosong.
+Alur submission (dipakai chat.py DAN ws.py lewat satu helper):
+  resolve_submission(dio_submission) -> (display_message, llm_message)
 
-Session_id didapat dari agents/rei/planner.py yang menyisipkannya
-otomatis ke argumen tool ini (lihat planner.py) - LLM sendiri TIDAK
-diminta menyebut session_id di schema tool-nya.
+KEAMANAN:
+  - Key yang mengandung pass/secret/token/community/api_key TIDAK PERNAH
+    disimpan ke interaction_memory dan dimasker di display_message.
+  - Event interaction.completed/cancelled hanya membawa NAMA field (keys),
+    bukan nilainya (password/koordinat tidak boleh masuk log/event).
+  - Key interaction_memory diberi namespace "<schema_id>:<key>".
+
+session_id untuk request_location_permission diisi otomatis oleh
+agents/rei/planner.py - LLM tidak diminta menyebutkannya.
 """
 
 import json
+import re
 import time
 from typing import Optional
 
@@ -41,7 +36,13 @@ from core.location import location_service
 from core.location.models import LocationContext, ROLE_ACCESS, SOURCE_BROWSER
 
 LOCATION_PENDING_KEY_PREFIX = "pending_location_request:"
-LOCATION_PENDING_TTL_SECONDS = 600  # 10 menit - cukup untuk user merespons dialog izin browser
+LOCATION_PENDING_TTL_SECONDS = 600  # 10 menit - cukup untuk merespons dialog izin browser
+
+SENSITIVE_KEY_RE = re.compile(r"pass|secret|token|community|api.?key", re.IGNORECASE)
+
+
+def _is_sensitive(key) -> bool:
+    return bool(SENSITIVE_KEY_RE.search(str(key)))
 
 
 def _to_missing_field(raw: dict) -> MissingField:
@@ -67,6 +68,8 @@ def _to_choice(raw: dict) -> ChoiceOption:
     return ChoiceOption(value=raw["value"], label=raw.get("label", raw["value"]))
 
 
+# ============================================================ TOOL: form umum
+
 def request_structured_input(
     intent: str,
     missing_fields: Optional[list] = None,
@@ -77,10 +80,12 @@ def request_structured_input(
     description: Optional[str] = None,
 ) -> dict:
     """
-    Dipanggil oleh LLM kapan pun informasi dari user KURANG atau AMBIGU
-    untuk menjalankan suatu permintaan (form/pilihan interaktif umum).
-    Untuk kebutuhan LOKASI PRESISI user, pakai request_location_permission
-    di bawah, BUKAN tool ini.
+    Dipanggil LLM kapan pun informasi dari user KURANG atau AMBIGU.
+    Untuk kebutuhan LOKASI PRESISI, pakai request_location_permission.
+
+    Kalau schema hasil build tidak lolos validator (mis. select tanpa
+    options), tool mengembalikan success=False beserta daftar issue supaya
+    LLM bisa memperbaiki panggilannya - bukan menampilkan form rusak.
     """
 
     plan = InteractionPlan(
@@ -94,6 +99,16 @@ def request_structured_input(
 
     schema = get_dio().generate_schema(plan, title=title, description=description)
 
+    validation = (schema.metadata or {}).get("validation") or {}
+
+    if not validation.get("is_valid", False):
+        return {
+            "success": False,
+            "tool": "request_structured_input",
+            "error": "Schema interaksi tidak valid. Perbaiki argumen lalu panggil ulang.",
+            "issues": validation.get("issues", []),
+        }
+
     return {
         "success": True,
         "tool": "request_structured_input",
@@ -101,18 +116,16 @@ def request_structured_input(
     }
 
 
+# ======================================================= TOOL: izin lokasi
+
 def request_location_permission(
     original_request: str,
     reason: Optional[str] = None,
     session_id: Optional[str] = None,
 ) -> dict:
     """
-    Dipanggil LLM ketika permintaan user butuh lokasi presisi user
-    SEKARANG (mis. "aku dimana?", "cuaca di sekitarku") TAPI lokasi
-    akses sesi ini belum diketahui dari GPS browser (cek blok KONTEKS
-    LOKASI di system prompt). Membuat form izin lokasi interaktif di
-    frontend DAN menyimpan permintaan asli user supaya bisa dilanjutkan
-    otomatis begitu user merespons.
+    Dipanggil LLM saat permintaan user butuh lokasi presisi SEKARANG dan
+    lokasi akses sesi belum bersumber dari GPS browser.
 
     `session_id` diisi otomatis oleh planner - JANGAN diminta dari LLM.
     """
@@ -154,8 +167,7 @@ def request_location_permission(
             },
         )
     except Exception:
-        # publish event tidak boleh menggagalkan pembuatan form izin.
-        pass
+        pass  # publish event tidak boleh menggagalkan pembuatan form izin
 
     return {
         "success": True,
@@ -166,9 +178,8 @@ def request_location_permission(
 
 def _handle_location_grant(pending: dict, values: dict) -> dict:
     """
-    Validasi koordinat dari browser lalu simpan sebagai lokasi akses sesi
-    ini lewat LocationService yang SUDAH ADA (tidak ada layer persistensi
-    baru). Return dict {"granted": bool, ...} - TIDAK PERNAH raise.
+    Validasi koordinat lalu simpan sebagai lokasi akses sesi lewat
+    LocationService. Return {"granted": bool, ...} - TIDAK PERNAH raise.
     """
 
     try:
@@ -189,9 +200,6 @@ def _handle_location_grant(pending: dict, values: dict) -> dict:
     session_id = pending.get("session_id")
 
     if not session_id:
-        # Tidak ada session_id (mis. dipanggil dari mode terminal run_chat.py
-        # yang tidak berbasis sesi web) - tidak ada tempat yang sah untuk
-        # menyimpan lokasi akses per-sesi.
         return {"granted": False, "reason": "missing_session"}
 
     context = LocationContext(
@@ -208,6 +216,8 @@ def _handle_location_grant(pending: dict, values: dict) -> dict:
     return {"granted": True, "latitude": latitude, "longitude": longitude, "accuracy": accuracy}
 
 
+# ===================================================== SUBMISSION HANDLING
+
 def submit_structured_input(
     schema_id: str,
     action_id: str,
@@ -215,14 +225,9 @@ def submit_structured_input(
     cancelled: bool = False,
 ) -> dict:
     """
-    Dipanggil LANGSUNG oleh api/routers/chat.py dan api/routers/ws.py
-    begitu user menekan aksi pada form/pilihan interaktif.
-
-    Kalau schema_id ini adalah pending location request: validasi &
-    simpan koordinat (atau catat penolakan), lalu pending request
-    dihapus (sekali pakai). Return membawa 'pending_location' dan
-    'location_result' supaya build_submission_message() bisa
-    menyusun instruksi resume yang tepat.
+    Menjalankan efek samping submission. SINKRON dan bisa melakukan HTTP
+    (reverse_geocode, timeout hingga 4 detik) - dari kode async WAJIB lewat
+    asyncio.to_thread (resolve_submission() dipakai untuk itu).
     """
     values = values or {}
     saved_keys: list[str] = []
@@ -240,15 +245,16 @@ def submit_structured_input(
             # deny_location, atau cancelled=True dari jalur mana pun.
             location_result = {"granted": False, "reason": "denied"}
 
-        # Pending request selalu sekali pakai - baik berhasil maupun ditolak.
+        # Pending request selalu sekali pakai.
         memory.clear(pending_key)
 
     elif not cancelled:
-        # Jalur generik lama (form non-lokasi) - perilaku TIDAK berubah.
         for key, value in values.items():
             if value is None or value == "":
                 continue
-            memory.save(key, value)
+            if _is_sensitive(key):
+                continue  # password/secret/token tidak pernah disimpan
+            memory.save(f"{schema_id}:{key}", value)  # namespace per schema
             saved_keys.append(key)
 
     event_name = "interaction.cancelled" if cancelled else "interaction.completed"
@@ -256,7 +262,8 @@ def submit_structured_input(
     try:
         event_bus.publish(
             event_name, agent="DIO",
-            data={"schema_id": schema_id, "action_id": action_id, "values": values},
+            # HANYA nama field, bukan nilainya.
+            data={"schema_id": schema_id, "action_id": action_id, "keys": list(values.keys())},
         )
     except Exception:
         pass
@@ -279,10 +286,9 @@ def build_submission_message(
     """
     Return (display_message, llm_message).
 
-    Kalau submission ini terkait pending location request, jalur
-    KHUSUS: kembalikan permintaan asli user (original_request) supaya
-    LLM melanjutkan permintaan itu - user tidak perlu mengetik ulang.
-    Selain itu, perilaku PERSIS seperti sebelumnya (form/pilihan biasa).
+    display_message disimpan ke chat_turns dan tampil di UI, jadi nilai
+    sensitif dimasker di sini. llm_message tetap membawa nilai asli
+    karena LLM membutuhkannya untuk melanjutkan permintaan.
     """
     action_id = dio_submission.get("action_id", "")
     values = dio_submission.get("values") or {}
@@ -327,7 +333,9 @@ def build_submission_message(
         )
         return display_message, llm_message
 
-    pretty_values = ", ".join(f"{k}={v}" for k, v in values.items()) or "(tidak ada input)"
+    pretty_values = ", ".join(
+        f"{k}={'***' if _is_sensitive(k) else v}" for k, v in values.items()
+    ) or "(tidak ada input)"
     display_message = f"📝 Form terkirim: {pretty_values}"
 
     llm_message = (
@@ -340,3 +348,26 @@ def build_submission_message(
     )
 
     return display_message, llm_message
+
+
+def resolve_submission(dio_submission: dict) -> "tuple[str, str]":
+    """
+    SATU-SATUNYA jalur memproses submission form/izin: efek samping +
+    penyusunan pesan. Dipakai chat.py (langsung) dan ws.py (lewat
+    asyncio.to_thread). Dengan begitu REST dan WebSocket tidak bisa
+    berbeda perilaku lagi.
+
+    Return (display_message, llm_message).
+    """
+    result = submit_structured_input(
+        schema_id=dio_submission.get("schema_id", ""),
+        action_id=dio_submission.get("action_id", ""),
+        values=dio_submission.get("values"),
+        cancelled=bool(dio_submission.get("cancelled")),
+    )
+
+    return build_submission_message(
+        dio_submission,
+        pending_location=result.get("pending_location"),
+        location_result=result.get("location_result"),
+    )

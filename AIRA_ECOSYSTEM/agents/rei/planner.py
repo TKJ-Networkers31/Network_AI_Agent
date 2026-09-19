@@ -1,50 +1,32 @@
 """
 agents/rei/planner.py — REI (Reasoning & Executive Intelligence).
 
-FIX (Optimalisasi DIO - root cause "form tidak pernah tampil"):
-Sebelumnya, hasil tool 'request_structured_input' (berisi
-'interaction_schema') hanya ikut ke dalam 'result_preview' per-step
-(dipotong 400 karakter) - tidak ada jalur khusus yang membawanya keluar
-dari planner sebagai data terstruktur. Sekarang Planner.run() melacak
-'pending_interaction_schema' sepanjang giliran ini: begitu tool
-'request_structured_input' sukses, schema-nya disimpan, lalu disertakan
-di SETIAP titik return sebagai key 'interaction_schema' - mengalir ke
-core/orchestrator.py -> core/brain.py -> api/schemas.py::ChatResponse /
-event WebSocket "response", sampai akhirnya dirender frontend
-(MessageBubble.jsx).
+Loop: LLM -> tool calls -> LLM ... sampai jawaban final.
 
-PERUBAHAN (Chat Session: tombol Stop):
-Planner.run() menerima parameter opsional 'cancel_event' (threading.Event).
-Dicek di titik-titik AMAN: sebelum/ sesudah tiap panggilan LLM dan sebelum
-tiap tool dijalankan. Kalau sudah di-set, run() langsung return dict
-dengan "cancelled": True - tanpa memanggil LLM/tool lagi dan tanpa
-menjalankan ekstraksi memori otomatis. Catatan: panggilan LLM/tool yang
-SEDANG berlangsung (HTTP/SSH) tidak bisa diputus di tengah jalan; stop
-berlaku begitu panggilan itu selesai. Tanpa cancel_event (REST /api/chat,
-run_chat.py) perilakunya PERSIS seperti sebelumnya.
+Event realtime dipublish LANGSUNG ke Event Bus (core/events.py) dengan
+nama bus (thinking.start, tool.start/progress/finish, system.error).
+WebSocket menerimanya lewat api/ws_bridge.py. Tidak ada lagi callback
+on_event: hanya ada SATU sistem event.
 
-PERUBAHAN (Sprint 1 - Model Router):
-Planner.run() menerima 'selected_model' (SelectedModel dari Model Router,
-dipilih Brain SEBELUM planner dipanggil) dan meneruskannya apa adanya ke
-call_model(). REI TIDAK PERNAH memilih model.
+Interaction schema (DIO):
+  Tool di DIO_SCHEMA_TOOLS (request_structured_input,
+  request_location_permission) mengembalikan 'interaction_schema'. Planner
+  menyimpannya sebagai pending_interaction_schema dan menyertakannya di
+  setiap return, sehingga sampai ke frontend.
 
-PERUBAHAN (Worker 1 - Event Bus):
-emit() sekarang mem-PUBLISH ke Event Bus (core/events.py) - satu-satunya
-sistem event internal. Peta nama lama -> nama event bus:
+session_id:
+  Tool di SESSION_AWARE_TOOLS menerima session_id yang disisipkan planner
+  dari memory.session_id (SessionMemory). LLM tidak diminta menyebutnya,
+  dan 'arguments' di steps tetap argumen asli LLM.
 
-    thinking      -> thinking.start
-    tool_start    -> tool.start
-    tool_progress -> tool.progress
-    tool_finish   -> tool.finish
-    error         -> system.error
+Stop:
+  cancel_event (threading.Event) dicek di titik aman: sebelum/sesudah
+  panggilan LLM dan sebelum tiap tool. Kalau set, run() return
+  {"cancelled": True} tanpa ekstraksi memori otomatis.
 
-Subscriber WebSocket (api/ws_bridge.py) menerjemahkannya balik ke protokol
-WebSocket lama, jadi frontend tidak berubah. session_id/run_id/correlation_id
-ditempel otomatis dari core.events.event_scope (diatur ws.py/Brain) - planner
-tidak perlu tahu soal WebSocket.
-
-Parameter 'on_event' TETAP didukung (callback lama, nama event lama) supaya
-pemanggil lain tidak patah; ws.py sendiri tidak lagi memakainya.
+Model:
+  'selected_model' dari Model Router diteruskan apa adanya ke call_model().
+  REI tidak pernah memilih model.
 """
 
 import json
@@ -64,16 +46,11 @@ MAX_TOOL_CALLS = 10
 MAX_EMPTY_RESPONSE_RETRIES = 1
 MAX_REPEATED_IDENTICAL_CALLS = 2
 
-DIO_REQUEST_TOOL_NAME = "request_structured_input"
+# Tool yang hasilnya membawa interaction_schema untuk dirender frontend.
+DIO_SCHEMA_TOOLS = {"request_structured_input", "request_location_permission"}
 
-# nama event lama (on_event / protokol WebSocket) -> nama event bus
-LEGACY_TO_BUS_EVENT = {
-    "thinking": EventNames.THINKING_START,
-    "tool_start": EventNames.TOOL_START,
-    "tool_progress": EventNames.TOOL_PROGRESS,
-    "tool_finish": EventNames.TOOL_FINISH,
-    "error": EventNames.SYSTEM_ERROR,
-}
+# Tool yang butuh session_id (diisi planner, BUKAN diminta dari LLM).
+SESSION_AWARE_TOOLS = {"request_location_permission"}
 
 
 class Planner:
@@ -83,27 +60,19 @@ class Planner:
         self.tool_category = tool_category or {}
         self.dangerous_tools = dangerous_tools or set()
 
-    def run(self, user_input, memory, tool_executor, on_event=None, cancel_event=None, selected_model=None):
-        def emit(event_type, payload):
-            bus_event = LEGACY_TO_BUS_EVENT.get(event_type)
+    def run(self, user_input, memory, tool_executor, cancel_event=None, selected_model=None):
 
-            if bus_event:
-                try:
-                    event_bus.publish(
-                        bus_event,
-                        source="REI",
-                        agent="REI",
-                        tool=payload.get("name") if event_type.startswith("tool_") else None,
-                        data=dict(payload),
-                    )
-                except Exception:
-                    logger.exception("event_bus.publish error (diabaikan)")
-
-            if on_event:
-                try:
-                    on_event(event_type, payload)
-                except Exception:
-                    logger.exception("on_event callback error (diabaikan)")
+        def emit(bus_event, payload):
+            try:
+                event_bus.publish(
+                    bus_event,
+                    source="REI",
+                    agent="REI",
+                    tool=payload.get("name") if bus_event.startswith("tool.") else None,
+                    data=dict(payload),
+                )
+            except Exception:
+                logger.exception("event_bus.publish error (diabaikan)")
 
         def is_cancelled():
             return cancel_event is not None and cancel_event.is_set()
@@ -111,22 +80,24 @@ class Planner:
         steps = []
         memory.add_user(user_input)
 
-        # FIX: dilacak sepanjang giliran ini, disertakan di setiap return.
         pending_interaction_schema = None
 
-        def cancelled_result():
-            logger.info("Planner dihentikan oleh user (cancel_event).")
+        def result_dict(answer, error=False, cancelled=False):
             return {
-                "answer": "",
+                "answer": answer,
                 "steps": steps,
                 "token_usage": memory.token_tracker.last_usage,
                 "session_token_usage": memory.token_tracker.as_dict(),
-                "error": False,
-                "interaction_schema": None,
-                "cancelled": True,
+                "error": error,
+                "interaction_schema": None if cancelled else pending_interaction_schema,
+                **({"cancelled": True} if cancelled else {}),
             }
 
-        emit("thinking", {"message": "Menganalisis permintaan..."})
+        def cancelled_result():
+            logger.info("Planner dihentikan oleh user (cancel_event).")
+            return result_dict("", cancelled=True)
+
+        emit(EventNames.THINKING_START, {"message": "Menganalisis permintaan..."})
 
         if is_cancelled():
             return cancelled_result()
@@ -136,17 +107,16 @@ class Planner:
         response = self._call_with_retry(memory.get_messages(system_prompt), selected_model=selected_model)
 
         if "error" in response:
-            emit("error", {"message": response["error"]})
-            return {
-                "answer": f"Terjadi error saat menghubungi model: {response['error']}",
-                "steps": steps, "token_usage": None, "error": True,
-                "interaction_schema": pending_interaction_schema,
-            }
+            emit(EventNames.SYSTEM_ERROR, {"message": response["error"]})
+            out = result_dict(f"Terjadi error saat menghubungi model: {response['error']}", error=True)
+            out["token_usage"] = None
+            return out
 
         self._track_usage(memory, response)
 
         tool_count = 0
         call_signatures = {}
+        session_id = getattr(memory, "session_id", None)
 
         while True:
             # Titik cek utama: setelah tiap jawaban LLM, sebelum tool jalan.
@@ -161,16 +131,9 @@ class Planner:
             if not tool_calls:
                 answer = message.get("content", "")
                 extract_and_save_facts_async(user_input, answer)
-                return {
-                    "answer": answer,
-                    "steps": steps,
-                    "token_usage": memory.token_tracker.last_usage,
-                    "session_token_usage": memory.token_tracker.as_dict(),
-                    "error": False,
-                    "interaction_schema": pending_interaction_schema,
-                }
+                return result_dict(answer)
 
-            emit("thinking", {"message": f"Menggunakan {len(tool_calls)} tool..."})
+            emit(EventNames.THINKING_START, {"message": f"Menggunakan {len(tool_calls)} tool..."})
 
             for call in tool_calls:
                 if is_cancelled():
@@ -178,15 +141,8 @@ class Planner:
 
                 if tool_count >= MAX_TOOL_CALLS:
                     steps.append({"type": "limit_reached", "message": "Batas jumlah tool call tercapai."})
-                    emit("error", {"message": "Batas jumlah tool call tercapai."})
-                    return {
-                        "answer": "Saya menghentikan proses karena jumlah observasi sudah mencapai batas.",
-                        "steps": steps,
-                        "token_usage": memory.token_tracker.last_usage,
-                        "session_token_usage": memory.token_tracker.as_dict(),
-                        "error": False,
-                        "interaction_schema": pending_interaction_schema,
-                    }
+                    emit(EventNames.SYSTEM_ERROR, {"message": "Batas jumlah tool call tercapai."})
+                    return result_dict("Saya menghentikan proses karena jumlah observasi sudah mencapai batas.")
 
                 function = call.get("function", {})
                 name = function.get("name")
@@ -217,7 +173,7 @@ class Planner:
                         "duration": 0,
                         "result_preview": "dilewati (dipanggil berulang tanpa hasil baru)",
                     })
-                    emit("tool_finish", {"name": name, "category": category, "success": False, "duration": 0})
+                    emit(EventNames.TOOL_FINISH, {"name": name, "category": category, "success": False, "duration": 0})
                     memory.add_tool_result(
                         json.dumps({
                             "success": False,
@@ -236,7 +192,7 @@ class Planner:
 
                 if name in self.dangerous_tools:
                     steps.append({"type": "confirmation_required", "name": name, "category": category, "arguments": arguments})
-                    emit("tool_finish", {"name": name, "category": category, "success": False, "skipped": True})
+                    emit(EventNames.TOOL_FINISH, {"name": name, "category": category, "success": False, "skipped": True})
                     memory.add_tool_result(
                         json.dumps({"success": False, "error": "Tool ini butuh konfirmasi manual, dilewati otomatis."}),
                         tool_call_id=call.get("id"),
@@ -244,20 +200,25 @@ class Planner:
                     tool_count += 1
                     continue
 
-                emit("tool_start", {"name": name, "category": category, "arguments": arguments})
-                emit("tool_progress", {"name": name, "category": category, "message": f"Menjalankan {name}..."})
+                emit(EventNames.TOOL_START, {"name": name, "category": category, "arguments": arguments})
+                emit(EventNames.TOOL_PROGRESS, {"name": name, "category": category, "message": f"Menjalankan {name}..."})
+
+                # FIX: session_id disisipkan planner, bukan diminta dari LLM.
+                exec_args = (
+                    {**arguments, "session_id": session_id}
+                    if name in SESSION_AWARE_TOOLS
+                    else arguments
+                )
 
                 step_start = time.perf_counter()
-                result = tool_executor(name, arguments)
+                result = tool_executor(name, exec_args)
                 step_duration = time.perf_counter() - step_start
 
                 tool_count += 1
 
-                # FIX: tangkap interaction_schema begitu request_structured_input
-                # sukses - inilah yang membuatnya bisa dikirim ke frontend
-                # lewat return value planner, alih-alih terkubur di result_preview.
+                # FIX: kedua tool DIO membawa schema keluar lewat return planner.
                 if (
-                    name == DIO_REQUEST_TOOL_NAME
+                    name in DIO_SCHEMA_TOOLS
                     and result.get("success")
                     and result.get("interaction_schema")
                 ):
@@ -265,11 +226,12 @@ class Planner:
 
                 steps.append({
                     "type": "tool_call", "name": name, "category": category,
-                    "arguments": arguments, "success": bool(result.get("success")),
+                    "arguments": arguments,  # argumen asli LLM, tanpa session_id
+                    "success": bool(result.get("success")),
                     "duration": round(step_duration, 3), "result_preview": _preview(result),
                 })
 
-                emit("tool_finish", {
+                emit(EventNames.TOOL_FINISH, {
                     "name": name, "category": category,
                     "success": bool(result.get("success")),
                     "duration": round(step_duration, 3),
@@ -280,20 +242,13 @@ class Planner:
             if is_cancelled():
                 return cancelled_result()
 
-            emit("thinking", {"message": "Menyusun jawaban..."})
+            emit(EventNames.THINKING_START, {"message": "Menyusun jawaban..."})
 
             response = self._call_with_retry(memory.get_messages(system_prompt), selected_model=selected_model)
 
             if "error" in response:
-                emit("error", {"message": response["error"]})
-                return {
-                    "answer": f"Terjadi error saat menghubungi model: {response['error']}",
-                    "steps": steps,
-                    "token_usage": memory.token_tracker.last_usage,
-                    "session_token_usage": memory.token_tracker.as_dict(),
-                    "error": True,
-                    "interaction_schema": pending_interaction_schema,
-                }
+                emit(EventNames.SYSTEM_ERROR, {"message": response["error"]})
+                return result_dict(f"Terjadi error saat menghubungi model: {response['error']}", error=True)
 
             self._track_usage(memory, response)
 

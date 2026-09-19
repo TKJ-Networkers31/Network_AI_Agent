@@ -1,70 +1,31 @@
 """
 api/routers/ws.py — WebSocket realtime streaming untuk AIRA.
 
-FIX (Optimalisasi DIO):
-Pesan client sekarang boleh menyertakan field "dio_submission" (di luar
-"type": "voice_audio") - dipakai untuk hasil submit form/pilihan
-interaktif DIO. Efek sampingnya dijalankan lewat
-agents.rei.dio_tools.submit_structured_input() sebelum Brain.think(),
-dan interaction_schema hasil giliran ini disertakan di event "response"
-+ disimpan ke chat_turns, sama seperti jalur REST (chat.py).
+Menjalankan Brain.think() yang SAMA dengan REST - hanya transport-nya beda.
 
-PERUBAHAN (Chat Session: stop / edit prompt / regenerate / multi-sesi):
+Ringkasan desain:
+- Tiap giliran berjalan sebagai asyncio.Task terpisah (_run_turn), sementara
+  loop receive tetap membaca pesan, sehingga {"type": "cancel"} bisa masuk
+  saat proses berjalan. Task TIDAK dibatalkan saat socket putus: hasil tetap
+  disimpan ke database.
+- run_id per giliran ada di SEMUA event giliran itu; client memakainya untuk
+  membuang event basi dari proses yang sudah di-stop.
+- STOP: threading.Event dicek Planner di titik aman. Hasil giliran yang
+  dihentikan dibuang (memory dikembalikan, tidak ada tulis ke database).
+- EDIT PROMPT / REGENERATE: riwayat dipotong mulai turn tertentu; database
+  baru dipotong SETELAH giliran pengganti sukses.
+- Event realtime (thinking, tool_*, error non-fatal) mengalir:
+  Planner/Brain -> Event Bus -> api/ws_bridge.py -> client. Event protokol
+  milik ws.py sendiri (ack, transcript, response, cancelled, error fatal)
+  dikirim langsung lewat _emit(); sebelum response/error/cancelled,
+  bridge.flush() memastikan semua event tool tiba lebih dulu.
 
-1. RECEIVE-LOOP KONKUREN. Sebelumnya satu giliran diproses DI DALAM loop
-   receive (await think_task), sehingga selama AI bekerja server tidak
-   membaca pesan apa pun dari client. Sekarang tiap giliran dijalankan
-   sebagai asyncio.Task terpisah (_run_turn), dan loop receive tetap
-   membaca - inilah yang memungkinkan pesan {"type": "cancel"} sampai
-   ke server saat proses masih berjalan. Task TIDAK dibatalkan saat
-   socket putus (mis. user pindah sesi/reload): hasil tetap disimpan ke
-   database, sama seperti perilaku sebelumnya.
-
-2. run_id. Client mengirim "run_id" per giliran; server menyertakannya di
-   SEMUA event giliran itu (ack/thinking/tool_*/response/error/cancelled).
-   Client memakainya untuk membuang event basi dari proses yang sudah
-   di-stop, supaya tidak "bocor" ke giliran berikutnya.
-
-3. STOP: {"type": "cancel"} men-set threading.Event yang dicek Planner di
-   titik-titik aman. Hasil giliran yang dihentikan DIBUANG: memory
-   dikembalikan ke kondisi sebelum giliran, tidak ada yang ditulis ke
-   database. Kalau user langsung kirim pesan baru sementara proses lama
-   masih menyelesaikan panggilan LLM/tool terakhirnya, pesan baru
-   menunggu proses lama selesai dulu.
-
-4. EDIT PROMPT: {"message": "...", "replace_from_turn_id": <id>} -
-   REGENERATE: {"type": "regenerate", "replace_from_turn_id": <id user turn>}
-   Riwayat dipotong mulai turn itu, lalu giliran baru dijalankan. Pemotongan
-   di DATABASE baru dilakukan SETELAH giliran pengganti sukses - kalau
-   di-stop atau error, percakapan lama tetap utuh.
-
-5. Event "response" sekarang membawa "user_turn_id" & "assistant_turn_id"
-   (id baris chat_turns) - dipakai frontend sebagai identitas pesan untuk
-   edit/regenerate. Error yang berasal dari server sendiri (bukan dari
-   planner) diberi "fatal": true.
-
-PERUBAHAN (Worker 1 - Event Bus):
-Event realtime dari giliran (thinking, tool_start, tool_progress,
-tool_finish, error non-fatal dari planner) TIDAK lagi lewat callback
-on_event -> queue.Queue -> _drain_queue_to_socket. Sekarang:
-
-    Planner/Brain --publish--> Event Bus --subscriber--> api/ws_bridge.py
-                                                      --> manager.send --> client
-
-  - Setiap giliran dijalankan di dalam core.events.event_scope(
-    correlation_id, session_id, run_id), jadi semua event yang dipublish
-    (juga dari thread pekerja) otomatis tertandai sesi + run-nya. Bridge
-    memakai tanda itu untuk memfilter sesi.
-  - Bentuk pesan WebSocket ke client TIDAK berubah.
-  - Event protokol milik ws.py sendiri (ack, transcript, transcript_empty,
-    response, cancelled, error fatal) tetap dikirim langsung lewat _emit().
-    Sebelum response/error/cancelled dikirim, `await bridge.flush()`
-    memastikan semua event tool yang sudah dipublish tiba lebih dulu
-    (urutan sama seperti drain lama).
-  - Bridge di-start di startup FastAPI (api/main.py) dan idempotent
-    di-ensure lagi saat koneksi WebSocket dibuka.
-
-Sisanya (voice call mode, slash command teks biasa) TIDAK BERUBAH.
+DIO submission (form/izin lokasi):
+  Diproses lewat resolve_submission() (agents/rei/dio_tools.py) - helper
+  yang SAMA dengan REST (chat.py). Karena resolve_submission() sinkron dan
+  bisa melakukan HTTP (reverse_geocode, timeout hingga 4 detik), ia
+  dijalankan lewat asyncio.to_thread supaya event loop (dan semua
+  WebSocket lain) tidak macet.
 """
 
 import asyncio
@@ -79,7 +40,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from agents.yuki.stt import transcribe
 from agents.yuki.tts import synthesize_bytes
-from agents.rei.dio_tools import submit_structured_input, build_submission_message
+from agents.rei.dio_tools import resolve_submission
 from api.state import get_memory, persist_memory, add_global_usage, drop_cache
 from api.ws_bridge import get_ws_bridge
 from api.ws_manager import manager
@@ -87,6 +48,7 @@ from core.brain import Brain
 from core.events import event_scope, new_correlation_id
 from core import chat_sessions as store
 from core.orchestrator import AGENT_TOOL_MAP
+from core.slash_commands import apply_slash_command
 
 logger = logging.getLogger("aira.ws")
 
@@ -96,27 +58,6 @@ router = APIRouter(prefix="/ws", tags=["websocket"])
 # Per SESI (bukan per koneksi) supaya cancel tetap menemukan proses yang
 # berjalan walau socket sempat putus-nyambung.
 _ACTIVE_RUNS: dict[str, dict] = {}
-
-
-def _apply_slash_command(raw_message: str) -> str:
-    if not raw_message.startswith("/"):
-        return raw_message
-
-    parts = raw_message[1:].split(" ", 1)
-    tool_name = parts[0].strip()
-    rest = parts[1].strip() if len(parts) > 1 else ""
-
-    if not tool_name or tool_name not in AGENT_TOOL_MAP:
-        return raw_message
-
-    instruction = rest or f"Jalankan tool {tool_name}."
-
-    return (
-        f"[Instruksi eksplisit dari user: WAJIB gunakan tool "
-        f"'{tool_name}' untuk memenuhi permintaan berikut. Ambil "
-        f"argumen yang diperlukan dari konteks kalimat ini.]\n"
-        f"{instruction}"
-    )
 
 
 def _decode_voice_audio(raw: dict) -> "np.ndarray | None":
@@ -247,35 +188,35 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
         memory.history = store.truncate_history_by_user_turns(backup_history, removed_user_turns)
 
     # --------------------------------------------------
-    # DIO SUBMISSION: efek samping dulu, lalu bangun
-    # instruksi LLM dari data form - alih-alih slash command.
+    # DIO SUBMISSION: efek samping + instruksi LLM lewat SATU helper
+    # (sama dengan REST). Sinkron + bisa HTTP -> jangan blok event loop.
     # --------------------------------------------------
     dio_submission = None if (msg_type == "voice_audio" or is_regenerate) else raw.get("dio_submission")
 
     if dio_submission:
-        submit_structured_input(
-            schema_id=dio_submission.get("schema_id", ""),
-            action_id=dio_submission.get("action_id", ""),
-            values=dio_submission.get("values"),
-            cancelled=bool(dio_submission.get("cancelled")),
-        )
-        _, llm_message = build_submission_message(dio_submission)
+        try:
+            _, llm_message = await asyncio.to_thread(resolve_submission, dio_submission)
+        except Exception as exc:
+            logger.exception("WS resolve_submission gagal | session=%s", session_id)
+            memory.history = backup_history
+            await fail(str(exc))
+            return
     elif regenerated_llm_message:
         llm_message = regenerated_llm_message
     else:
-        llm_message = _apply_slash_command(display_message)
+        llm_message = apply_slash_command(display_message, AGENT_TOOL_MAP)
 
     # --------------------------------------------------
-    # PROSES: SAMA PERSIS untuk teks/suara/dio_submission -
-    # satu jalur reasoning (Brain.think()). Event realtime-nya
-    # dipublish ke Event Bus dan sampai ke client lewat WS bridge.
+    # PROSES: satu jalur reasoning (Brain.think()) untuk teks/suara/DIO.
+    # Event realtime dipublish ke Event Bus dan sampai ke client lewat
+    # WS bridge.
     # --------------------------------------------------
     brain = Brain(memory)
 
     await emit("ack", {"message": display_message})
 
     try:
-        result = await asyncio.to_thread(brain.think, llm_message, None, cancel_event)
+        result = await asyncio.to_thread(brain.think, llm_message, cancel_event)
     except Exception as exc:
         logger.exception("WS think() gagal | session=%s", session_id)
         memory.history = backup_history

@@ -1,38 +1,24 @@
 """
 core/brain.py — satu-satunya pintu masuk publik ke AIRA.
 
-FIX (Optimalisasi DIO):
-BrainResponse sekarang membawa 'interaction_schema' (dict atau None),
-diteruskan apa adanya dari hasil Planner.run() lewat Orchestrator.route()
-- ini yang membuat form/pilihan interaktif DIO bisa sampai ke
-api/routers/chat.py & ws.py, lalu ke frontend.
-
-PERUBAHAN (Chat Session: tombol Stop):
-- think() menerima 'cancel_event' opsional (threading.Event).
-- BrainResponse punya field 'cancelled' (default False) - True kalau
-  giliran ini dihentikan user sebelum selesai.
-
-PERUBAHAN (Sprint 1 - Model Router):
 Flow: prompt -> TaskClassifier -> ModelRouter (+ModelPolicy) -> SelectedModel
 -> Orchestrator/REI. Kegagalan classifier/router tidak pernah menjatuhkan
 giliran: classifier jatuh ke general/0.50, router gagal -> selected=None dan
 provider_client memakai default label general.
 
-PERUBAHAN (Worker 1 - Event Bus):
-Brain sekarang mem-publish siklus hidup satu giliran ke Event Bus
-(core/events.py), semuanya dengan correlation_id yang SAMA:
+Siklus hidup satu giliran dipublish ke Event Bus (core/events.py), semuanya
+dengan correlation_id yang SAMA:
 
     chat.received -> thinking.start -> (task.classified oleh classifier)
       -> task.started -> [tool.* dari Planner] -> thinking.finish
       -> task.finished -> response.ready
 
 correlation_id diambil dari event_scope yang sudah aktif (ws.py mengaturnya
-per giliran); kalau tidak ada (REST/terminal) dibuat baru di sini. session_id
-dan run_id ikut otomatis lewat konteks yang sama.
+per giliran); kalau tidak ada (REST/terminal) dibuat baru di sini.
 
-Parameter 'on_event' TETAP didukung (callback lama) untuk pemanggil yang
-belum bermigrasi; ws.py tidak lagi memakainya - WebSocket menerima event
-lewat api/ws_bridge.py (subscriber Event Bus).
+think() menerima cancel_event (threading.Event) untuk tombol Stop.
+Tidak ada lagi parameter on_event: WebSocket menerima event lewat
+api/ws_bridge.py (subscriber Event Bus).
 """
 
 import logging
@@ -86,14 +72,8 @@ class Brain:
         except Exception:
             logger.exception("BRAIN | gagal publish %s (diabaikan).", event_name)
 
-    def _thinking(self, message: str, on_event=None) -> None:
+    def _thinking(self, message: str) -> None:
         self._publish(EventNames.THINKING_START, message=message)
-
-        if on_event:
-            try:
-                on_event("thinking", {"message": message})
-            except Exception:
-                logger.exception("on_event callback error (diabaikan)")
 
     def _classify(self, user_input: str) -> TaskClassification:
         try:
@@ -111,15 +91,15 @@ class Brain:
 
     # -------------------------------------------------------------- think
 
-    def think(self, user_input: str, on_event=None, cancel_event=None) -> BrainResponse:
+    def think(self, user_input: str, cancel_event=None) -> BrainResponse:
         # Satu giliran = satu correlation_id (pakai yang sudah ada dari
         # ws.py kalau ada, supaya event WS dan event Brain nyambung).
         correlation_id = current_event_context().get("correlation_id") or new_correlation_id()
 
         with event_scope(correlation_id=correlation_id):
-            return self._think(user_input, on_event, cancel_event)
+            return self._think(user_input, cancel_event)
 
-    def _think(self, user_input: str, on_event, cancel_event) -> BrainResponse:
+    def _think(self, user_input: str, cancel_event) -> BrainResponse:
         logger.info("BRAIN | menerima input user (%d char)", len(user_input))
 
         def cancelled() -> bool:
@@ -130,7 +110,7 @@ class Brain:
         if cancelled():
             return BrainResponse(answer="", cancelled=True)
 
-        self._thinking("Mengklasifikasi permintaan...", on_event)
+        self._thinking("Mengklasifikasi permintaan...")
 
         classification = self._classify(user_input)
         selected = self._select(classification)
@@ -151,7 +131,7 @@ class Brain:
         try:
             result = self.orchestrator.route(
                 user_input, self.memory,
-                on_event=on_event, cancel_event=cancel_event, selected_model=selected,
+                cancel_event=cancel_event, selected_model=selected,
             )
             outcome = {
                 "error": bool(result.get("error", False)),

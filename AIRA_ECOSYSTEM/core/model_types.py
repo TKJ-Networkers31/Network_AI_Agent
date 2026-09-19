@@ -8,6 +8,8 @@ itu bisa saling impor tanpa circular import.
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
+from core.events import EventNames
+
 VALID_LABELS = (
     "general", "reasoning", "coding", "networking",
     "vision", "voice", "retrieval", "automation",
@@ -15,10 +17,11 @@ VALID_LABELS = (
 DEFAULT_LABEL = "general"
 VALID_PROVIDERS = ("ollama", "openrouter", "gemini")
 
-EVENT_TASK_CLASSIFIED = "task.classified"
-EVENT_MODEL_SELECTED = "model.selected"
-EVENT_MODEL_FALLBACK = "model.fallback"
-EVENT_MODEL_FAILED = "model.failed"
+# Nilai berasal dari EventNames (satu sumber kebenaran).
+EVENT_TASK_CLASSIFIED = EventNames.TASK_CLASSIFIED
+EVENT_MODEL_SELECTED = EventNames.MODEL_SELECTED
+EVENT_MODEL_FALLBACK = EventNames.MODEL_FALLBACK
+EVENT_MODEL_FAILED = EventNames.MODEL_FAILED
 
 
 @dataclass

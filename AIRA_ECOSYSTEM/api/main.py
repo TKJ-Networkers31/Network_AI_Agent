@@ -4,23 +4,13 @@ api/main.py — entry point FastAPI untuk AIRA.
 Jalankan dari root AIRA_ECOSYSTEM/:
     uvicorn api.main:app --reload --port 8000
 
-FIX (Optimalisasi APCE):
-Menambahkan shutdown event yang memanggil ConnectionManager.shutdown() -
-sebelumnya method ini sudah ada tapi tidak pernah dipanggil siapa pun,
-sehingga channel SSH APCE tidak ditutup rapi saat server di-restart/
-reload (mis. lewat --reload saat development).
-
-PERUBAHAN (Lokasi hosting & akses):
-- Router location di-include (sebelumnya file-nya salah isi & tidak terdaftar).
-- Startup: lokasi hosting dihangatkan di thread terpisah, supaya giliran chat
-  pertama tidak menunggu deteksi IP.
-
-PERUBAHAN (Worker 1 - Event Bus):
-- Startup: WebSocketEventBridge (api/ws_bridge.py) di-start di event loop
-  utama. Ini juga mengikat (bind_loop) loop tersebut ke Event Bus, supaya
-  subscriber async yang dipublish dari thread pekerja dijadwalkan ke loop
-  FastAPI - bukan ke loop sementara.
-- Shutdown: bridge dihentikan rapi.
+Startup:
+- Lokasi hosting dihangatkan di thread terpisah (chat pertama tidak menunggu).
+- WebSocketEventBridge di-start di event loop utama (sekaligus bind_loop
+  ke Event Bus).
+- Interaction memory dibersihkan dari entri kedaluwarsa (purge_expired).
+Shutdown:
+- Bridge dihentikan rapi, semua sesi SSH APCE ditutup.
 """
 
 import asyncio
@@ -39,6 +29,7 @@ from api.routers import chat, providers, memory, devices, sessions, tools, logs,
 from api.routers import ws
 from api.ws_bridge import get_ws_bridge
 from agents.akane.connection_manager import get_connection_manager
+from core.dio import get_interaction_memory
 from core.location import location_service
 
 
@@ -80,6 +71,14 @@ def _warm_host_location() -> None:
 @app.on_event("startup")
 def _startup_location():
     threading.Thread(target=_warm_host_location, daemon=True).start()
+
+
+@app.on_event("startup")
+def _startup_purge_interaction_memory():
+    try:
+        get_interaction_memory().purge_expired()
+    except Exception:
+        pass
 
 
 @app.on_event("startup")

@@ -114,6 +114,26 @@ CATEGORY_INFO = {
         "description": "Pembuatan, rename, hapus, dan penyimpanan riwayat percakapan (chat_sessions.db).",
         "triggered_by": "User membuat chat baru, mengganti judul, atau menghapus sesi dari sidebar.",
     },
+    "eventbus": {
+        "label": "Event Bus",
+        "description": "Setiap event internal yang dipublish (level DEBUG), termasuk error subscriber.",
+        "triggered_by": "Setiap event_bus.publish() - hanya tercatat kalau level DEBUG aktif.",
+    },
+    "connection_manager": {
+        "label": "SSH Connection (AKANE)",
+        "description": "Sesi SSH persisten: buka, tutup, idle timeout, dan reconnect otomatis.",
+        "triggered_by": "ConnectionManager (AKANE Persistent Connection Engine).",
+    },
+    "dio": {
+        "label": "Dynamic Interaction (DIO)",
+        "description": "Pembuatan schema form/pilihan interaktif dan hasil submit-nya.",
+        "triggered_by": "Tool request_structured_input / request_location_permission.",
+    },
+    "location": {
+        "label": "Lokasi",
+        "description": "Deteksi lokasi hosting, lokasi akses user, dan geocoding.",
+        "triggered_by": "Sesi dibuka, izin GPS diberikan, atau lokasi hosting diubah.",
+    },
 }
 
 KNOWN_CATEGORIES = list(CATEGORY_INFO.keys())

@@ -1,14 +1,11 @@
 """
 api/routers/chat.py
 
-FIX (Optimalisasi DIO + Worker 3 Location):
-Endpoint /api/chat menangani tiga jenis payload:
-1. Chat teks biasa (dan slash command).
-2. dio_submission generik - hasil user mengisi form/pilihan interaktif.
-3. dio_submission untuk location grant/deny - ditangani otomatis oleh
-   submit_structured_input()/build_submission_message() lewat
-   pending_location/location_result, tanpa endpoint ini perlu tahu
-   detail lokasi sama sekali (tetap generic).
+Endpoint /api/chat menangani:
+1. Chat teks biasa (dan slash command lewat core/slash_commands.py).
+2. dio_submission (form/pilihan interaktif, termasuk izin lokasi) lewat
+   resolve_submission() - helper yang SAMA dengan WebSocket (ws.py),
+   sehingga kedua jalur tidak bisa berbeda perilaku.
 """
 
 from fastapi import APIRouter, HTTPException
@@ -18,30 +15,10 @@ from api.state import get_memory, persist_memory, drop_cache, add_global_usage, 
 from core.brain import Brain
 from core import chat_sessions as store
 from core.orchestrator import AGENT_TOOL_MAP
-from agents.rei.dio_tools import submit_structured_input, build_submission_message
+from core.slash_commands import apply_slash_command
+from agents.rei.dio_tools import resolve_submission
 
 router = APIRouter(prefix="/api", tags=["chat"])
-
-
-def _apply_slash_command(raw_message: str) -> str:
-    if not raw_message.startswith("/"):
-        return raw_message
-
-    parts = raw_message[1:].split(" ", 1)
-    tool_name = parts[0].strip()
-    rest = parts[1].strip() if len(parts) > 1 else ""
-
-    if not tool_name or tool_name not in AGENT_TOOL_MAP:
-        return raw_message
-
-    instruction = rest or f"Jalankan tool {tool_name}."
-
-    return (
-        f"[Instruksi eksplisit dari user: WAJIB gunakan tool "
-        f"'{tool_name}' untuk memenuhi permintaan berikut. Ambil "
-        f"argumen yang diperlukan dari konteks kalimat ini.]\n"
-        f"{instruction}"
-    )
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -56,20 +33,10 @@ def chat(payload: ChatRequest):
         session_id = session["id"]
 
     if payload.dio_submission:
-        submission_result = submit_structured_input(
-            schema_id=payload.dio_submission.get("schema_id", ""),
-            action_id=payload.dio_submission.get("action_id", ""),
-            values=payload.dio_submission.get("values"),
-            cancelled=bool(payload.dio_submission.get("cancelled")),
-        )
-        display_message, llm_message = build_submission_message(
-            payload.dio_submission,
-            pending_location=submission_result.get("pending_location"),
-            location_result=submission_result.get("location_result"),
-        )
+        display_message, llm_message = resolve_submission(payload.dio_submission)
     else:
         display_message = payload.message.strip()
-        llm_message = _apply_slash_command(display_message)
+        llm_message = apply_slash_command(display_message, AGENT_TOOL_MAP)
 
     memory = get_memory(session_id)
 
