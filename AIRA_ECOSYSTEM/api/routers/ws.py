@@ -43,13 +43,33 @@ PERUBAHAN (Chat Session: stop / edit prompt / regenerate / multi-sesi):
    edit/regenerate. Error yang berasal dari server sendiri (bukan dari
    planner) diberi "fatal": true.
 
+PERUBAHAN (Worker 1 - Event Bus):
+Event realtime dari giliran (thinking, tool_start, tool_progress,
+tool_finish, error non-fatal dari planner) TIDAK lagi lewat callback
+on_event -> queue.Queue -> _drain_queue_to_socket. Sekarang:
+
+    Planner/Brain --publish--> Event Bus --subscriber--> api/ws_bridge.py
+                                                      --> manager.send --> client
+
+  - Setiap giliran dijalankan di dalam core.events.event_scope(
+    correlation_id, session_id, run_id), jadi semua event yang dipublish
+    (juga dari thread pekerja) otomatis tertandai sesi + run-nya. Bridge
+    memakai tanda itu untuk memfilter sesi.
+  - Bentuk pesan WebSocket ke client TIDAK berubah.
+  - Event protokol milik ws.py sendiri (ack, transcript, transcript_empty,
+    response, cancelled, error fatal) tetap dikirim langsung lewat _emit().
+    Sebelum response/error/cancelled dikirim, `await bridge.flush()`
+    memastikan semua event tool yang sudah dipublish tiba lebih dulu
+    (urutan sama seperti drain lama).
+  - Bridge di-start di startup FastAPI (api/main.py) dan idempotent
+    di-ensure lagi saat koneksi WebSocket dibuka.
+
 Sisanya (voice call mode, slash command teks biasa) TIDAK BERUBAH.
 """
 
 import asyncio
 import base64
 import logging
-import queue
 import threading
 import time
 import uuid
@@ -61,16 +81,16 @@ from agents.yuki.stt import transcribe
 from agents.yuki.tts import synthesize_bytes
 from agents.rei.dio_tools import submit_structured_input, build_submission_message
 from api.state import get_memory, persist_memory, add_global_usage, drop_cache
+from api.ws_bridge import get_ws_bridge
 from api.ws_manager import manager
 from core.brain import Brain
+from core.events import event_scope, new_correlation_id
 from core import chat_sessions as store
 from core.orchestrator import AGENT_TOOL_MAP
 
 logger = logging.getLogger("aira.ws")
 
 router = APIRouter(prefix="/ws", tags=["websocket"])
-
-QUEUE_POLL_INTERVAL = 0.05
 
 # session_id -> {"task": asyncio.Task, "cancel": threading.Event}
 # Per SESI (bukan per koneksi) supaya cancel tetap menemukan proses yang
@@ -113,27 +133,8 @@ def _decode_voice_audio(raw: dict) -> "np.ndarray | None":
         return None
 
 
-async def _drain_queue_to_socket(session_id: str, event_queue: "queue.Queue", stop_flag: dict) -> None:
-    while True:
-        drained_any = False
-
-        while True:
-            try:
-                event = event_queue.get_nowait()
-            except queue.Empty:
-                break
-            drained_any = True
-            await manager.send(session_id, event)
-
-        if stop_flag.get("done") and not drained_any:
-            if event_queue.empty():
-                break
-
-        if not drained_any:
-            await asyncio.sleep(QUEUE_POLL_INTERVAL)
-
-
 async def _emit(session_id: str, run_id, event_type: str, data: dict | None = None) -> None:
+    """Event protokol milik ws.py sendiri (bukan event domain Event Bus)."""
     await manager.send(session_id, {
         "type": event_type,
         "data": {**(data or {}), "session_id": session_id, "run_id": run_id},
@@ -145,17 +146,19 @@ async def _emit(session_id: str, run_id, event_type: str, data: dict | None = No
 # SATU GILIRAN (dijalankan sebagai asyncio.Task terpisah)
 # ============================================================
 
-async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Event) -> None:
+async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Event, run_id: str) -> None:
     msg_type = raw.get("type", "text")
-    run_id = raw.get("run_id") or uuid.uuid4().hex[:12]
     is_regenerate = msg_type == "regenerate"
     is_voice_turn = False
     display_message = ""
+
+    bridge = get_ws_bridge()
 
     async def emit(event_type: str, data: dict | None = None) -> None:
         await _emit(session_id, run_id, event_type, data)
 
     async def fail(message: str) -> None:
+        await bridge.flush()
         await emit("error", {"message": message, "fatal": True})
 
     replace_from = None
@@ -250,17 +253,13 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
     dio_submission = None if (msg_type == "voice_audio" or is_regenerate) else raw.get("dio_submission")
 
     if dio_submission:
-        submission_result = submit_structured_input(
+        submit_structured_input(
             schema_id=dio_submission.get("schema_id", ""),
             action_id=dio_submission.get("action_id", ""),
             values=dio_submission.get("values"),
             cancelled=bool(dio_submission.get("cancelled")),
         )
-        _, llm_message = build_submission_message(
-            dio_submission,
-            pending_location=submission_result.get("pending_location"),
-            location_result=submission_result.get("location_result"),
-        )
+        _, llm_message = build_submission_message(dio_submission)
     elif regenerated_llm_message:
         llm_message = regenerated_llm_message
     else:
@@ -268,41 +267,24 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
 
     # --------------------------------------------------
     # PROSES: SAMA PERSIS untuk teks/suara/dio_submission -
-    # satu jalur reasoning (Brain.think()).
+    # satu jalur reasoning (Brain.think()). Event realtime-nya
+    # dipublish ke Event Bus dan sampai ke client lewat WS bridge.
     # --------------------------------------------------
     brain = Brain(memory)
 
-    event_queue: "queue.Queue" = queue.Queue()
-    stop_flag = {"done": False}
-
-    def on_event(event_type: str, payload: dict) -> None:
-        event_queue.put({
-            "type": event_type,
-            "data": {**payload, "session_id": session_id, "run_id": run_id},
-            "ts": time.time(),
-        })
-
     await emit("ack", {"message": display_message})
 
-    think_task = asyncio.create_task(
-        asyncio.to_thread(brain.think, llm_message, on_event, cancel_event)
-    )
-    drain_task = asyncio.create_task(
-        _drain_queue_to_socket(session_id, event_queue, stop_flag)
-    )
-
     try:
-        result = await think_task
+        result = await asyncio.to_thread(brain.think, llm_message, None, cancel_event)
     except Exception as exc:
         logger.exception("WS think() gagal | session=%s", session_id)
         memory.history = backup_history
-        stop_flag["done"] = True
-        await drain_task
-        await fail(str(exc))
+        await fail(str(exc))  # fail() sudah flush bridge dulu
         return
 
-    stop_flag["done"] = True
-    await drain_task
+    # Semua event tool/thinking yang sudah dipublish harus tiba di client
+    # SEBELUM response/cancelled dikirim.
+    await bridge.flush()
 
     # --------------------------------------------------
     # DIHENTIKAN USER: buang hasil, kembalikan memory, JANGAN tulis DB.
@@ -367,12 +349,21 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
 
 
 async def _run_turn(session_id: str, raw: dict, cancel_event: threading.Event) -> None:
+    run_id = raw.get("run_id") or uuid.uuid4().hex[:12]
+
     try:
-        await _process_turn(session_id, raw, cancel_event)
+        # Semua event yang dipublish selama giliran ini (termasuk dari thread
+        # pekerja) otomatis tertandai sesi + run + correlation_id yang sama.
+        with event_scope(
+            correlation_id=new_correlation_id(),
+            session_id=session_id,
+            run_id=run_id,
+        ):
+            await _process_turn(session_id, raw, cancel_event, run_id)
     except Exception:
         logger.exception("WS turn error tak terduga | session=%s", session_id)
         try:
-            await _emit(session_id, raw.get("run_id"), "error", {
+            await _emit(session_id, run_id, "error", {
                 "message": "Terjadi kesalahan tak terduga di server.",
                 "fatal": True,
             })
@@ -393,6 +384,10 @@ def _cleanup_run(session_id: str, task: "asyncio.Task") -> None:
 @router.websocket("/chat/{session_id}")
 async def chat_ws(websocket: WebSocket, session_id: str):
     await manager.connect(session_id, websocket)
+
+    # Idempotent: pastikan bridge Event Bus -> WebSocket aktif di loop ini
+    # (normalnya sudah di-start di startup api/main.py).
+    get_ws_bridge().ensure_started(asyncio.get_running_loop())
 
     try:
         while True:

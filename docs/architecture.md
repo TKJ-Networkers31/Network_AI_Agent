@@ -6,7 +6,7 @@
 AIRA_ECOSYSTEM/
 ├── app/        PWA frontend — render + call api/, no business logic
 ├── api/        FastAPI: REST routers + WebSocket, thin HTTP layer only
-├── core/       brain, orchestrator, memory, persona, logger, scheduler
+├── core/       brain, orchestrator, memory, persona, logger, events, scheduler
 ├── agents/     akane, rei, hikari, yuki — internal specialists
 ├── tools/      low-level clients only (paramiko, pysnmp, requests, cv2)
 ├── database/   SQLite files + vision_snapshots (only persistence layer)
@@ -35,6 +35,8 @@ permanent (see [`constitution.md`](constitution.md)):
 - `agents/rei/provider_client.py` is the **only** file allowed to call an
   LLM provider (Ollama or OpenRouter). No other module may issue HTTP
   requests to a model endpoint.
+- There is **one** internal event system: `core/events.py`. No module may
+  introduce a second callback/queue mechanism for internal communication.
 - All persistent storage is SQLite in `database/`. No JSON files, no
   ad-hoc flat files for state.
 
@@ -44,11 +46,12 @@ permanent (see [`constitution.md`](constitution.md)):
 User message
   -> api/routers/chat.py (REST) or api/routers/ws.py (WebSocket)
   -> core/brain.py :: Brain.think()
-  -> core/orchestrator.py :: Orchestrator.route()
-      -> agents/rei/planner.py :: Planner.run()
-          -> agents/rei/provider_client.py :: call_model()  (LLM call)
-          -> tool_executor callback -> Orchestrator._execute_tool()
-              -> AGENT_TOOL_MAP[name](**arguments)   (AKANE / HIKARI / REI tools)
+      -> core/task_classifier.py -> core/model_router.py  (choose model)
+      -> core/orchestrator.py :: Orchestrator.route()
+          -> agents/rei/planner.py :: Planner.run()
+              -> agents/rei/provider_client.py :: call_model()  (LLM call)
+              -> tool_executor callback -> Orchestrator._execute_tool()
+                  -> AGENT_TOOL_MAP[name](**arguments)   (AKANE / HIKARI / REI tools)
   <- BrainResponse(answer, steps, token_usage, ...)
   -> persisted to core/chat_sessions.py (SQLite)
   -> returned to caller (REST response or WebSocket "response" event)
@@ -63,15 +66,100 @@ maps used by the planner:
 - `AGENT_TOOL_SCHEMAS` — OpenAI-style function-calling schemas sent to the
   LLM
 
+## Event Bus (`core/events.py`)
+
+The single internal communication layer:
+
+```
+Publisher (Brain, Planner, classifier, DIO, FSE, AKANE, ...)
+      |
+      v
+   Event Bus
+      +--> Logger
+      +--> WebSocket subscriber (api/ws_bridge.py)
+      +--> Memory / Scheduler / other subscribers
+```
+
+**Event contract** (`Event`, immutable): `event_id`, `correlation_id`,
+`event`, `source`, `agent`, `tool`, UTC ISO `timestamp`, `data`, `metadata`.
+`Event.to_json_dict()` returns a JSON-safe copy (non-serializable values
+become `str`). `Event.child()` keeps the `correlation_id`.
+
+**API:** `subscribe(event, callback) -> token`, `unsubscribe(event, token)`,
+`publish(...)`, `publish_async(...)`, wildcard `"*"`, `bind_loop(loop)`,
+`stats()`.
+
+**Dispatch rules**
+
+- Sync subscribers run inline in the publisher's thread, isolated by
+  try/except, before `publish()` returns (deterministic order). They must be
+  fast and non-blocking.
+- Async subscribers are scheduled onto the loop registered with
+  `bind_loop()` (`run_coroutine_threadsafe` from other threads,
+  `create_task` from the loop's own thread). `asyncio.run()` is only a last
+  resort when no loop exists at all (terminal mode, plain tests) — never
+  once per event on the normal server path.
+- A failing subscriber never breaks the publisher or other subscribers; it
+  is logged and counted in `stats()["failed_callbacks"]`.
+
+**Event context.** `event_scope(correlation_id=..., session_id=..., run_id=...)`
+(a `contextvars`-based context manager) stamps every event published inside
+the block — including events published from worker threads started with
+`asyncio.to_thread`. `correlation_id` comes from the scope when not given
+explicitly; the other keys land in `Event.metadata`. `Brain.think()` opens a
+scope if none is active, so one chat turn = one `correlation_id`.
+
+**Standard events** (`EventNames`): `chat.received`, `thinking.start/finish`,
+`task.classified/started/finished`, `model.started/finished/failed/switched/
+selected/fallback`, `tool.start/progress/finish`, `response.ready`,
+`memory.saved`, `interaction.requested/started/generated/completed/cancelled`,
+`location.updated/cleared`, `system.error`.
+
+Currently published: `chat.received`, `thinking.start/finish`,
+`task.classified/started/finished`, `tool.*`, `response.ready`,
+`system.error` (planner errors), `model.selected/fallback/failed`,
+`interaction.started/generated/completed/cancelled`, `location.*`,
+`connection.*`, `file.*`. Defined but not yet published by anyone:
+`model.started/finished/switched`, `memory.saved`, `interaction.requested`
+(see [`roadmap.md`](roadmap.md)).
+
 ## Realtime streaming (WebSocket)
 
 `api/routers/ws.py` runs the exact same `Brain.think()` used by REST — it
-is **not** a second chatbot. The only difference is transport: `Planner.run()`
-accepts an `on_event` callback that emits `thinking` / `tool_start` /
-`tool_finish` / `response` / `error` events. Because `Brain.think()` is
-synchronous (blocking HTTP/SSH calls), the WS handler runs it in a worker
-thread via `asyncio.to_thread` and relays events back through a
-thread-safe `queue.Queue` drained by an async loop (`_drain_queue_to_socket`).
+is **not** a second chatbot. The only difference is transport.
+
+```
+Planner/Brain --publish--> Event Bus --subscriber--> api/ws_bridge.py
+                                                       |  asyncio.Queue (FIFO)
+                                                       v
+                                            api/ws_manager.py -> client
+```
+
+- Each turn runs inside `event_scope(correlation_id, session_id, run_id)`.
+  `Brain.think()` is synchronous (blocking HTTP/SSH), so `ws.py` runs it in
+  a worker thread via `asyncio.to_thread`; the context follows the thread.
+- `WebSocketEventBridge` is a single wildcard subscriber, started in
+  `api/main.py` startup (idempotently re-ensured when a socket connects).
+  It only forwards events that carry **both** `session_id` and `run_id`
+  (REST turns have no `run_id`, so they never leak into an open socket) and
+  only those in `DEFAULT_WS_EVENT_MAP`:
+
+  | Event Bus | WebSocket `type` |
+  |---|---|
+  | `thinking.start` | `thinking` |
+  | `tool.start` | `tool_start` |
+  | `tool.progress` | `tool_progress` |
+  | `tool.finish` | `tool_finish` |
+  | `system.error` | `error` |
+
+  The wire protocol seen by the frontend is unchanged.
+- Protocol events owned by `ws.py` itself (`ack`, `transcript`,
+  `transcript_empty`, `response`, `cancelled`, fatal `error`) are still sent
+  directly. Before `response` / `cancelled` / fatal `error`, `ws.py` awaits
+  `bridge.flush()` so every tool event already published arrives first.
+- `Brain.think(on_event=...)` / `Planner.run(on_event=...)` still accept the
+  legacy callback for callers that have not migrated; `ws.py` no longer
+  uses it.
 
 `api/ws_manager.py` tracks live connections per `session_id` and is
 intentionally separate from `api/state.py` (which caches `ConversationMemory`
@@ -106,6 +194,9 @@ sinks simultaneously:
 Category is inferred from the last segment of the logger name
 (`aira.tools.ssh` -> `ssh`), or explicitly passed via `extra={"category": ...}`
 using the `log_event()` helper.
+
+The Event Bus logs every event at `DEBUG` (category `eventbus`); the payload
+is only built when `DEBUG` is enabled.
 
 ## Auto memory extraction
 

@@ -6,57 +6,83 @@ File:
     AIRA_ECOSYSTEM/core/events.py
 
 Purpose:
-    Central publish/subscribe event system for AIRA OS.
+    SATU-SATUNYA sistem event internal AIRA OS (publish/subscribe).
 
-Architecture:
-    Publisher
+Arsitektur:
+    Publisher (Brain, Planner, DIO, FSE, AKANE, ...)
         |
         v
     EventBus
         |
         +--> Logger
-        +--> WebSocket
+        +--> WebSocket (api/ws_bridge.py)
         +--> Memory
-        +--> Voice
-        +--> Companion
         +--> Scheduler
-        +--> Other subscribers
+        +--> subscriber lain
 
-Core principles:
-    1. Modules communicate through events, not direct callbacks.
-    2. Every event has a correlation_id for end-to-end tracing.
-    3. Every event has a unique event_id.
-    4. Subscribers are isolated from each other.
-    5. Subscriber failure must never crash the publisher.
-    6. EventBus is thread-safe.
-    7. Event payloads are immutable after creation.
-    8. Sync and async publishers are both supported.
-    9. Wildcard subscribers can observe every event.
-    10. EventBus itself does not contain business logic.
+Prinsip:
+    1. Modul berkomunikasi lewat event, bukan callback langsung.
+    2. Setiap event punya correlation_id untuk tracing end-to-end.
+    3. Setiap event punya event_id unik.
+    4. Subscriber terisolasi satu sama lain.
+    5. Error subscriber TIDAK PERNAH menjatuhkan publisher.
+    6. EventBus thread-safe.
+    7. Event immutable setelah dibuat (data/metadata disalin saat publish).
+    8. Publisher sync maupun async didukung.
+    9. Subscriber wildcard ("*") menerima semua event.
+    10. EventBus tidak berisi business logic.
 
-Sprint 1 — Core Stabilization
------------------------------
-This module is intentionally infrastructure-only.
+PERUBAHAN (Worker 1 - Event Bus stabilization):
 
-Do NOT put:
-    - LLM reasoning
-    - routing logic
-    - tool execution
-    - network logic
-    - persona logic
-    - memory retrieval
-    - security decisions
+1. DISPATCH TIDAK LAGI asyncio.run() PER EVENT.
+   Sebelumnya publish() dari thread tanpa event loop (mis. Planner yang
+   dijalankan lewat asyncio.to_thread) memanggil asyncio.run() untuk SETIAP
+   event: membuat event loop baru tiap kali, dan subscriber async berjalan
+   di loop sementara itu - bukan di loop FastAPI - sehingga tidak bisa
+   mengirim ke WebSocket. Sekarang:
+     - subscriber SYNC dipanggil langsung (inline) di thread publisher,
+       terisolasi try/except -> urutan deterministik, tanpa event loop.
+       Subscriber sync WAJIB cepat/non-blocking; kerja berat -> async.
+     - subscriber ASYNC dijadwalkan ke loop yang di-bind lewat bind_loop()
+       (run_coroutine_threadsafe dari thread lain, create_task dari thread
+       loop itu sendiri). asyncio.run() hanya fallback terakhir (terminal /
+       test tanpa loop sama sekali).
 
-inside this file.
+2. KONTEKS EVENT (contextvars).
+   event_scope(correlation_id=..., session_id=..., run_id=...) menempelkan
+   konteks ke SEMUA event yang dipublish di dalam blok with - termasuk yang
+   dipublish dari thread pekerja (asyncio.to_thread menyalin context).
+   correlation_id diambil dari konteks kalau tidak diberikan eksplisit;
+   key lain (session_id, run_id, ...) masuk ke Event.metadata. Satu giliran
+   chat jadi satu correlation_id tanpa harus mengoper argumen di banyak
+   modul.
+
+3. Event.to_json_dict() / json_safe(): payload aman untuk JSON (WebSocket,
+   logs.db) walau data berisi objek non-serializable.
+
+4. EventNames dilengkapi (interaction.*, model.selected, model.fallback)
+   sesuai string yang SUDAH dipakai modul lain - tidak ada nama yang
+   berubah, jadi subscriber/test lama tetap jalan.
+
+5. _log_event hanya menyusun payload kalau level DEBUG aktif (Planner kini
+   mem-publish banyak event per giliran).
+
+Do NOT put in this file:
+    LLM reasoning, routing, tool execution, network logic, persona logic,
+    memory retrieval, security decisions.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import inspect
+import json
+import logging
 import threading
 import uuid
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -64,6 +90,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Iterator,
     Optional,
     Union,
 )
@@ -91,114 +118,126 @@ WILDCARD = "*"
 
 class EventNames:
     """
-    Standard event names used across AIRA OS.
+    Nama event standar AIRA OS.
 
-    Naming convention:
+    Konvensi: <domain>.<action>
 
-        <domain>.<action>
-
-    Examples:
-
-        chat.received
-        thinking.start
-        tool.start
-        response.ready
+    Catatan kompatibilitas: string di bawah SAMA PERSIS dengan yang sudah
+    dipakai modul lain (core/model_types.py, core/dio/constants.py, dst).
     """
 
-    # --------------------------------------------------------
     # CHAT
-    # --------------------------------------------------------
-
     CHAT_RECEIVED = "chat.received"
 
-    # --------------------------------------------------------
     # THINKING
-    # --------------------------------------------------------
-
     THINKING_START = "thinking.start"
     THINKING_FINISH = "thinking.finish"
 
-    # --------------------------------------------------------
     # TOOL
-    # --------------------------------------------------------
-
     TOOL_START = "tool.start"
     TOOL_PROGRESS = "tool.progress"
     TOOL_FINISH = "tool.finish"
 
-    # --------------------------------------------------------
     # RESPONSE
-    # --------------------------------------------------------
-
     RESPONSE_READY = "response.ready"
 
-    # --------------------------------------------------------
     # MEMORY
-    # --------------------------------------------------------
-
     MEMORY_SAVED = "memory.saved"
 
-    # --------------------------------------------------------
     # SYSTEM
-    # --------------------------------------------------------
-
     SYSTEM_ERROR = "system.error"
 
-    # --------------------------------------------------------
     # MODEL
-    # --------------------------------------------------------
-
     MODEL_STARTED = "model.started"
     MODEL_FINISHED = "model.finished"
     MODEL_FAILED = "model.failed"
     MODEL_SWITCHED = "model.switched"
+    MODEL_SELECTED = "model.selected"
+    MODEL_FALLBACK = "model.fallback"
 
-    # --------------------------------------------------------
     # TASK
-    # --------------------------------------------------------
-
     TASK_CLASSIFIED = "task.classified"
     TASK_STARTED = "task.started"
     TASK_FINISHED = "task.finished"
 
+    # INTERACTION (DIO)
+    INTERACTION_REQUESTED = "interaction.requested"
+    INTERACTION_STARTED = "interaction.started"
+    INTERACTION_GENERATED = "interaction.generated"
+    INTERACTION_COMPLETED = "interaction.completed"
+    INTERACTION_CANCELLED = "interaction.cancelled"
+
+    # LOCATION
     LOCATION_UPDATED = "location.updated"
     LOCATION_CLEARED = "location.cleared"
 
 
-# ============================================================
-# STANDARD EVENT REGISTRY
-# ============================================================
-
 STANDARD_EVENTS: frozenset[str] = frozenset(
-    {
-        EventNames.CHAT_RECEIVED,
-
-        EventNames.THINKING_START,
-        EventNames.THINKING_FINISH,
-
-        EventNames.TOOL_START,
-        EventNames.TOOL_PROGRESS,
-        EventNames.TOOL_FINISH,
-
-        EventNames.RESPONSE_READY,
-
-        EventNames.MEMORY_SAVED,
-
-        EventNames.SYSTEM_ERROR,
-
-        EventNames.MODEL_STARTED,
-        EventNames.MODEL_FINISHED,
-        EventNames.MODEL_FAILED,
-        EventNames.MODEL_SWITCHED,
-
-        EventNames.TASK_CLASSIFIED,
-        EventNames.TASK_STARTED,
-        EventNames.TASK_FINISHED,
-
-        EventNames.LOCATION_UPDATED,
-        EventNames.LOCATION_CLEARED,
-    }
+    value
+    for name, value in vars(EventNames).items()
+    if name.isupper() and isinstance(value, str)
 )
+
+
+# ============================================================
+# JSON SAFETY
+# ============================================================
+
+def json_safe(value: Any) -> Any:
+    """
+    Kembalikan salinan `value` yang PASTI bisa di-JSON-kan.
+
+    Objek yang tidak dikenali (Path, datetime, dataclass, dst) diubah jadi
+    str(); kalau seluruh struktur tetap gagal (mis. key dict non-string atau
+    referensi melingkar), dikembalikan str(value). Tidak pernah raise.
+    """
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except (TypeError, ValueError):
+        return str(value)
+
+
+# ============================================================
+# EVENT CONTEXT (correlation / session / run)
+# ============================================================
+
+_EVENT_CONTEXT: contextvars.ContextVar[Optional[dict[str, Any]]] = (
+    contextvars.ContextVar("aira_event_context", default=None)
+)
+
+
+def new_correlation_id() -> str:
+    return uuid.uuid4().hex
+
+
+def current_event_context() -> dict[str, Any]:
+    """Salinan konteks event aktif ({} kalau tidak ada)."""
+    return dict(_EVENT_CONTEXT.get() or {})
+
+
+@contextmanager
+def event_scope(**values: Any) -> Iterator[dict[str, Any]]:
+    """
+    Tempelkan konteks ke semua event yang dipublish di dalam blok ini.
+
+        with event_scope(correlation_id=cid, session_id="s1", run_id="r1"):
+            await asyncio.to_thread(brain.think, ...)   # event ikut tertandai
+
+    - Scope bersarang digabung (yang dalam menimpa yang luar).
+    - Nilai None diabaikan (tidak menimpa konteks luar).
+    - Konteks ikut ke thread pekerja lewat asyncio.to_thread.
+    """
+    merged = {
+        **(_EVENT_CONTEXT.get() or {}),
+        **{key: value for key, value in values.items() if value is not None},
+    }
+
+    token = _EVENT_CONTEXT.set(merged)
+
+    try:
+        yield dict(merged)
+    finally:
+        _EVENT_CONTEXT.reset(token)
 
 
 # ============================================================
@@ -221,104 +260,41 @@ EventCallback = Callable[
 @dataclass(frozen=True)
 class Event:
     """
-    Immutable event contract.
+    Kontrak event (immutable).
 
-    Example:
-
-        Event(
-            event="tool.start",
-            correlation_id="abc123",
-            source="AKANE",
-            agent="AKANE",
-            tool="ssh",
-            data={
-                "device": "R1",
-                "command": "/system resource print",
-            },
-        )
-
-    Serialized form:
+    Bentuk serialisasi (to_dict):
 
         {
             "event_id": "...",
             "correlation_id": "...",
             "event": "tool.start",
-            "source": "AKANE",
-            "agent": "AKANE",
-            "tool": "ssh",
-            "timestamp": "...",
+            "source": "REI",
+            "agent": "REI",
+            "tool": "ping",
+            "timestamp": "2026-09-19T05:00:00+00:00",   # UTC
             "data": {...},
-            "metadata": {...}
+            "metadata": {...}          # session_id, run_id, ...
         }
     """
 
-    # --------------------------------------------------------
-    # IDENTIFIERS
-    # --------------------------------------------------------
-
-    event_id: str = field(
-        default_factory=lambda: uuid.uuid4().hex
-    )
-
-    correlation_id: str = field(
-        default_factory=lambda: uuid.uuid4().hex
-    )
-
-    # --------------------------------------------------------
-    # EVENT INFORMATION
-    # --------------------------------------------------------
+    event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    correlation_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     event: str = ""
 
-    # --------------------------------------------------------
-    # SOURCE
-    # --------------------------------------------------------
-
     source: Optional[str] = None
-
-    # --------------------------------------------------------
-    # OPTIONAL AGENT / TOOL
-    # --------------------------------------------------------
-
     agent: Optional[str] = None
-
     tool: Optional[str] = None
 
-    # --------------------------------------------------------
-    # TIMESTAMP
-    # --------------------------------------------------------
-
     timestamp: str = field(
-        default_factory=lambda: datetime.now(
-            timezone.utc
-        ).isoformat()
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
 
-    # --------------------------------------------------------
-    # PAYLOAD
-    # --------------------------------------------------------
-
-    data: dict[str, Any] = field(
-        default_factory=dict
-    )
-
-    # --------------------------------------------------------
-    # METADATA
-    # --------------------------------------------------------
-
-    metadata: dict[str, Any] = field(
-        default_factory=dict
-    )
-
-    # ========================================================
-    # SERIALIZATION
-    # ========================================================
+    data: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """
-        Convert event into a JSON-friendly dictionary.
-        """
-
+        """Dict biasa (data/metadata direferensikan apa adanya)."""
         return {
             "event_id": self.event_id,
             "correlation_id": self.correlation_id,
@@ -331,9 +307,9 @@ class Event:
             "metadata": self.metadata,
         }
 
-    # ========================================================
-    # CORRELATION CHILD EVENT
-    # ========================================================
+    def to_json_dict(self) -> dict[str, Any]:
+        """Salinan yang dijamin JSON-serializable (untuk WebSocket/log DB)."""
+        return json_safe(self.to_dict())
 
     def child(
         self,
@@ -346,36 +322,17 @@ class Event:
         metadata: Optional[dict[str, Any]] = None,
     ) -> "Event":
         """
-        Create another event while preserving the same
-        correlation_id.
-
-        Useful for tracing:
-
-            chat.received
-                |
-                +--> thinking.start
-                |
-                +--> task.classified
-                |
-                +--> model.started
-                |
-                +--> tool.start
-                |
-                +--> tool.finish
-                |
-                +--> response.ready
-
-        All events can share one correlation_id.
+        Buat event lain dengan correlation_id yang SAMA (dan metadata induk
+        diwariskan, kecuali ditimpa).
         """
-
         return Event(
             event=event,
             correlation_id=self.correlation_id,
             source=source or self.source,
             agent=agent if agent is not None else self.agent,
             tool=tool if tool is not None else self.tool,
-            data=data or {},
-            metadata=metadata or {},
+            data=dict(data or {}),
+            metadata={**self.metadata, **(metadata or {})},
         )
 
 
@@ -385,12 +342,7 @@ class Event:
 
 @dataclass(frozen=True)
 class _Subscription:
-    """
-    Internal subscriber record.
-    """
-
     token: str
-
     callback: EventCallback
 
 
@@ -400,207 +352,144 @@ class _Subscription:
 
 class EventBus:
     """
-    Thread-safe publish/subscribe Event Bus.
+    Publish/subscribe Event Bus yang thread-safe.
 
-    Responsibilities:
-
-        publish
-        subscribe
-        unsubscribe
-        event tracing
-        subscriber isolation
-        sync/async dispatch
-
-    Non-responsibilities:
-
-        reasoning
-        routing
-        execution
-        security
-        persistence
-        business logic
+    Tanggung jawab: publish, subscribe, unsubscribe, tracing, isolasi
+    subscriber, dispatch sync/async.
+    Bukan tanggung jawab: reasoning, routing, eksekusi, keamanan, persistensi.
     """
 
     def __init__(self) -> None:
-
-        # ----------------------------------------------------
-        # Subscriber registry
-        # ----------------------------------------------------
-
-        self._subscribers: dict[
-            str,
-            list[_Subscription],
-        ] = {}
-
-        # ----------------------------------------------------
-        # Thread safety
-        # ----------------------------------------------------
-
+        self._subscribers: dict[str, list[_Subscription]] = {}
         self._lock = threading.RLock()
 
-        # ----------------------------------------------------
-        # Statistics
-        # ----------------------------------------------------
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
         self._published_count = 0
-
         self._failed_callbacks = 0
 
     # ========================================================
-    # SUBSCRIBE
+    # LOOP BINDING
     # ========================================================
 
-    def subscribe(
+    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """
+        Daftarkan event loop utama (FastAPI). Subscriber async akan
+        dijadwalkan ke loop ini walau publish() dipanggil dari thread lain.
+        """
+        with self._lock:
+            self._loop = loop
+
+    def unbind_loop(
         self,
-        event_name: str,
-        callback: EventCallback,
-    ) -> str:
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+    ) -> None:
+        """Lepas binding (hanya kalau `loop` cocok, atau loop=None)."""
+        with self._lock:
+            if loop is None or loop is self._loop:
+                self._loop = None
+
+    @property
+    def loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        with self._lock:
+            return self._loop
+
+    # ========================================================
+    # SUBSCRIBE / UNSUBSCRIBE / CLEAR
+    # ========================================================
+
+    def subscribe(self, event_name: str, callback: EventCallback) -> str:
         """
-        Register a callback.
-
-        Example:
-
-            token = event_bus.subscribe(
-                EventNames.TOOL_START,
-                handle_tool_start,
-            )
-
-        Wildcard:
-
-            token = event_bus.subscribe(
-                WILDCARD,
-                handle_everything,
-            )
-
-        Returns:
-            subscription token
+        Daftarkan callback (sync atau async). Return: token untuk unsubscribe.
+        `WILDCARD` ("*") menerima semua event.
         """
-
         if not event_name:
-            raise ValueError(
-                "event_name tidak boleh kosong."
-            )
+            raise ValueError("event_name tidak boleh kosong.")
 
         if not callable(callback):
-            raise TypeError(
-                "callback harus callable."
-            )
+            raise TypeError("callback harus callable.")
 
         token = uuid.uuid4().hex
-
-        subscription = _Subscription(
-            token=token,
-            callback=callback,
-        )
+        subscription = _Subscription(token=token, callback=callback)
 
         with self._lock:
-
-            if event_name not in self._subscribers:
-                self._subscribers[event_name] = []
-
-            self._subscribers[event_name].append(
-                subscription
-            )
-
-            total = len(
-                self._subscribers[event_name]
-            )
+            self._subscribers.setdefault(event_name, []).append(subscription)
+            total = len(self._subscribers[event_name])
 
         logger.debug(
             "SUBSCRIBE | event=%s | token=%s | total=%d",
-            event_name,
-            token,
-            total,
+            event_name, token, total,
         )
 
         return token
 
-    # ========================================================
-    # UNSUBSCRIBE
-    # ========================================================
-
-    def unsubscribe(
-        self,
-        event_name: str,
-        token: str,
-    ) -> bool:
-        """
-        Remove subscriber by token.
-        """
-
+    def unsubscribe(self, event_name: str, token: str) -> bool:
+        """Hapus subscriber berdasarkan token. True kalau ada yang dihapus."""
         with self._lock:
-
-            subscriptions = self._subscribers.get(
-                event_name
-            )
+            subscriptions = self._subscribers.get(event_name)
 
             if not subscriptions:
                 return False
 
-            remaining = [
-                sub
-                for sub in subscriptions
-                if sub.token != token
-            ]
-
-            removed = (
-                len(remaining)
-                != len(subscriptions)
-            )
+            remaining = [s for s in subscriptions if s.token != token]
+            removed = len(remaining) != len(subscriptions)
 
             if remaining:
-
-                self._subscribers[
-                    event_name
-                ] = remaining
-
+                self._subscribers[event_name] = remaining
             else:
-
-                self._subscribers.pop(
-                    event_name,
-                    None,
-                )
+                self._subscribers.pop(event_name, None)
 
         if removed:
-
-            logger.debug(
-                "UNSUBSCRIBE | event=%s | token=%s",
-                event_name,
-                token,
-            )
+            logger.debug("UNSUBSCRIBE | event=%s | token=%s", event_name, token)
 
         return removed
 
-    # ========================================================
-    # CLEAR
-    # ========================================================
-
-    def clear(
-        self,
-        event_name: Optional[str] = None,
-    ) -> None:
-        """
-        Remove subscribers.
-
-        clear():
-            remove everything
-
-        clear("tool.start"):
-            remove only tool.start subscribers
-        """
-
+    def clear(self, event_name: Optional[str] = None) -> None:
+        """clear(): hapus semua subscriber; clear("x"): hanya untuk event x."""
         with self._lock:
-
             if event_name is None:
-
                 self._subscribers.clear()
-
             else:
+                self._subscribers.pop(event_name, None)
 
-                self._subscribers.pop(
-                    event_name,
-                    None,
-                )
+    # ========================================================
+    # BUILD EVENT
+    # ========================================================
+
+    @staticmethod
+    def _build_event(
+        event_name: str,
+        correlation_id: Optional[str],
+        source: Optional[str],
+        agent: Optional[str],
+        tool: Optional[str],
+        data: Optional[dict[str, Any]],
+        metadata: Optional[dict[str, Any]],
+    ) -> Event:
+        if not event_name:
+            raise ValueError("event_name tidak boleh kosong.")
+
+        context = _EVENT_CONTEXT.get() or {}
+
+        context_metadata = {
+            key: value
+            for key, value in context.items()
+            if key != "correlation_id"
+        }
+
+        return Event(
+            event=event_name,
+            correlation_id=(
+                correlation_id
+                or context.get("correlation_id")
+                or uuid.uuid4().hex
+            ),
+            source=source,
+            agent=agent,
+            tool=tool,
+            data=dict(data or {}),
+            metadata={**context_metadata, **(metadata or {})},
+        )
 
     # ========================================================
     # PUBLISH
@@ -618,72 +507,27 @@ class EventBus:
         metadata: Optional[dict[str, Any]] = None,
     ) -> Event:
         """
-        Publish an event.
+        Publish event (sinkron).
 
-        This method is intentionally synchronous.
+        Aman dipanggil dari kode biasa, thread pekerja, FastAPI, planner,
+        tool SSH, dsb.
 
-        It is safe to call from:
-
-            - normal Python code
-            - FastAPI
-            - worker threads
-            - SSH tools
-            - planner
-            - background tasks
-
-        Async subscribers are scheduled/executed automatically.
+        - Subscriber sync selesai dipanggil SEBELUM publish() return
+          (urutan deterministik). Harus cepat/non-blocking.
+        - Subscriber async dijadwalkan (tidak ditunggu) - lihat _schedule().
+        - Error subscriber tidak pernah sampai ke pemanggil.
         """
-
-        if not event_name:
-
-            raise ValueError(
-                "event_name tidak boleh kosong."
-            )
-
-        event = Event(
-            event=event_name,
-
-            correlation_id=(
-                correlation_id
-                or uuid.uuid4().hex
-            ),
-
-            source=source,
-
-            agent=agent,
-
-            tool=tool,
-
-            data=dict(data or {}),
-
-            metadata=dict(metadata or {}),
+        event = self._build_event(
+            event_name, correlation_id, source, agent, tool, data, metadata,
         )
 
-        # ----------------------------------------------------
-        # Statistics
-        # ----------------------------------------------------
-
         with self._lock:
-
             self._published_count += 1
 
-        # ----------------------------------------------------
-        # Internal logging
-        # ----------------------------------------------------
-
         self._log_event(event)
-
-        # ----------------------------------------------------
-        # Dispatch
-        # ----------------------------------------------------
-
         self._dispatch(event)
 
         return event
-
-    # ========================================================
-    # ASYNC PUBLISH
-    # ========================================================
 
     async def publish_async(
         self,
@@ -697,46 +541,28 @@ class EventBus:
         metadata: Optional[dict[str, Any]] = None,
     ) -> Event:
         """
-        Async version of publish().
-
-        Unlike publish(), this method waits until all subscribers
-        have finished.
-
-        Useful when event ordering matters.
+        Versi async: MENUNGGU semua subscriber async selesai
+        (berguna kalau urutan penting).
         """
-
-        if not event_name:
-
-            raise ValueError(
-                "event_name tidak boleh kosong."
-            )
-
-        event = Event(
-            event=event_name,
-
-            correlation_id=(
-                correlation_id
-                or uuid.uuid4().hex
-            ),
-
-            source=source,
-
-            agent=agent,
-
-            tool=tool,
-
-            data=dict(data or {}),
-
-            metadata=dict(metadata or {}),
+        event = self._build_event(
+            event_name, correlation_id, source, agent, tool, data, metadata,
         )
 
         with self._lock:
-
             self._published_count += 1
 
         self._log_event(event)
 
-        await self._dispatch_async(event)
+        pending = []
+
+        for subscription in self._collect_subscriptions(event.event):
+            awaitable = self._invoke(subscription, event)
+
+            if awaitable is not None:
+                pending.append(self._guard(awaitable, subscription, event))
+
+        if pending:
+            await asyncio.gather(*pending)
 
         return event
 
@@ -744,17 +570,11 @@ class EventBus:
     # LOGGING
     # ========================================================
 
-    def _log_event(
-        self,
-        event: Event,
-    ) -> None:
-        """
-        Internal event logging.
-
-        Logging failure must NEVER break EventBus.
-        """
-
+    def _log_event(self, event: Event) -> None:
+        """Logging tidak boleh pernah merusak EventBus."""
         try:
+            if not logger.isEnabledFor(logging.DEBUG):
+                return
 
             log_event(
                 logger,
@@ -763,300 +583,152 @@ class EventBus:
                 category="eventbus",
                 context=event.to_dict(),
             )
-
         except Exception:
-
-            logger.exception(
-                "EventBus logging gagal "
-                "(diabaikan)."
-            )
+            logger.exception("EventBus logging gagal (diabaikan).")
 
     # ========================================================
-    # COLLECT SUBSCRIBERS
+    # DISPATCH
     # ========================================================
 
-    def _collect_subscriptions(
-        self,
-        event_name: str,
-    ) -> list[_Subscription]:
-        """
-        Return a snapshot of subscribers.
-
-        Snapshot prevents mutation of the subscriber registry
-        while dispatching.
-        """
-
+    def _collect_subscriptions(self, event_name: str) -> list[_Subscription]:
+        """Snapshot subscriber (registry aman diubah saat dispatch)."""
         with self._lock:
-
-            specific = list(
-                self._subscribers.get(
-                    event_name,
-                    [],
-                )
-            )
-
-            wildcard = list(
-                self._subscribers.get(
-                    WILDCARD,
-                    [],
-                )
-            )
+            specific = list(self._subscribers.get(event_name, []))
+            wildcard = list(self._subscribers.get(WILDCARD, []))
 
         return specific + wildcard
 
-    # ========================================================
-    # SYNC DISPATCH
-    # ========================================================
+    def _dispatch(self, event: Event) -> None:
+        for subscription in self._collect_subscriptions(event.event):
+            awaitable = self._invoke(subscription, event)
 
-    def _dispatch(
+            if awaitable is not None:
+                self._schedule(awaitable, subscription, event)
+
+    def _invoke(
         self,
+        subscription: _Subscription,
         event: Event,
-    ) -> None:
+    ) -> Optional[Awaitable[None]]:
         """
-        Dispatch event from synchronous code.
+        Panggil callback SEKARANG, terisolasi.
+
+        Callback sync: selesai di sini. Callback async: pemanggilan hanya
+        membuat coroutine (murah) - dikembalikan supaya dijadwalkan/ditunggu.
         """
-
-        subscriptions = (
-            self._collect_subscriptions(
-                event.event
-            )
-        )
-
-        if not subscriptions:
-            return
-
-        # ----------------------------------------------------
-        # Detect active asyncio loop
-        # ----------------------------------------------------
-
         try:
+            result = subscription.callback(event)
+        except Exception:
+            self._record_failure(subscription, event)
+            return None
 
-            loop = asyncio.get_running_loop()
+        return result if inspect.isawaitable(result) else None
 
-        except RuntimeError:
-
-            loop = None
-
-        # ----------------------------------------------------
-        # Active async loop
-        # ----------------------------------------------------
-
-        if loop is not None:
-
-            for subscription in subscriptions:
-
-                task = loop.create_task(
-                    self._run_callback(
-                        subscription,
-                        event,
-                    )
-                )
-
-                # Make sure task exception is consumed.
-                task.add_done_callback(
-                    self._consume_task_result
-                )
-
-            return
-
-        # ----------------------------------------------------
-        # Pure sync context
-        # ----------------------------------------------------
-
-        asyncio.run(
-            self._dispatch_async(
-                event,
-                subscriptions,
-            )
-        )
-
-    # ========================================================
-    # ASYNC DISPATCH
-    # ========================================================
-
-    async def _dispatch_async(
+    async def _guard(
         self,
+        awaitable: Awaitable[None],
+        subscription: _Subscription,
         event: Event,
-        subscriptions: Optional[
-            list[_Subscription]
-        ] = None,
     ) -> None:
-        """
-        Dispatch all subscribers concurrently.
-        """
+        """Tunggu awaitable subscriber; error dicatat, tidak dilempar."""
+        try:
+            await awaitable
+        except Exception:
+            self._record_failure(subscription, event)
 
-        if subscriptions is None:
-
-            subscriptions = (
-                self._collect_subscriptions(
-                    event.event
-                )
-            )
-
-        if not subscriptions:
-            return
-
-        await asyncio.gather(
-            *(
-                self._run_callback(
-                    subscription,
-                    event,
-                )
-                for subscription in subscriptions
-            ),
-            return_exceptions=True,
-        )
-
-    # ========================================================
-    # CALLBACK EXECUTOR
-    # ========================================================
-
-    async def _run_callback(
+    def _schedule(
         self,
+        awaitable: Awaitable[None],
         subscription: _Subscription,
         event: Event,
     ) -> None:
         """
-        Execute one subscriber safely.
+        Jadwalkan subscriber async (fire-and-forget).
 
-        Supports:
-
-            def callback(event):
-                ...
-
-        and:
-
-            async def callback(event):
-                ...
+        Prioritas:
+          1. Loop yang di-bind (bind_loop) dan sedang berjalan:
+               - dari thread loop itu  -> create_task
+               - dari thread lain      -> run_coroutine_threadsafe
+          2. Loop yang berjalan di thread ini -> create_task
+          3. Tidak ada loop sama sekali (terminal/test) -> asyncio.run,
+             selesai sebelum publish() return.
         """
+        guarded = self._guard(awaitable, subscription, event)
 
         try:
+            current = asyncio.get_running_loop()
+        except RuntimeError:
+            current = None
 
-            result = subscription.callback(
-                event
-            )
+        bound = self.loop
 
-            # ------------------------------------------------
-            # Async callback
-            # ------------------------------------------------
+        if bound is not None and bound.is_running() and not bound.is_closed():
+            if current is bound:
+                task = bound.create_task(guarded)
+                task.add_done_callback(self._consume_result)
+            else:
+                future = asyncio.run_coroutine_threadsafe(guarded, bound)
+                future.add_done_callback(self._consume_result)
+            return
 
-            if inspect.isawaitable(result):
+        if current is not None:
+            task = current.create_task(guarded)
+            task.add_done_callback(self._consume_result)
+            return
 
-                await result
+        asyncio.run(guarded)
 
-        except Exception:
+    def _record_failure(
+        self,
+        subscription: _Subscription,
+        event: Event,
+    ) -> None:
+        """Dipanggil dari dalam blok except (supaya traceback ikut tercatat)."""
+        with self._lock:
+            self._failed_callbacks += 1
 
-            with self._lock:
-
-                self._failed_callbacks += 1
-
-            logger.exception(
-                "EVENT SUBSCRIBER ERROR | "
-                "event=%s | "
-                "event_id=%s | "
-                "correlation_id=%s | "
-                "token=%s",
-                event.event,
-                event.event_id,
-                event.correlation_id,
-                subscription.token,
-            )
-
-    # ========================================================
-    # TASK RESULT CONSUMER
-    # ========================================================
+        logger.exception(
+            "EVENT SUBSCRIBER ERROR | event=%s | event_id=%s | "
+            "correlation_id=%s | token=%s",
+            event.event,
+            event.event_id,
+            event.correlation_id,
+            subscription.token,
+        )
 
     @staticmethod
-    def _consume_task_result(
-        task: asyncio.Task,
-    ) -> None:
-        """
-        Consume task result so background subscriber
-        exceptions never become unhandled asyncio warnings.
-        """
-
+    def _consume_result(done: Any) -> None:
+        """Konsumsi hasil task/future supaya tidak jadi warning asyncio."""
         try:
-
-            task.result()
-
-        except asyncio.CancelledError:
-
-            pass
-
-        except Exception:
-
-            # _run_callback already handles subscriber errors.
+            done.result()
+        except BaseException:
+            # _guard sudah mencatat error subscriber; cancel juga diabaikan.
             pass
 
     # ========================================================
     # INSPECTION
     # ========================================================
 
-    def subscriber_count(
-        self,
-        event_name: Optional[str] = None,
-    ) -> int:
-        """
-        Return subscriber count.
-
-        subscriber_count():
-            all subscribers
-
-        subscriber_count("tool.start"):
-            subscribers for tool.start
-        """
-
+    def subscriber_count(self, event_name: Optional[str] = None) -> int:
         with self._lock:
-
             if event_name is not None:
+                return len(self._subscribers.get(event_name, []))
 
-                return len(
-                    self._subscribers.get(
-                        event_name,
-                        [],
-                    )
-                )
-
-            return sum(
-                len(subscribers)
-                for subscribers
-                in self._subscribers.values()
-            )
-
-    # ========================================================
-    # STATS
-    # ========================================================
+            return sum(len(subs) for subs in self._subscribers.values())
 
     def stats(self) -> dict[str, int]:
-        """
-        Return basic EventBus statistics.
-        """
-
         with self._lock:
+            published = self._published_count
+            failed = self._failed_callbacks
 
-            return {
-                "published": self._published_count,
-                "failed_callbacks": (
-                    self._failed_callbacks
-                ),
-                "subscriber_count": (
-                    self.subscriber_count()
-                ),
-            }
-
-    # ========================================================
-    # RESET STATS
-    # ========================================================
+        return {
+            "published": published,
+            "failed_callbacks": failed,
+            "subscriber_count": self.subscriber_count(),
+        }
 
     def reset_stats(self) -> None:
-        """
-        Reset runtime statistics.
-
-        Mostly useful for tests.
-        """
-
         with self._lock:
-
             self._published_count = 0
             self._failed_callbacks = 0
 
@@ -1082,18 +754,7 @@ def publish_event(
     data: Optional[dict[str, Any]] = None,
     metadata: Optional[dict[str, Any]] = None,
 ) -> Event:
-    """
-    Convenience wrapper.
-
-    Instead of:
-
-        event_bus.publish(...)
-
-    You can use:
-
-        publish_event(...)
-    """
-
+    """Shortcut untuk event_bus.publish(...)."""
     return event_bus.publish(
         event_name,
         correlation_id=correlation_id,
@@ -1115,10 +776,7 @@ async def publish_event_async(
     data: Optional[dict[str, Any]] = None,
     metadata: Optional[dict[str, Any]] = None,
 ) -> Event:
-    """
-    Async convenience wrapper.
-    """
-
+    """Shortcut async untuk event_bus.publish_async(...)."""
     return await event_bus.publish_async(
         event_name,
         correlation_id=correlation_id,
@@ -1127,72 +785,4 @@ async def publish_event_async(
         tool=tool,
         data=data,
         metadata=metadata,
-    )
-
-
-# ============================================================
-# EXAMPLE
-# ============================================================
-
-if __name__ == "__main__":
-
-    def logger_listener(event: Event) -> None:
-
-        print(
-            "[EVENT]",
-            event.event,
-            event.correlation_id,
-        )
-
-    async def websocket_listener(
-        event: Event,
-    ) -> None:
-
-        print(
-            "[WS]",
-            event.event,
-            event.event_id,
-        )
-
-    # --------------------------------------------------------
-    # Subscribe
-    # --------------------------------------------------------
-
-    event_bus.subscribe(
-        WILDCARD,
-        logger_listener,
-    )
-
-    event_bus.subscribe(
-        EventNames.TOOL_START,
-        websocket_listener,
-    )
-
-    # --------------------------------------------------------
-    # Publish
-    # --------------------------------------------------------
-
-    correlation_id = uuid.uuid4().hex
-
-    event_bus.publish(
-        EventNames.TOOL_START,
-        correlation_id=correlation_id,
-        source="AKANE",
-        agent="AKANE",
-        tool="ssh",
-        data={
-            "device": "R1",
-            "command": "/system resource print",
-        },
-        metadata={
-            "environment": "lab",
-        },
-    )
-
-    # --------------------------------------------------------
-    # Stats
-    # --------------------------------------------------------
-
-    print(
-        event_bus.stats()
     )

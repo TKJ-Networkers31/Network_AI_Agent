@@ -14,8 +14,16 @@ PERUBAHAN (Lokasi hosting & akses):
 - Router location di-include (sebelumnya file-nya salah isi & tidak terdaftar).
 - Startup: lokasi hosting dihangatkan di thread terpisah, supaya giliran chat
   pertama tidak menunggu deteksi IP.
+
+PERUBAHAN (Worker 1 - Event Bus):
+- Startup: WebSocketEventBridge (api/ws_bridge.py) di-start di event loop
+  utama. Ini juga mengikat (bind_loop) loop tersebut ke Event Bus, supaya
+  subscriber async yang dipublish dari thread pekerja dijadwalkan ke loop
+  FastAPI - bukan ke loop sementara.
+- Shutdown: bridge dihentikan rapi.
 """
 
+import asyncio
 import threading
 from pathlib import Path
 
@@ -29,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files, location
 from api.routers import ws
+from api.ws_bridge import get_ws_bridge
 from agents.akane.connection_manager import get_connection_manager
 from core.location import location_service
 
@@ -71,6 +80,18 @@ def _warm_host_location() -> None:
 @app.on_event("startup")
 def _startup_location():
     threading.Thread(target=_warm_host_location, daemon=True).start()
+
+
+@app.on_event("startup")
+async def _startup_event_bridge():
+    # Async supaya berjalan DI event loop utama (loop yang sama dengan
+    # WebSocket) - bridge mengikat loop ini ke Event Bus.
+    get_ws_bridge().start(asyncio.get_running_loop())
+
+
+@app.on_event("shutdown")
+async def _shutdown_event_bridge():
+    await get_ws_bridge().stop()
 
 
 @app.on_event("shutdown")

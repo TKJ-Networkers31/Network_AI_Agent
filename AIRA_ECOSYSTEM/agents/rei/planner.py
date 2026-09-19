@@ -27,6 +27,24 @@ PERUBAHAN (Sprint 1 - Model Router):
 Planner.run() menerima 'selected_model' (SelectedModel dari Model Router,
 dipilih Brain SEBELUM planner dipanggil) dan meneruskannya apa adanya ke
 call_model(). REI TIDAK PERNAH memilih model.
+
+PERUBAHAN (Worker 1 - Event Bus):
+emit() sekarang mem-PUBLISH ke Event Bus (core/events.py) - satu-satunya
+sistem event internal. Peta nama lama -> nama event bus:
+
+    thinking      -> thinking.start
+    tool_start    -> tool.start
+    tool_progress -> tool.progress
+    tool_finish   -> tool.finish
+    error         -> system.error
+
+Subscriber WebSocket (api/ws_bridge.py) menerjemahkannya balik ke protokol
+WebSocket lama, jadi frontend tidak berubah. session_id/run_id/correlation_id
+ditempel otomatis dari core.events.event_scope (diatur ws.py/Brain) - planner
+tidak perlu tahu soal WebSocket.
+
+Parameter 'on_event' TETAP didukung (callback lama, nama event lama) supaya
+pemanggil lain tidak patah; ws.py sendiri tidak lagi memakainya.
 """
 
 import json
@@ -35,6 +53,7 @@ import logging
 
 from agents.rei.provider_client import call_model, EMPTY_RESPONSE_MARKER
 from agents.rei.auto_extract import extract_and_save_facts_async
+from core.events import EventNames, event_bus
 from core.persona import get_engine
 from core.time_utils import time_context_block
 from core.memory import build_context_snippet
@@ -47,6 +66,15 @@ MAX_REPEATED_IDENTICAL_CALLS = 2
 
 DIO_REQUEST_TOOL_NAME = "request_structured_input"
 
+# nama event lama (on_event / protokol WebSocket) -> nama event bus
+LEGACY_TO_BUS_EVENT = {
+    "thinking": EventNames.THINKING_START,
+    "tool_start": EventNames.TOOL_START,
+    "tool_progress": EventNames.TOOL_PROGRESS,
+    "tool_finish": EventNames.TOOL_FINISH,
+    "error": EventNames.SYSTEM_ERROR,
+}
+
 
 class Planner:
 
@@ -57,6 +85,20 @@ class Planner:
 
     def run(self, user_input, memory, tool_executor, on_event=None, cancel_event=None, selected_model=None):
         def emit(event_type, payload):
+            bus_event = LEGACY_TO_BUS_EVENT.get(event_type)
+
+            if bus_event:
+                try:
+                    event_bus.publish(
+                        bus_event,
+                        source="REI",
+                        agent="REI",
+                        tool=payload.get("name") if event_type.startswith("tool_") else None,
+                        data=dict(payload),
+                    )
+                except Exception:
+                    logger.exception("event_bus.publish error (diabaikan)")
+
             if on_event:
                 try:
                     on_event(event_type, payload)
@@ -155,9 +197,6 @@ class Planner:
                         arguments = json.loads(arguments)
                     except json.JSONDecodeError:
                         arguments = {}
-
-                if name == "request_location_permission" and "session_id" not in arguments:
-                    arguments["session_id"] = getattr(memory, "session_id", None)
 
                 category = self.tool_category.get(name, "tool")
 
