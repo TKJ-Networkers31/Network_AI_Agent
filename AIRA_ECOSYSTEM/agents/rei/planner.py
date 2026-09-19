@@ -156,6 +156,9 @@ class Planner:
                     except json.JSONDecodeError:
                         arguments = {}
 
+                if name == "request_location_permission" and "session_id" not in arguments:
+                    arguments["session_id"] = getattr(memory, "session_id", None)
+
                 category = self.tool_category.get(name, "tool")
 
                 signature = f"{name}:{json.dumps(arguments, sort_keys=True, ensure_ascii=False)}"

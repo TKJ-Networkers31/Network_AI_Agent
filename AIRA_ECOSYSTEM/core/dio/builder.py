@@ -6,6 +6,14 @@ Schema (serializable dict-able), TANPA tahu apa pun soal domain
 (Router/Docker/OCR/dst) — hanya membaca field generik
 plan.missing_data / plan.known_data / plan.choices, sesuai prinsip
 "DIO tidak mengetahui domain" (Phase 2.0).
+
+TAMBAHAN (Worker 3 — Location):
+_build_location_permission() menangani mode MODE_LOCATION_PERMISSION -
+satu field khusus tipe "location_permission" yang di frontend menangani
+sendiri alur izin GPS browser (lihat LocationPermissionField.jsx) dan
+langsung memanggil onAction("grant_location"/"deny_location") tanpa
+lewat ActionBar - jadi actions dikosongkan di sini supaya tidak ada
+tombol duplikat.
 """
 
 from typing import Any, Optional
@@ -18,7 +26,9 @@ from core.dio.reasoning import select_mode
 from core.dio.constants import (
     MODE_DISPLAY, MODE_TEXT, MODE_CHOICE, MODE_MIXED,
     MODE_FORM, MODE_WIZARD, MODE_APPROVAL, MODE_REVIEW,
+    MODE_LOCATION_PERMISSION,
     COMPONENT_SELECT, COMPONENT_RADIO, COMPONENT_INFO, COMPONENT_TEXT,
+    COMPONENT_LOCATION_PERMISSION,
     DATA_TYPE_TO_COMPONENT,
 )
 
@@ -42,6 +52,7 @@ class SchemaBuilder:
             MODE_WIZARD: self._build_form,  # satu langkah wizard = bentuk form biasa
             MODE_APPROVAL: self._build_approval,
             MODE_REVIEW: self._build_review,
+            MODE_LOCATION_PERMISSION: self._build_location_permission,
         }
 
         build_fn = builders.get(mode, self._build_form)
@@ -172,6 +183,29 @@ class SchemaBuilder:
             Action(id="approve", label="Setujui", style="primary"),
         ]
         return [section], actions
+
+    def _build_location_permission(self, plan: InteractionPlan):
+        """
+        Satu field khusus yang MENGURUS SENDIRI alur izin GPS browser
+        (lihat LocationPermissionField.jsx) - field itu langsung memanggil
+        onAction("grant_location"/"deny_location") begitu browser
+        merespons, jadi tombol ActionBar generik SENGAJA dikosongkan
+        supaya tidak ada tombol duplikat/membingungkan.
+        """
+        reason = plan.context.get("reason") or (
+            "AIRA butuh mengetahui lokasimu sekarang untuk menjawab permintaan ini."
+        )
+
+        field = Field(
+            id="location_permission",
+            type=COMPONENT_LOCATION_PERMISSION,
+            label="Izin Akses Lokasi",
+            helper_text=reason,
+        )
+
+        section = Section(id="location", fields=[field])
+
+        return [section], []
 
     # ---------------- helpers ----------------
 

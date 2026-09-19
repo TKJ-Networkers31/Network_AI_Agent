@@ -1,45 +1,47 @@
 """
 agents/rei/dio_tools.py — wrapper tipis REI di atas Dynamic Interaction
-Orchestrator (core/dio/*), Phase 2.0 -> Integrasi Phase 2.6 -> Sprint
-Optimalisasi DIO (submit round-trip).
+Orchestrator (core/dio/*).
 
-request_structured_input() TIDAK BERUBAH dari sebelumnya - itu yang
-dipanggil LLM untuk MEMBUAT schema.
+request_structured_input() TIDAK BERUBAH dari sebelumnya.
 
-FIX (Optimalisasi DIO - jalur submit yang sebelumnya tidak ada sama
-sekali):
-1. submit_structured_input() - dipanggil dari api/routers/chat.py dan
-   api/routers/ws.py (BUKAN oleh LLM) begitu user menekan aksi pada form
-   interaktif di frontend. Efeknya:
-     a. Menulis setiap field yang diisi user ke InteractionMemory
-        (core/dio/interaction_memory.py) - inilah yang membuat
-        DIOAnalyzer.analyze() di sesi/permintaan berikutnya bisa
-        menutup 'missing_data' otomatis TANPA bertanya ulang. Sebelum
-        fix ini, InteractionMemory hanya pernah DIBACA, tidak pernah
-        DITULIS dari hasil interaksi nyata.
-     b. Mempublish event lifecycle "interaction.completed" /
-        "interaction.cancelled" ke core/events.py::event_bus, sesuai
-        siklus hidup yang sudah didesain DIO.schema.py::DIO.complete()/
-        cancel() (kita publish event-nya langsung di sini, bukan lewat
-        DIO.complete()/cancel(), karena objek InteractionSchema/Plan asli
-        sudah tidak ada lagi di memori setelah giliran tool call selesai
-        - publish langsung tetap sah karena event_bus.publish() menerima
-        data dict apa pun).
-2. build_submission_message() - membangun pasangan (display_message,
-   llm_message) dari payload submission, dipakai chat.py & ws.py supaya
-   tidak duplikasi logic di dua tempat (sebelumnya pola serupa - lihat
-   _apply_slash_command - memang diduplikasi di chat.py & ws.py; kali
-   ini sengaja disatukan di sini).
+TAMBAHAN (Worker 3 — DIO + Location):
+1. request_location_permission() - dipanggil LLM saat perlu tahu lokasi
+   presisi user SEKARANG tapi lokasi akses sesi ini belum diketahui dari
+   GPS browser. Membuat schema DIO mode "location_permission" DAN
+   menyimpan "pending location request" (session_id, permintaan asli
+   user, created_at) lewat InteractionMemory (TTL 10 menit) - inilah
+   yang membuat permintaan asli user bisa DILANJUTKAN OTOMATIS begitu
+   izin diberikan, TANPA user perlu mengetik ulang.
+2. submit_structured_input() diperluas: kalau schema_id yang di-submit
+   cocok dengan pending location request, validasi koordinat lalu simpan
+   lewat core/location/service.py::LocationService.update_access() (yang
+   SUDAH mempublish event "location.updated" ke event_bus - tidak ada
+   event bus baru dibuat di sini).
+3. build_submission_message() diperluas: kalau submission ini adalah
+   hasil location grant/deny, balas dengan instruksi yang membawa
+   permintaan asli user (original_request) supaya LLM melanjutkan
+   permintaan itu, bukan menjawab form kosong.
+
+Session_id didapat dari agents/rei/planner.py yang menyisipkannya
+otomatis ke argumen tool ini (lihat planner.py) - LLM sendiri TIDAK
+diminta menyebut session_id di schema tool-nya.
 """
 
 import json
+import time
 from typing import Optional
 
 from core.dio import get_dio
 from core.dio.models import InteractionPlan, MissingField, ChoiceOption
 from core.dio.reasoning import select_mode
+from core.dio.constants import MODE_LOCATION_PERMISSION, EVENT_INTERACTION_REQUESTED
 from core.dio.interaction_memory import get_interaction_memory
 from core.events import event_bus
+from core.location import location_service
+from core.location.models import LocationContext, ROLE_ACCESS, SOURCE_BROWSER
+
+LOCATION_PENDING_KEY_PREFIX = "pending_location_request:"
+LOCATION_PENDING_TTL_SECONDS = 600  # 10 menit - cukup untuk user merespons dialog izin browser
 
 
 def _to_missing_field(raw: dict) -> MissingField:
@@ -75,17 +77,10 @@ def request_structured_input(
     description: Optional[str] = None,
 ) -> dict:
     """
-    Dipanggil oleh LLM (lewat agents/rei/planner.py) kapan pun informasi
-    dari user KURANG atau AMBIGU untuk menjalankan suatu permintaan.
-    Mengembalikan Universal Interaction Schema (dict, sudah divalidasi)
-    yang sekarang benar-benar dirender ke frontend sebagai form/pilihan
-    interaktif (lihat agents/rei/planner.py + MessageBubble.jsx) - BUKAN
-    hanya teks JSON yang terkubur di tool result seperti sebelumnya.
-
-    Setelah tool ini dipanggil, LLM WAJIB berhenti menjawab dengan teks
-    panjang di giliran itu - biarkan schema yang ditampilkan ke user,
-    lalu tunggu balasan user di giliran berikutnya (masuk lewat
-    submit_structured_input() di bawah).
+    Dipanggil oleh LLM kapan pun informasi dari user KURANG atau AMBIGU
+    untuk menjalankan suatu permintaan (form/pilihan interaktif umum).
+    Untuk kebutuhan LOKASI PRESISI user, pakai request_location_permission
+    di bawah, BUKAN tool ini.
     """
 
     plan = InteractionPlan(
@@ -106,6 +101,113 @@ def request_structured_input(
     }
 
 
+def request_location_permission(
+    original_request: str,
+    reason: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> dict:
+    """
+    Dipanggil LLM ketika permintaan user butuh lokasi presisi user
+    SEKARANG (mis. "aku dimana?", "cuaca di sekitarku") TAPI lokasi
+    akses sesi ini belum diketahui dari GPS browser (cek blok KONTEKS
+    LOKASI di system prompt). Membuat form izin lokasi interaktif di
+    frontend DAN menyimpan permintaan asli user supaya bisa dilanjutkan
+    otomatis begitu user merespons.
+
+    `session_id` diisi otomatis oleh planner - JANGAN diminta dari LLM.
+    """
+
+    plan = InteractionPlan(
+        intent="location_permission",
+        context={"reason": reason or ""},
+    )
+    plan.suggested_mode = MODE_LOCATION_PERMISSION
+
+    schema = get_dio().generate_schema(
+        plan,
+        title="Izin Akses Lokasi",
+        description=reason or "AIRA butuh tahu lokasimu sekarang untuk menjawab ini.",
+    )
+
+    request_id = schema.id
+
+    pending = {
+        "request_id": request_id,
+        "session_id": session_id,
+        "original_request": original_request,
+        "created_at": time.time(),
+    }
+
+    get_interaction_memory().save(
+        f"{LOCATION_PENDING_KEY_PREFIX}{request_id}",
+        pending,
+        ttl_seconds=LOCATION_PENDING_TTL_SECONDS,
+    )
+
+    try:
+        event_bus.publish(
+            EVENT_INTERACTION_REQUESTED, agent="DIO",
+            data={
+                "schema_id": request_id,
+                "intent": "location_permission",
+                "session_id": session_id,
+            },
+        )
+    except Exception:
+        # publish event tidak boleh menggagalkan pembuatan form izin.
+        pass
+
+    return {
+        "success": True,
+        "tool": "request_location_permission",
+        "interaction_schema": schema.to_dict(),
+    }
+
+
+def _handle_location_grant(pending: dict, values: dict) -> dict:
+    """
+    Validasi koordinat dari browser lalu simpan sebagai lokasi akses sesi
+    ini lewat LocationService yang SUDAH ADA (tidak ada layer persistensi
+    baru). Return dict {"granted": bool, ...} - TIDAK PERNAH raise.
+    """
+
+    try:
+        latitude = float(values.get("latitude"))
+        longitude = float(values.get("longitude"))
+    except (TypeError, ValueError):
+        return {"granted": False, "reason": "invalid_coordinates"}
+
+    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+        return {"granted": False, "reason": "invalid_coordinates"}
+
+    accuracy = values.get("accuracy")
+    try:
+        accuracy = float(accuracy) if accuracy is not None else None
+    except (TypeError, ValueError):
+        accuracy = None
+
+    session_id = pending.get("session_id")
+
+    if not session_id:
+        # Tidak ada session_id (mis. dipanggil dari mode terminal run_chat.py
+        # yang tidak berbasis sesi web) - tidak ada tempat yang sah untuk
+        # menyimpan lokasi akses per-sesi.
+        return {"granted": False, "reason": "missing_session"}
+
+    context = LocationContext(
+        role=ROLE_ACCESS,
+        latitude=latitude,
+        longitude=longitude,
+        accuracy=accuracy,
+        source=SOURCE_BROWSER,
+        timestamp=time.time(),
+    )
+
+    location_service.update_access(session_id, context)
+
+    return {"granted": True, "latitude": latitude, "longitude": longitude, "accuracy": accuracy}
+
+
 def submit_structured_input(
     schema_id: str,
     action_id: str,
@@ -114,23 +216,35 @@ def submit_structured_input(
 ) -> dict:
     """
     Dipanggil LANGSUNG oleh api/routers/chat.py dan api/routers/ws.py
-    (bukan tool LLM) begitu user menekan aksi pada form/pilihan
-    interaktif yang dirender frontend dari hasil request_structured_input().
+    begitu user menekan aksi pada form/pilihan interaktif.
 
-    - Kalau TIDAK dibatalkan: setiap field yang diisi disimpan ke
-      InteractionMemory supaya DIOAnalyzer bisa menutup gap yang sama di
-      permintaan berikutnya tanpa bertanya ulang.
-    - Selalu mempublish event lifecycle DIO ke event_bus, apa pun
-      hasilnya (completed/cancelled), supaya subscriber lain (mis. Logs,
-      atau relay WebSocket di masa depan) bisa mengamati siklus hidup
-      interaksi ini.
+    Kalau schema_id ini adalah pending location request: validasi &
+    simpan koordinat (atau catat penolakan), lalu pending request
+    dihapus (sekali pakai). Return membawa 'pending_location' dan
+    'location_result' supaya build_submission_message() bisa
+    menyusun instruksi resume yang tepat.
     """
     values = values or {}
     saved_keys: list[str] = []
 
-    if not cancelled:
-        memory = get_interaction_memory()
+    memory = get_interaction_memory()
+    pending_key = f"{LOCATION_PENDING_KEY_PREFIX}{schema_id}"
+    pending = memory.load(pending_key)
 
+    location_result = None
+
+    if pending:
+        if action_id == "grant_location" and not cancelled:
+            location_result = _handle_location_grant(pending, values)
+        else:
+            # deny_location, atau cancelled=True dari jalur mana pun.
+            location_result = {"granted": False, "reason": "denied"}
+
+        # Pending request selalu sekali pakai - baik berhasil maupun ditolak.
+        memory.clear(pending_key)
+
+    elif not cancelled:
+        # Jalur generik lama (form non-lokasi) - perilaku TIDAK berubah.
         for key, value in values.items():
             if value is None or value == "":
                 continue
@@ -145,9 +259,6 @@ def submit_structured_input(
             data={"schema_id": schema_id, "action_id": action_id, "values": values},
         )
     except Exception:
-        # Publish event tidak boleh pernah menggagalkan submit - efek
-        # penyimpanan ke InteractionMemory di atas sudah cukup penting
-        # untuk tetap berhasil walau event bus bermasalah.
         pass
 
     return {
@@ -155,20 +266,56 @@ def submit_structured_input(
         "schema_id": schema_id,
         "cancelled": cancelled,
         "saved_keys": saved_keys,
+        "pending_location": pending,
+        "location_result": location_result,
     }
 
 
-def build_submission_message(dio_submission: dict) -> "tuple[str, str]":
+def build_submission_message(
+    dio_submission: dict,
+    pending_location: Optional[dict] = None,
+    location_result: Optional[dict] = None,
+) -> "tuple[str, str]":
     """
-    Return (display_message, llm_message):
-    - display_message: teks singkat yang disimpan/ditampilkan sebagai
-      bubble chat milik user (bukan JSON mentah - biar enak dibaca).
-    - llm_message: instruksi terstruktur yang benar-benar dikirim ke
-      LLM, berisi data lengkap yang tadi diisi user di form.
+    Return (display_message, llm_message).
+
+    Kalau submission ini terkait pending location request, jalur
+    KHUSUS: kembalikan permintaan asli user (original_request) supaya
+    LLM melanjutkan permintaan itu - user tidak perlu mengetik ulang.
+    Selain itu, perilaku PERSIS seperti sebelumnya (form/pilihan biasa).
     """
     action_id = dio_submission.get("action_id", "")
     values = dio_submission.get("values") or {}
     cancelled = bool(dio_submission.get("cancelled"))
+
+    if pending_location:
+        original_request = pending_location.get("original_request") or ""
+        granted = bool(location_result and location_result.get("granted"))
+
+        if granted:
+            accuracy_note = (
+                f", akurasi±{location_result['accuracy']:.0f}m"
+                if location_result.get("accuracy") is not None else ""
+            )
+            display_message = "📍 Lokasi diberikan."
+            llm_message = (
+                "[Instruksi sistem: User baru saja mengizinkan akses lokasi GPS "
+                f"browser (lat={location_result['latitude']}, lon={location_result['longitude']}"
+                f"{accuracy_note}). Lokasi ini SUDAH tersimpan sebagai lokasi akses sesi "
+                "ini - pakai langsung, JANGAN memanggil request_location_permission lagi "
+                f"di giliran ini. Lanjutkan permintaan asli user berikut: \"{original_request}\"]"
+            )
+        else:
+            reason = (location_result or {}).get("reason", "denied")
+            display_message = "🚫 Izin lokasi ditolak." if reason == "denied" else "⚠ Lokasi tidak valid."
+            llm_message = (
+                "[Instruksi sistem: User TIDAK memberikan lokasi GPS yang valid "
+                f"(alasan: {reason}). JANGAN memanggil request_location_permission lagi "
+                "di giliran ini. Jawab permintaan asli user berikut TANPA data lokasi "
+                f"presisi, atau jelaskan kenapa lokasi dibutuhkan: \"{original_request}\"]"
+            )
+
+        return display_message, llm_message
 
     if cancelled:
         display_message = "❌ Dibatalkan."

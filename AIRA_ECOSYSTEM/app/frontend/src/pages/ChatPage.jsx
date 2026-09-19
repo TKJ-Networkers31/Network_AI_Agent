@@ -153,8 +153,21 @@ export default function ChatPage({ onOpenMenu }) {
     if (!schema) return;
 
     const action = (schema.actions || []).find((a) => a.id === actionId);
-    const cancelled = action ? action.style === "ghost" : false;
-    const displayText = cancelled ? "❌ Dibatalkan." : "📝 Form terkirim.";
+
+    // Worker 3 (Location): location_permission tidak punya entri di
+    // schema.actions (tombolnya dirender sendiri oleh field-nya), jadi
+    // cancelled/displayText di-special-case untuk dua action id ini.
+    const cancelled =
+      actionId === "deny_location" ? true : action ? action.style === "ghost" : false;
+
+    const displayText =
+      actionId === "grant_location"
+        ? "📍 Lokasi diberikan."
+        : actionId === "deny_location"
+        ? "🚫 Izin lokasi ditolak."
+        : cancelled
+        ? "❌ Dibatalkan."
+        : "📝 Form terkirim.";
 
     markInteractionResolved(index);
 

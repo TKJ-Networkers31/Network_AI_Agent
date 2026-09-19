@@ -67,6 +67,7 @@ REI_TOOLS = {
     "restore_file": fs.restore_file,
     "list_trash": fs.list_trash,
     "request_structured_input": dio.request_structured_input,
+    "request_location_permission": dio.request_location_permission,
 }
 
 REI_TOOL_CATEGORY = {
@@ -87,6 +88,7 @@ REI_TOOL_CATEGORY = {
     "restore_file": "filesystem",
     "list_trash": "filesystem",
     "request_structured_input": "interaction",
+    "request_location_permission": "interaction",
 }
 
 REI_TOOL_SCHEMAS = [
@@ -428,6 +430,39 @@ REI_TOOL_SCHEMAS = [
                     "description": {"type": "string", "description": "Deskripsi singkat konteks permintaan."},
                 },
                 "required": ["intent"],
+            },
+        },
+    },
+        {
+        "type": "function",
+        "function": {
+            "name": "request_location_permission",
+            "description": (
+                "WAJIB dipanggil kalau user menanyakan lokasinya sendiri secara "
+                "presisi (mis. 'aku dimana', 'cuaca di sekitarku', 'restoran dekat "
+                "sini') DAN blok KONTEKS LOKASI di atas menunjukkan lokasi akses "
+                "BELUM bersumber dari GPS/browser (kalau sumbernya sudah "
+                "'GPS/lokasi browser', jangan panggil tool ini lagi - pakai "
+                "lokasi yang sudah ada). JANGAN PERNAH menjawab pertanyaan 'aku "
+                "dimana' dengan lokasi dari perkiraan IP sebagai jawaban final - "
+                "itu cuma kasar/bisa meleset kota. Panggil tool ini supaya "
+                "browser user diminta izin GPS. Setelah memanggil tool ini, "
+                "JANGAN menjawab dengan lokasi apa pun di giliran yang sama - "
+                "form izin akan tampil otomatis, tunggu giliran berikutnya."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "original_request": {
+                        "type": "string",
+                        "description": "Permintaan/pertanyaan asli user apa adanya, supaya bisa dilanjutkan otomatis setelah izin diberikan.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Alasan singkat kenapa lokasi dibutuhkan, ditampilkan ke user di form izin.",
+                    },
+                },
+                "required": ["original_request"],
             },
         },
     },

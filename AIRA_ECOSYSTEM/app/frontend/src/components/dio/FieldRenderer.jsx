@@ -3,7 +3,7 @@ import NumberField from "./Field/NumberField.jsx";
 import PasswordField from "./Field/PasswordField.jsx";
 import SelectField from "./Field/SelectField.jsx";
 import RadioField from "./Field/RadioField.jsx";
-import CheckboxField from "./Field/CheckboxField.jsx";
+import CheckboxField from "./Field/CheckBoxField.jsx";
 import SwitchField from "./Field/SwitchField.jsx";
 import SliderField from "./Field/SliderField.jsx";
 import DateField from "./Field/DateField.jsx";
@@ -13,10 +13,9 @@ import TableField from "./Field/TableField.jsx";
 import InfoField from "./Field/InfoField.jsx";
 import DividerField from "./Field/DividerField.jsx";
 import ButtonField from "./Field/ButtonField.jsx";
+import LocationPermissionField from "./Field/LocationPermissionField.jsx";
 
-// Mapping tunggal field.type -> komponen. Ini SATU-SATUNYA tempat
-// yang tahu nama tipe field - tidak ada switch/if berdasarkan nama
-// fitur/domain di mana pun di renderer ini.
+// Mapping tunggal field.type -> komponen.
 const FIELD_COMPONENTS = {
   text: TextField,
   textarea: TextField,
@@ -34,6 +33,7 @@ const FIELD_COMPONENTS = {
   info: InfoField,
   divider: DividerField,
   button: ButtonField,
+  location_permission: LocationPermissionField,
 };
 
 export default function FieldRenderer({ field, value, error, onChange, onAction }) {
@@ -47,9 +47,10 @@ export default function FieldRenderer({ field, value, error, onChange, onAction 
     );
   }
 
-  // Field bertipe "button" tidak punya value/onChange - dia trigger
-  // onAction seperti ActionBar, cuma posisinya inline dalam section.
-  if (field.type === "button") {
+  // Field bertipe "button" atau "location_permission" tidak punya
+  // value/onChange biasa - keduanya trigger onAction sendiri (yang
+  // terakhir sambil menyisipkan koordinat lewat extraValues).
+  if (field.type === "button" || field.type === "location_permission") {
     return <Component field={field} onAction={onAction} />;
   }
 

@@ -1,17 +1,14 @@
 """
 api/routers/chat.py
 
-FIX (Optimalisasi DIO):
-Endpoint /api/chat sekarang menangani dua jenis payload:
-1. Chat teks biasa (dan slash command) - PERSIS seperti sebelumnya.
-2. dio_submission - hasil user mengisi/menekan aksi pada form/pilihan
-   interaktif yang dirender dari request_structured_input(). Efek
-   sampingnya (simpan ke InteractionMemory + publish event lifecycle)
-   dijalankan lewat agents.rei.dio_tools.submit_structured_input()
-   SEBELUM Brain.think() dipanggil, supaya tetap tercatat apa pun yang
-   LLM lakukan selanjutnya. interaction_schema dari hasil giliran ini
-   (kalau LLM memanggil request_structured_input lagi, mis. untuk
-   langkah wizard berikutnya) ikut dikembalikan & disimpan.
+FIX (Optimalisasi DIO + Worker 3 Location):
+Endpoint /api/chat menangani tiga jenis payload:
+1. Chat teks biasa (dan slash command).
+2. dio_submission generik - hasil user mengisi form/pilihan interaktif.
+3. dio_submission untuk location grant/deny - ditangani otomatis oleh
+   submit_structured_input()/build_submission_message() lewat
+   pending_location/location_result, tanpa endpoint ini perlu tahu
+   detail lokasi sama sekali (tetap generic).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -59,15 +56,17 @@ def chat(payload: ChatRequest):
         session_id = session["id"]
 
     if payload.dio_submission:
-        # Efek samping (InteractionMemory + event bus) dijalankan dulu,
-        # terlepas dari apa yang LLM lakukan setelahnya.
-        submit_structured_input(
+        submission_result = submit_structured_input(
             schema_id=payload.dio_submission.get("schema_id", ""),
             action_id=payload.dio_submission.get("action_id", ""),
             values=payload.dio_submission.get("values"),
             cancelled=bool(payload.dio_submission.get("cancelled")),
         )
-        display_message, llm_message = build_submission_message(payload.dio_submission)
+        display_message, llm_message = build_submission_message(
+            payload.dio_submission,
+            pending_location=submission_result.get("pending_location"),
+            location_result=submission_result.get("location_result"),
+        )
     else:
         display_message = payload.message.strip()
         llm_message = _apply_slash_command(display_message)

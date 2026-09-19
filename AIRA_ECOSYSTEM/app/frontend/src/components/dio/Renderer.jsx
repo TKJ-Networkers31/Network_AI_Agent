@@ -5,31 +5,26 @@ import ActionBar from "./ActionBar.jsx";
 /**
  * Renderer — Universal Interaction Renderer.
  *
- * Mengubah Interaction Schema (JSON) dari DIO jadi UI React, dirender
- * sebagai bagian percakapan (message bubble) - BUKAN halaman penuh.
- * Sepenuhnya data-driven: tidak ada logic khusus AKANE/HIKARI/YUKI/FSE
- * di sini, semua agent memakai renderer yang sama.
- *
- * Props:
- * - schema: Interaction Schema dari DIO.
- * - onSubmitAction(actionId, values): dipanggil saat user menekan
- *   action (ActionBar atau field bertipe button). Action dengan style
- *   selain "ghost"/"secondary" WAJIB lolos validasi dulu sebelum
- *   callback ini dipanggil.
+ * TAMBAHAN (Worker 3 - Location): handleAction menerima parameter kedua
+ * `extraValues` opsional - dipakai field yang mengurus alur async sendiri
+ * (mis. LocationPermissionField yang baru dapat koordinat dari browser)
+ * untuk menyisipkan data langsung ke payload submit TANPA bergantung pada
+ * state `values` yang di-update lewat onChange (yang rawan race condition
+ * kalau field langsung memanggil onAction pada callback async yang sama).
  */
 export default function Renderer({ schema, onSubmitAction }) {
   const { values, errors, setValue, submit } = useInteractionState(schema);
 
   if (!schema) return null;
 
-  function handleAction(actionId) {
+  function handleAction(actionId, extraValues) {
     const action = (schema.actions || []).find((a) => a.id === actionId);
     const needsValidation = !action || !["ghost", "secondary"].includes(action.style);
 
     if (needsValidation) {
-      submit((finalValues) => onSubmitAction?.(actionId, finalValues));
+      submit((finalValues) => onSubmitAction?.(actionId, { ...finalValues, ...extraValues }));
     } else {
-      onSubmitAction?.(actionId, values);
+      onSubmitAction?.(actionId, { ...values, ...extraValues });
     }
   }
 

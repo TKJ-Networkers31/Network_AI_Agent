@@ -250,13 +250,17 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
     dio_submission = None if (msg_type == "voice_audio" or is_regenerate) else raw.get("dio_submission")
 
     if dio_submission:
-        submit_structured_input(
+        submission_result = submit_structured_input(
             schema_id=dio_submission.get("schema_id", ""),
             action_id=dio_submission.get("action_id", ""),
             values=dio_submission.get("values"),
             cancelled=bool(dio_submission.get("cancelled")),
         )
-        _, llm_message = build_submission_message(dio_submission)
+        _, llm_message = build_submission_message(
+            dio_submission,
+            pending_location=submission_result.get("pending_location"),
+            location_result=submission_result.get("location_result"),
+        )
     elif regenerated_llm_message:
         llm_message = regenerated_llm_message
     else:

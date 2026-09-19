@@ -53,6 +53,13 @@ Kalau penjelasan jadi lebih mudah dipahami dengan gambar, TAMPILKAN gambar - jan
 - Jangan membuat ilustrasi untuk jawaban singkat, sapaan, atau hal yang sudah jelas lewat teks.
 """
 
+LOCATION_RULES = """
+=== LOKASI USER ===
+Kalau blok KONTEKS LOKASI di bawah menunjukkan lokasi akses bersumber dari GPS/browser, itu lokasi presisi user - pakai langsung.
+Kalau belum ada (sumbernya IP/perkiraan/belum diketahui) DAN user menanyakan lokasinya sendiri secara presisi, panggil tool request_location_permission - JANGAN menjawab lokasi dari IP sebagai jawaban final ke pertanyaan "aku di mana", karena itu cuma perkiraan kasar dan bisa meleset kota.
+Untuk kebutuhan yang tidak butuh presisi (cuaca umum, waktu setempat kasar), boleh pakai info lokasi yang sudah ada apa adanya tanpa minta izin baru.
+"""
+
 
 def _pick(table: list[tuple[int, str]], value: int) -> str:
     chosen = table[0][1]
@@ -158,6 +165,7 @@ def build_prompt(profile: dict, behavior: dict, persona_text: dict, extra_contex
     sections.append(_behavior_narrative(behavior))
     sections.append(FORMATTING_RULES.strip())
     sections.append(ILLUSTRATION_RULES.strip())
+    sections.append(LOCATION_RULES.strip())
 
     if extra_context:
         sections.append(extra_context.strip())
