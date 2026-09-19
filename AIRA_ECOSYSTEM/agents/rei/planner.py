@@ -22,6 +22,11 @@ menjalankan ekstraksi memori otomatis. Catatan: panggilan LLM/tool yang
 SEDANG berlangsung (HTTP/SSH) tidak bisa diputus di tengah jalan; stop
 berlaku begitu panggilan itu selesai. Tanpa cancel_event (REST /api/chat,
 run_chat.py) perilakunya PERSIS seperti sebelumnya.
+
+PERUBAHAN (Sprint 1 - Model Router):
+Planner.run() menerima 'selected_model' (SelectedModel dari Model Router,
+dipilih Brain SEBELUM planner dipanggil) dan meneruskannya apa adanya ke
+call_model(). REI TIDAK PERNAH memilih model.
 """
 
 import json
@@ -50,7 +55,7 @@ class Planner:
         self.tool_category = tool_category or {}
         self.dangerous_tools = dangerous_tools or set()
 
-    def run(self, user_input, memory, tool_executor, on_event=None, cancel_event=None):
+    def run(self, user_input, memory, tool_executor, on_event=None, cancel_event=None, selected_model=None):
         def emit(event_type, payload):
             if on_event:
                 try:
@@ -86,7 +91,7 @@ class Planner:
 
         system_prompt = get_engine().build(time_context_block() + build_context_snippet())
 
-        response = self._call_with_retry(memory.get_messages(system_prompt))
+        response = self._call_with_retry(memory.get_messages(system_prompt), selected_model=selected_model)
 
         if "error" in response:
             emit("error", {"message": response["error"]})
@@ -235,7 +240,7 @@ class Planner:
 
             emit("thinking", {"message": "Menyusun jawaban..."})
 
-            response = self._call_with_retry(memory.get_messages(system_prompt))
+            response = self._call_with_retry(memory.get_messages(system_prompt), selected_model=selected_model)
 
             if "error" in response:
                 emit("error", {"message": response["error"]})
@@ -255,8 +260,8 @@ class Planner:
         if usage:
             memory.token_tracker.add(usage)
 
-    def _call_with_retry(self, messages, max_retries=MAX_EMPTY_RESPONSE_RETRIES):
-        response = call_model(messages, self.tool_schemas)
+    def _call_with_retry(self, messages, selected_model=None, max_retries=MAX_EMPTY_RESPONSE_RETRIES):
+        response = call_model(messages, self.tool_schemas, selected_model)
         attempt = 0
 
         while (
@@ -266,7 +271,7 @@ class Planner:
         ):
             attempt += 1
             logger.info("Provider balas kosong, mencoba ulang (%d/%d)...", attempt, max_retries)
-            response = call_model(messages, self.tool_schemas)
+            response = call_model(messages, self.tool_schemas, selected_model)
 
         return response
 
