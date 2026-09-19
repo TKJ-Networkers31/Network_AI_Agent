@@ -27,6 +27,13 @@ Stop:
 Model:
   'selected_model' dari Model Router diteruskan apa adanya ke call_model().
   REI tidak pernah memilih model.
+
+Context:
+  'context' (AIRAContext dari core/context, disusun Brain) dipakai apa adanya:
+  context.system_prompt menjadi system prompt. Planner TIDAK lagi menyusun
+  persona/waktu/memory/lokasi sendiri. Kalau context=None (pemanggil yang
+  tidak lewat Brain), Planner meminta builder default membuatnya - tetap SATU
+  jalur penyusunan konteks, tidak ada injeksi ganda.
 """
 
 import json
@@ -36,9 +43,7 @@ import logging
 from agents.rei.provider_client import call_model, EMPTY_RESPONSE_MARKER
 from agents.rei.auto_extract import extract_and_save_facts_async
 from core.events import EventNames, event_bus
-from core.persona import get_engine
-from core.time_utils import time_context_block
-from core.memory import build_context_snippet
+from core.context import get_context_builder
 
 logger = logging.getLogger("aira.rei.planner")
 
@@ -60,7 +65,7 @@ class Planner:
         self.tool_category = tool_category or {}
         self.dangerous_tools = dangerous_tools or set()
 
-    def run(self, user_input, memory, tool_executor, cancel_event=None, selected_model=None):
+    def run(self, user_input, memory, tool_executor, cancel_event=None, selected_model=None, context=None):
 
         def emit(bus_event, payload):
             try:
@@ -102,7 +107,14 @@ class Planner:
         if is_cancelled():
             return cancelled_result()
 
-        system_prompt = get_engine().build(time_context_block() + build_context_snippet())
+        # Konteks disusun SATU kali oleh Context Builder (dipanggil Brain).
+        # Fallback ini hanya untuk pemanggil yang tidak lewat Brain.
+        if context is None:
+            context = get_context_builder().build(
+                user_input, session_id=getattr(memory, "session_id", None),
+            )
+
+        system_prompt = context.system_prompt
 
         response = self._call_with_retry(memory.get_messages(system_prompt), selected_model=selected_model)
 

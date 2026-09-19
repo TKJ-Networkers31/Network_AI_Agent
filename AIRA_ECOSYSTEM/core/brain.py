@@ -2,9 +2,14 @@
 core/brain.py — satu-satunya pintu masuk publik ke AIRA.
 
 Flow: prompt -> TaskClassifier -> ModelRouter (+ModelPolicy) -> SelectedModel
--> Orchestrator/REI. Kegagalan classifier/router tidak pernah menjatuhkan
-giliran: classifier jatuh ke general/0.50, router gagal -> selected=None dan
-provider_client memakai default label general.
+-> ContextBuilder -> Orchestrator/REI. Kegagalan classifier/router tidak
+pernah menjatuhkan giliran: classifier jatuh ke general/0.50, router gagal ->
+selected=None dan provider_client memakai default label general.
+
+Konteks runtime (persona/identity, waktu, memory, lokasi, ringkasan tool, task)
+disusun SATU kali per giliran oleh core/context (ContextBuilder) lalu dibawa
+ke Planner sebagai AIRAContext. Kalau builder gagal, context=None dan Planner
+memakai builder default - giliran tetap jalan.
 
 Siklus hidup satu giliran dipublish ke Event Bus (core/events.py), semuanya
 dengan correlation_id yang SAMA:
@@ -33,7 +38,8 @@ from core.events import (
     event_scope,
     new_correlation_id,
 )
-from core.orchestrator import Orchestrator
+from core.context import AIRAContext, ContextBuilder, summarize_tool_schemas
+from core.orchestrator import AGENT_TOOL_CATEGORY, AGENT_TOOL_SCHEMAS, Orchestrator
 from core.memory import ConversationMemory
 from core.model_router import get_model_router
 from core.model_types import SelectedModel, TaskClassification
@@ -55,13 +61,19 @@ class BrainResponse:
     routing: Optional[dict] = None   # {"task": {...}, "model": {...}|None}
 
 
+def _tool_summary() -> dict:
+    """Ringkasan tool (nama + kategori) untuk tool_context - bukan skema penuh."""
+    return summarize_tool_schemas(AGENT_TOOL_SCHEMAS, AGENT_TOOL_CATEGORY)
+
+
 class Brain:
 
-    def __init__(self, memory: ConversationMemory):
+    def __init__(self, memory: ConversationMemory, context_builder: Optional[ContextBuilder] = None):
         self.memory = memory
         self.orchestrator = Orchestrator()
         self.classifier = get_task_classifier()
         self.router = get_model_router()
+        self.context_builder = context_builder or ContextBuilder(tool_summary=_tool_summary)
 
     # ------------------------------------------------------------ helpers
 
@@ -87,6 +99,18 @@ class Brain:
             return self.router.select(classification)
         except Exception:
             logger.exception("BRAIN | router gagal - provider_client akan pakai default general.")
+            return None
+
+    def _build_context(self, user_input: str, classification: TaskClassification) -> Optional[AIRAContext]:
+        """Builder hanya menggabungkan konteks; gagal -> None, Planner memakai builder default."""
+        try:
+            return self.context_builder.build(
+                user_input,
+                session_id=getattr(self.memory, "session_id", None),
+                task=classification,
+            )
+        except Exception:
+            logger.exception("BRAIN | context builder gagal - Planner memakai builder default.")
             return None
 
     # -------------------------------------------------------------- think
@@ -125,6 +149,8 @@ class Brain:
             model=selected.display_name if selected else None,
         )
 
+        context = self._build_context(user_input, classification)
+
         started = time.perf_counter()
         outcome = {"error": True, "cancelled": False}   # kalau route() raise
 
@@ -132,6 +158,7 @@ class Brain:
             result = self.orchestrator.route(
                 user_input, self.memory,
                 cancel_event=cancel_event, selected_model=selected,
+                context=context,
             )
             outcome = {
                 "error": bool(result.get("error", False)),
