@@ -11,6 +11,11 @@
 // - Pesan assistant : Salin, Buat ulang (hanya di jawaban terakhir).
 // Tombol aksi muncul saat hover (desktop) dan selalu terlihat di layar
 // sentuh. Edit/Buat ulang dinonaktifkan selama ada proses berjalan (`busy`).
+//
+// PERUBAHAN (Sprint 2.5 - Thinking/Loading UX): prop `streaming` - pesan yang
+// sedang diisi potongan jawaban. Aksi (salin/buat ulang) disembunyikan sampai
+// pesan final menggantikannya di posisi yang sama (bubble tidak remount, jadi
+// animasi reveal tidak diputar ulang). Bagian lain tidak berubah.
 import { useEffect, useRef, useState } from "react";
 import ToolStep from "./ToolStep.jsx";
 import Markdown from "./Markdown.jsx";
@@ -200,6 +205,7 @@ export default function MessageBubble({
   steps,
   isNew,
   local,
+  streaming,
   interactionSchema,
   interactionResolved,
   onSubmitInteraction,
@@ -214,7 +220,7 @@ export default function MessageBubble({
   const [editing, setEditing] = useState(false);
 
   const canEdit = isUser && Boolean(content) && !isDioSubmissionText(content) && Boolean(onEdit);
-  const showAssistantActions = !isUser && !local && Boolean(content);
+  const showAssistantActions = !isUser && !local && !streaming && Boolean(content);
   const showActions = !editing && (isUser ? Boolean(content) : showAssistantActions);
 
   const widthClass = isUser

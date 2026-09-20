@@ -18,6 +18,15 @@
 // FIX (Sprint 2.5 - Session): voice call membuat sesi lewat
 // ensureSession() (single-flight, sama dengan kirim pesan) dan diabaikan
 // kalau sedang menyambung - tidak ada lagi sesi ganda dari klik beruntun.
+//
+// PERUBAHAN (Sprint 2.5 - Thinking/Loading UX):
+// - Animasi thinking (LiveSteps) hanya dirender kalau ada isinya
+//   (shouldShowLiveSteps): begitu chunk pertama tiba fasenya kosong, jadi
+//   tidak tersisa wadah kosong yang menambah jarak di bawah pesan streaming.
+// - Auto-scroll memakai behavior "auto" selama streaming; "smooth" per chunk
+//   akan me-restart animasi scroll tiap potongan (patah-patah).
+// - `streaming` diteruskan ke MessageBubble (aksi salin/buat ulang disembunyikan
+//   sampai jawaban final menggantikan pesan streaming).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
@@ -33,6 +42,7 @@ import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { useVoiceCall } from "../hooks/useVoiceCall.js";
 import { buildGreeting } from "../utils/greeting.js";
+import { shouldShowLiveSteps } from "../utils/runLifecycle.js";
 import Hero from "../Hero.jsx";
 
 export default function ChatPage({ onOpenMenu }) {
@@ -44,6 +54,7 @@ export default function ChatPage({ onOpenMenu }) {
     loading,
     phase,
     liveTools,
+    streaming,
     switching,
     wsStatus,
     sendMessage,
@@ -135,8 +146,8 @@ export default function ChatPage({ onOpenMenu }) {
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+    bottomRef.current?.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
+  }, [messages, loading, streaming]);
 
   if (!sessionsReady || !personaReady) {
     return <BootScreen />;
@@ -264,6 +275,7 @@ export default function ChatPage({ onOpenMenu }) {
                 steps={m.steps}
                 isNew={m.isNew}
                 local={m.local}
+                streaming={Boolean(m.streaming)}
                 interactionSchema={m.interactionSchema}
                 interactionResolved={Boolean(m.interactionResolved)}
                 onSubmitInteraction={(actionId, values) =>
@@ -277,7 +289,7 @@ export default function ChatPage({ onOpenMenu }) {
               />
             ))}
 
-          {loading && (
+          {shouldShowLiveSteps({ loading, phase, liveTools }) && (
             <div className="flex justify-start">
               <LiveSteps phase={phase} liveTools={liveTools} />
             </div>

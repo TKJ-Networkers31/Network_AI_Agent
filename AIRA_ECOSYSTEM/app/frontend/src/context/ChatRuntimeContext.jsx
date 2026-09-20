@@ -10,6 +10,16 @@ import { useSessionsContext } from "./SessionsContext.jsx";
 import { useAiraSocketPool } from "../hooks/useAiraSocketPool.js";
 import { api } from "../api.js";
 import { createSingleFlight } from "../utils/singleFlight.js";
+import {
+  EVENT_RESPONSE_CHUNK,
+  PHASE_REGENERATING,
+  PHASE_SENDING,
+  classifyRunEvent,
+  createRun,
+  deriveChatView,
+  reduceRunEvent,
+  settleStreamingMessage,
+} from "../utils/runLifecycle.js";
 
 const ChatRuntimeContext = createContext(null);
 
@@ -61,6 +71,20 @@ function makeRunId() {
  *    New Chat (activeIdRef belum terupdate sebelum render) membuat dua
  *    sesi di server, dan sesi yang selesai dibuat menarik tampilan user
  *    balik walau ia sudah pindah ke history lain.
+ *
+ * 6. FIX (Sprint 2.5 - Thinking/Loading UX): siklus proses
+ *    kirim -> thinking -> streaming -> selesai/error/cancel. Aturan
+ *    transisinya ada di utils/runLifecycle.js (fungsi murni + test);
+ *    state-nya tetap runsBySession/messagesBySession di sini - tidak ada
+ *    sistem loading baru. Ringkas:
+ *    - event `response_chunk` (belum dikirim backend, lihat runLifecycle.js)
+ *      mengakhiri fase thinking sekali saja; chunk berikutnya tidak
+ *      me-restart animasi dan pesan streaming DIGANTI di tempat oleh
+ *      `response` (bukan di-push -> tidak ada bubble ganda/remount).
+ *    - error NON-fatal tidak lagi mengakhiri proses lebih awal (input
+ *      terbuka padahal server masih bekerja) dan tidak menambah bubble
+ *      ganda: `response` selalu menyusul dan membawa teks errornya.
+ *    - New Chat menampilkan "Mengirim..." selama sesi dibuat (creatingSession).
  */
 export function ChatRuntimeProvider({ children, isOnChatPage }) {
   const { activeId, upsertSession } = useSessionsContext();
@@ -68,12 +92,15 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
   // Pesan disimpan PER session_id supaya pindah sesi tidak saling
   // menimpa / tidak perlu re-fetch tiap kali balik ke sesi yang sama.
   const [messagesBySession, setMessagesBySession] = useState({});
-  // { [sessionId]: { runId, phase, liveTools } } - ada entri = sedang diproses
+  // { [sessionId]: { runId, status, phase, liveTools } } - ada entri = sedang
+  // diproses (status: "thinking" | "streaming", lihat utils/runLifecycle.js)
   const [runsBySession, setRunsBySession] = useState({});
   const [loadingHistoryIds, setLoadingHistoryIds] = useState(() => new Set());
   const [unreadSessionIds, setUnreadSessionIds] = useState(() => new Set());
   const [persona, setPersona] = useState(null);
   const [personaReady, setPersonaReady] = useState(false);
+  // New Chat sedang membuat sesi di server (run pertama belum ada).
+  const [creatingSession, setCreatingSession] = useState(false);
 
   // Cermin sinkron dari state di atas - dibaca di dalam callback/event
   // handler supaya tidak kena stale closure dan bisa dipakai untuk guard
@@ -109,14 +136,22 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
     setRunsBySession(next);
   }, []);
 
-  const patchRun = useCallback(
-    (sessionId, updater) => {
-      const current = runsRef.current[sessionId];
-      if (!current) return;
-      const next = updater(current);
-      if (next !== current) setRun(sessionId, next);
+  // Terapkan satu event WebSocket lewat reducer murni (utils/runLifecycle.js)
+  // lalu tulis HANYA bagian yang berubah (perbandingan referensi) - chunk
+  // berikutnya tidak menyentuh run sama sekali, jadi animasi tidak re-render.
+  const commitRunEvent = useCallback(
+    (sessionId, event) => {
+      const before = {
+        run: runsRef.current[sessionId] || null,
+        messages: messagesRef.current[sessionId] || [],
+      };
+
+      const after = reduceRunEvent(before, event, { staleRunIds: staleRunIdsRef.current });
+
+      if (after.messages !== before.messages) setMessagesForSession(sessionId, after.messages);
+      if (after.run !== before.run) setRun(sessionId, after.run);
     },
-    [setRun]
+    [setMessagesForSession, setRun]
   );
 
   // Akhiri proses dengan pesan error lokal. Kalau ada snapshot (edit/
@@ -124,6 +159,8 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
   // memang belum menghapus apa pun saat proses gagal.
   const failRun = useCallback(
     (sessionId, text) => {
+      const failedRunId = runsRef.current[sessionId]?.runId;
+
       setRun(sessionId, null);
 
       const snapshot = snapshotsRef.current[sessionId];
@@ -131,7 +168,9 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
 
       const bubble = { role: "assistant", content: text, local: true, isNew: true };
       setMessagesForSession(sessionId, (prev) =>
-        snapshot ? [...snapshot, bubble] : [...prev, bubble]
+        snapshot
+          ? [...snapshot, bubble]
+          : [...settleStreamingMessage(prev, failedRunId), bubble]
       );
 
       voiceHandlersRef.current?.cancelWaiting?.();
@@ -155,53 +194,18 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
 
       const runId = data.run_id;
       const current = runsRef.current[sid];
-      const isStale = Boolean(runId && staleRunIdsRef.current.has(runId));
-      const isOtherRun = Boolean(current && current.runId && runId && current.runId !== runId);
+      const { isStale, isOtherRun } = classifyRunEvent(current, data, staleRunIdsRef.current);
 
       switch (type) {
-        case "ack": {
-          if (isStale || isOtherRun) break;
-          // Giliran suara tidak punya run_id dari client -> adopsi dari server.
-          setRun(sid, {
-            runId: runId || current?.runId || null,
-            phase: "Menganalisis permintaan...",
-            liveTools: [],
-          });
-          break;
-        }
-
-        case "thinking": {
-          if (!current || isStale || isOtherRun) break;
-          patchRun(sid, (run) => ({ ...run, phase: data.message || "Berpikir..." }));
-          break;
-        }
-
-        case "tool_start": {
-          if (!current || isStale || isOtherRun) break;
-          patchRun(sid, (run) => ({
-            ...run,
-            liveTools: [...run.liveTools, { ...data, success: null }],
-          }));
-          break;
-        }
-
-        case "tool_finish": {
-          if (!current || isStale || isOtherRun) break;
-          patchRun(sid, (run) => {
-            // update entri "success: null" TERAKHIR dengan nama yang sama
-            const tools = run.liveTools;
-            let idx = -1;
-            for (let i = tools.length - 1; i >= 0; i -= 1) {
-              if (tools[i].name === data.name && tools[i].success === null) {
-                idx = i;
-                break;
-              }
-            }
-            if (idx === -1) return run;
-            const nextTools = [...tools];
-            nextTools[idx] = { ...nextTools[idx], ...data };
-            return { ...run, liveTools: nextTools };
-          });
+        // Semua transisi thinking/streaming ada di reducer (utils/runLifecycle.js):
+        // ack (giliran suara mengadopsi run_id server), thinking, tool_*, dan
+        // response_chunk (chunk pertama mengakhiri fase thinking, berikutnya no-op).
+        case "ack":
+        case "thinking":
+        case "tool_start":
+        case "tool_finish":
+        case EVENT_RESPONSE_CHUNK: {
+          commitRunEvent(sid, event);
           break;
         }
 
@@ -225,36 +229,13 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
           // Selalu ditampilkan (termasuk bila run_id-nya basi): kalau server
           // sempat menyelesaikan giliran sebelum pesan Stop terbaca, hasilnya
           // SUDAH tersimpan di database, jadi UI harus ikut menampilkannya.
-          setMessagesForSession(sid, (prev) => {
-            const next = [...prev];
-
-            // Beri id server ke bubble user terakhir yang belum punya id.
-            if (data.user_turn_id != null) {
-              for (let i = next.length - 1; i >= 0; i -= 1) {
-                if (next[i].role === "user" && !next[i].local) {
-                  if (next[i].turnId == null) {
-                    next[i] = { ...next[i], turnId: data.user_turn_id };
-                  }
-                  break;
-                }
-              }
-            }
-
-            next.push({
-              role: "assistant",
-              content: data.answer,
-              steps: data.steps,
-              interactionSchema: data.interaction_schema || null,
-              turnId: data.assistant_turn_id ?? null,
-              isNew: true,
-            });
-
-            return next;
-          });
+          // Reducer: mengganti pesan streaming milik run ini di tempat (atau
+          // menambah satu pesan kalau tidak ada), memberi id server ke bubble
+          // user, dan mengakhiri run kecuali event ini milik run lain.
+          commitRunEvent(sid, event);
 
           if (!isOtherRun) {
             delete snapshotsRef.current[sid];
-            setRun(sid, null);
           }
 
           if (runId) staleRunIdsRef.current.delete(runId);
@@ -294,6 +275,7 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
             const snapshot = snapshotsRef.current[sid];
             delete snapshotsRef.current[sid];
             if (snapshot) setMessagesForSession(sid, snapshot);
+            else setMessagesForSession(sid, (prev) => settleStreamingMessage(prev, current.runId));
             voiceHandlersRef.current?.cancelWaiting?.();
           }
           break;
@@ -302,21 +284,17 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
         case "error": {
           if (isStale || isOtherRun) break;
 
-          const text = `⚠ ${data.message}`;
-
           if (data.fatal) {
             // Error dari server sendiri: tidak akan ada event "response" lagi.
-            failRun(sid, text);
+            failRun(sid, `⚠ ${data.message}`);
             break;
           }
 
-          // Error dari planner: event "response" tetap menyusul.
-          setMessagesForSession(sid, (prev) => [
-            ...prev,
-            { role: "assistant", content: text, local: true, isNew: true },
-          ]);
-          setRun(sid, null);
-          voiceHandlersRef.current?.cancelWaiting?.();
+          // Error non-fatal (mis. planner gagal / batas tool): event "response"
+          // SELALU menyusul (api/routers/ws.py) dan membawa teks errornya.
+          // Proses TIDAK diakhiri di sini - sebelumnya animasi berhenti dan
+          // input terbuka padahal server masih bekerja, lalu bubble error
+          // muncul dua kali (lokal + response).
           break;
         }
 
@@ -324,7 +302,7 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
           break;
       }
     },
-    [failRun, patchRun, setMessagesForSession, setRun, upsertSession]
+    [commitRunEvent, failRun, setMessagesForSession, setRun, upsertSession]
   );
 
   // --------------------------------------------------------------
@@ -508,11 +486,13 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
             : [...current.slice(0, fromIndex), { role: "user", content: text, isNew: true }];
       }
 
-      setRun(sid, {
-        runId,
-        phase: effectiveKind === "regenerate" ? "Membuat ulang jawaban..." : "Mengirim...",
-        liveTools: [],
-      });
+      setRun(
+        sid,
+        createRun({
+          runId,
+          phase: effectiveKind === "regenerate" ? PHASE_REGENERATING : PHASE_SENDING,
+        })
+      );
 
       if (nextMessages) {
         setMessagesForSession(sid, nextMessages);
@@ -559,9 +539,27 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
 
       if (existing && runsRef.current[existing]) return;
 
-      const sid = await ensureSession({ onNewSession });
+      // New Chat: sesi dibuat dulu di server. Selama itu tampilkan
+      // "Mengirim..." + kunci input (lihat deriveChatView) - tanpa ini tidak
+      // ada umpan balik antara tombol kirim dan run pertama.
+      if (!existing) setCreatingSession(true);
 
-      await runTurn({ sid, kind: "send", text });
+      let sid;
+
+      try {
+        sid = await ensureSession({ onNewSession });
+      } catch (err) {
+        setCreatingSession(false);
+        throw err;
+      }
+
+      // runTurn menyetel run + bubble user SECARA SINKRON sebelum await
+      // pertamanya, jadi penanda creatingSession dilepas sesudahnya tanpa
+      // celah tampilan (Hero tidak sempat muncul sesaat).
+      const turn = runTurn({ sid, kind: "send", text });
+      setCreatingSession(false);
+
+      await turn;
     },
     [ensureSession, runTurn]
   );
@@ -635,8 +633,10 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
 
       // Pesan baru dihentikan: bubble prompt tetap tampil (bisa di-edit lalu
       // dikirim ulang), tapi ditandai belum tersimpan di server.
+      // Potongan jawaban yang sempat tampil (streaming) dipertahankan sebagai
+      // pesan lokal, tidak lagi streaming.
       setMessagesForSession(sid, (prev) => {
-        const next = [...prev];
+        const next = [...settleStreamingMessage(prev, run.runId)];
         for (let i = next.length - 1; i >= 0; i -= 1) {
           if (next[i].role === "user") {
             if (next[i].turnId == null) {
@@ -699,9 +699,11 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
   // --------------------------------------------------------------
   const messages = (activeId && messagesBySession[activeId]) || [];
   const activeRun = activeId ? runsBySession[activeId] : null;
-  const loading = Boolean(activeRun);
-  const phase = activeRun?.phase || "";
-  const liveTools = activeRun?.liveTools || [];
+  const { loading, streaming, phase, liveTools } = deriveChatView({
+    activeRun,
+    creatingSession,
+    activeId,
+  });
   const switching = activeId ? loadingHistoryIds.has(activeId) : false;
   const wsStatus = (activeId && statusById[activeId]) || "idle";
   const runningSessionIds = new Set(runningIds);
@@ -713,6 +715,7 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
         loading,
         phase,
         liveTools,
+        streaming,
         switching,
         wsStatus,
         sendMessage,
