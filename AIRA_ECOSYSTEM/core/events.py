@@ -169,6 +169,13 @@ class EventNames:
     LOCATION_UPDATED = "location.updated"
     LOCATION_CLEARED = "location.cleared"
 
+    # RUNTIME STATE (IDLE / LISTENING / THINKING / SPEAKING)
+    RUNTIME_STATE_CHANGED = "runtime.state_changed"
+    VOICE_LISTENING_START = "voice.listening.start"
+    VOICE_LISTENING_STOP = "voice.listening.stop"
+    SPEECH_START = "speech.start"
+    SPEECH_FINISH = "speech.finish"
+
     # CONNECTION (AKANE)
     CONNECTION_OPENED = "connection.opened"
     CONNECTION_CLOSED = "connection.closed"

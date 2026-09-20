@@ -33,6 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Optional
+from core.events import EventNames
 
 
 class RuntimeState(str, Enum):
@@ -45,16 +46,21 @@ class RuntimeState(str, Enum):
 
 
 class RuntimeEvents:
-    """Event yang dipublish/dikonsumsi Runtime State (di luar EventNames yang sudah ada)."""
+    """Compatibility surface for Runtime State's event names.
 
-    # dipublish engine setiap kali state resmi BERUBAH
-    STATE_CHANGED = "runtime.state_changed"
+    These are no longer independently defined strings — they are aliases
+    onto core.events.EventNames, which is the single authoritative source
+    for event-name strings across AIRA. This class exists only so existing
+    callers (engine.py, tests, any other consumer importing RuntimeEvents
+    from core.runtime_state) do not need to change their import path or
+    attribute names.
+    """
 
-    # dipublish lapisan suara (YUKI / WS) - engine hanya mengkonsumsi
-    VOICE_LISTENING_START = "voice.listening.start"
-    VOICE_LISTENING_STOP = "voice.listening.stop"
-    SPEECH_START = "speech.start"
-    SPEECH_FINISH = "speech.finish"
+    STATE_CHANGED = EventNames.RUNTIME_STATE_CHANGED
+    VOICE_LISTENING_START = EventNames.VOICE_LISTENING_START
+    VOICE_LISTENING_STOP = EventNames.VOICE_LISTENING_STOP
+    SPEECH_START = EventNames.SPEECH_START
+    SPEECH_FINISH = EventNames.SPEECH_FINISH
 
 
 # Urutan prioritas (tertinggi dulu) untuk state yang berasal dari aktivitas.

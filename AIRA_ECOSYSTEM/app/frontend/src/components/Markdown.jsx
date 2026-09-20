@@ -41,7 +41,6 @@ import { useToast } from "./Toast.jsx";
  const SVG_LANGS = new Set(["svg", "xml", "html"]);
  const SVG_START_RE = /^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i;
  const SVG_END_RE = /<\/svg>\s*$/i;
- const DEFAULT_VIEWBOX = "0 0 720 405";
  const DEFAULT_VIEWBOX = "0 0 720 400";
 
  function looksLikeSvg(raw) {

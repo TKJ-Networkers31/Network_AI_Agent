@@ -1110,6 +1110,43 @@ class TestBrainIntegration(unittest.TestCase):
 
         self.assertIsNotNone(brain)
 
+# ============================================================
+# EVENT NAME AUTHORITY (regression: Sprint 2 QA architecture-drift fix)
+# ============================================================
+
+class TestEventNameAuthority(unittest.TestCase):
+    """RuntimeEvents must never re-introduce an independent event-name
+    authority. This guards the fix for the drift Worker 5 QA found:
+    core/runtime_state/models.py previously hardcoded the same strings
+    core/events.py::EventNames owns."""
+
+    def test_runtime_events_values_match_event_names(self):
+        self.assertEqual(RuntimeEvents.STATE_CHANGED, EventNames.RUNTIME_STATE_CHANGED)
+        self.assertEqual(RuntimeEvents.VOICE_LISTENING_START, EventNames.VOICE_LISTENING_START)
+        self.assertEqual(RuntimeEvents.VOICE_LISTENING_STOP, EventNames.VOICE_LISTENING_STOP)
+        self.assertEqual(RuntimeEvents.SPEECH_START, EventNames.SPEECH_START)
+        self.assertEqual(RuntimeEvents.SPEECH_FINISH, EventNames.SPEECH_FINISH)
+
+    def test_runtime_events_source_has_no_independent_literals(self):
+        # Fails again if someone reverts models.py to hardcoding these
+        # strings directly instead of aliasing EventNames.
+        import inspect
+        source = inspect.getsource(RuntimeEvents)
+        for literal in (
+            '"runtime.state_changed"', '"voice.listening.start"',
+            '"voice.listening.stop"', '"speech.start"', '"speech.finish"',
+        ):
+            self.assertNotIn(literal, source)
+
+    def test_emitted_event_name_strings_are_unchanged(self):
+        # Public-contract check: the wire-visible strings must not have moved.
+        self.assertEqual(RuntimeEvents.STATE_CHANGED, "runtime.state_changed")
+        self.assertEqual(RuntimeEvents.VOICE_LISTENING_START, "voice.listening.start")
+        self.assertEqual(RuntimeEvents.VOICE_LISTENING_STOP, "voice.listening.stop")
+        self.assertEqual(RuntimeEvents.SPEECH_START, "speech.start")
+        self.assertEqual(RuntimeEvents.SPEECH_FINISH, "speech.finish")
+
+
 
 if __name__ == "__main__":
     unittest.main()

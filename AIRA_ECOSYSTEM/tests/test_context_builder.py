@@ -34,13 +34,22 @@ from core.context import (
     summarize_tool_schemas,
 )
 
+# Builder yang dibuat tanpa `semantic_memory` akan memanggil singleton produksi
+# (database/semantic_memory.db). Di test builder itu tidak boleh terjadi.
+_SEMANTIC_GUARD = mock.patch(
+    "core.context.builder._default_semantic_memory", return_value=None,
+)
+
 
 def setUpModule():
     # Banyak test sengaja memicu sumber yang gagal (warning + traceback).
     logging.disable(logging.CRITICAL)
+    # Jangan sentuh database/semantic_memory.db asli dari test builder.
+    _SEMANTIC_GUARD.start()
 
 
 def tearDownModule():
+    _SEMANTIC_GUARD.stop()
     logging.disable(logging.NOTSET)
 
 # ============================================================
