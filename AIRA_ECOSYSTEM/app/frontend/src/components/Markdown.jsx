@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
+import GraphBlock from "./GraphBlock.jsx";
 import remarkGfm from "remark-gfm";
 import DOMPurify from "dompurify";
 import CopyButton from "./CopyButton.jsx";
@@ -37,13 +38,23 @@ import { useToast } from "./Toast.jsx";
 //    sebagai galeri kecil: lazy-load, klik untuk perbesar, fallback link
 //    kalau gambar gagal dimuat (hotlink diblokir / URL kedaluwarsa).
 
-const SVG_LANGS = new Set(["svg", "xml", "html"]);
-const SVG_START_RE = /^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i;
-const SVG_END_RE = /<\/svg>\s*$/i;
-const DEFAULT_VIEWBOX = "0 0 720 405";
+ const SVG_LANGS = new Set(["svg", "xml", "html"]);
+ const SVG_START_RE = /^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i;
+ const SVG_END_RE = /<\/svg>\s*$/i;
+ const DEFAULT_VIEWBOX = "0 0 720 405";
+ const DEFAULT_VIEWBOX = "0 0 720 400";
 
-function looksLikeSvg(raw) {
-  return SVG_START_RE.test(raw) && SVG_END_RE.test(raw);
+ function looksLikeSvg(raw) {
+   return SVG_START_RE.test(raw) && SVG_END_RE.test(raw);
+ }
+
+// Diagram terstruktur (node/edge) - dirender lewat layout engine sendiri di
+// GraphBlock.jsx, BUKAN dari koordinat yang ditulis manual. Aktif hanya
+// kalau payload-nya memang berbentuk {"nodes":[...],"edges":[...]}.
+function looksLikeGraphJson(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{")) return false;
+  return /"nodes"\s*:/.test(trimmed) && /"edges"\s*:/.test(trimmed);
 }
 
 // Sanitasi -> normalisasi viewBox -> serialisasi XML valid -> data URI.
@@ -66,7 +77,35 @@ function buildSvg(code) {
     svg.setAttribute("viewBox", w > 0 && h > 0 ? `0 0 ${w} ${h}` : DEFAULT_VIEWBOX);
   }
 
-  const viewBoxWidth = parseFloat(svg.getAttribute("viewBox").split(/[\s,]+/)[2]) || 720;
+  let viewBoxParts = svg.getAttribute("viewBox").split(/[\s,]+/).map(Number);
+
+  // FIX (text clipping): ukur bounding box RIIL konten terhadap viewBox
+  // yang dideklarasikan, lalu perbesar viewBox kalau ada yang meluber -
+  // sebelumnya teks/shape yang keluar viewBox dari LLM langsung terpotong
+  // tanpa peringatan apa pun.
+  try {
+    document.body.appendChild(host);
+    const bbox = svg.getBBox();
+    const [vx, vy, vw, vh] = viewBoxParts;
+    const pad = 8;
+
+    const minX = Math.min(vx, bbox.x - pad);
+    const minY = Math.min(vy, bbox.y - pad);
+    const maxX = Math.max(vx + vw, bbox.x + bbox.width + pad);
+    const maxY = Math.max(vy + vh, bbox.y + bbox.height + pad);
+
+    if (minX !== vx || minY !== vy || maxX !== vx + vw || maxY !== vy + vh) {
+      viewBoxParts = [minX, minY, maxX - minX, maxY - minY];
+      svg.setAttribute("viewBox", viewBoxParts.join(" "));
+    }
+  } catch {
+    // getBBox gagal/tidak didukung (mis. SVG kosong) - pakai viewBox apa adanya.
+  } finally {
+    if (host.parentNode) host.parentNode.removeChild(host);
+  }
+
+  const [, , viewBoxWidth, viewBoxHeight] = viewBoxParts;
+  const aspectRatio = viewBoxWidth / (viewBoxHeight || 1);
 
   // Ukuran diatur CSS (responsif), bukan atribut tetap dari LLM.
   svg.removeAttribute("width");
@@ -74,12 +113,17 @@ function buildSvg(code) {
 
   const xml = new XMLSerializer().serializeToString(svg);
 
+  // FIX (responsive): diagram lebar-pendek (rasio besar, mis. flow
+  // horizontal) sebelumnya di-cap sama sempitnya dengan diagram biasa -
+  // teksnya jadi kekecilan waktu di-scale turun paksa ke 880px.
+  const widthCap = aspectRatio > 2 ? 1100 : 880;
+
   return {
     xml,
     uri: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`,
-    maxWidth: Math.min(Math.max(viewBoxWidth, 320), 880),
+    maxWidth: Math.min(Math.max(viewBoxWidth || 720, 320), widthCap),
   };
-}
+ }
 
 function downloadSvg(xml) {
   const blob = new Blob([xml], { type: "image/svg+xml" });
@@ -327,6 +371,12 @@ function CodeBlock({ className, children }) {
   }
 
   const raw = text.replace(/\n$/, "");
+
+ // Diprioritaskan sebelum deteksi SVG: kalau payload sudah berbentuk
+ // node/edge terstruktur, pakai layout engine, jangan render sebagai teks.
+  if ((lang === "graph" || lang === "json" || !lang) && looksLikeGraphJson(raw)) {
+    return <GraphBlock code={raw} />;
+  }
 
   // SVG: ```svg, atau ```xml/```html/tanpa bahasa yang isinya <svg>...</svg> utuh.
   const svgCandidate = !lang || SVG_LANGS.has(lang);

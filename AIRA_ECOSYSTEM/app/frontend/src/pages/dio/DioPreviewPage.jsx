@@ -59,6 +59,23 @@ const EXAMPLES = {
     actions: [{ id: "next", label: "Lanjut", style: "primary" }],
   },
 
+  media: {
+    title: "Contoh Field Media",
+    sections: [{
+      id: "media",
+      fields: [
+        { id: "img1", type: "image", label: "Foto perangkat", src: "https://picsum.photos/seed/router/480/300", caption: "MikroTik hAP ax3" },
+        { id: "gal1", type: "gallery", label: "Galeri", images: [
+          { url: "https://picsum.photos/seed/a/200/150", caption: "Sudut 1" },
+          { url: "https://picsum.photos/seed/b/200/150", caption: "Sudut 2" },
+          { url: "https://picsum.photos/seed/c/200/150", caption: "Sudut 3" },
+        ]},
+        { id: "prog1", type: "progress", label: "Backup konfigurasi", value: 62, helper_text: "Sedang mengunggah..." },
+      ],
+    }],
+    actions: [{ id: "done", label: "Tutup", style: "secondary" }],
+  },
+
   mixed: {
     title: "Konfigurasi Monitoring",
     sections: [

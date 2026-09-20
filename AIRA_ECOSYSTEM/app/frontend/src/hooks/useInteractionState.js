@@ -11,7 +11,8 @@ function flattenFields(schema) {
 }
 
 function validateField(field, value) {
-  if (field.type === "info" || field.type === "divider" || field.type === "button") {
+  const DISPLAY_ONLY = new Set(["info", "divider", "button", "image", "gallery", "progress", "svg"]);
+  if (DISPLAY_ONLY.has(field.type)) {
     return null;
   }
 

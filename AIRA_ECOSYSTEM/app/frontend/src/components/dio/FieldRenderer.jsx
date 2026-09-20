@@ -14,6 +14,10 @@ import InfoField from "./Field/InfoField.jsx";
 import DividerField from "./Field/DividerField.jsx";
 import ButtonField from "./Field/ButtonField.jsx";
 import LocationPermissionField from "./Field/LocationPermissionField.jsx";
+import ImageField from "./Field/ImageField.jsx";
+import GalleryField from "./Field/GalleryField.jsx";
+import ProgressField from "./Field/ProgressField.jsx";
+import SvgField from "./Field/SvgField.jsx";
 
 // Mapping tunggal field.type -> komponen.
 const FIELD_COMPONENTS = {
@@ -22,6 +26,7 @@ const FIELD_COMPONENTS = {
   number: NumberField,
   password: PasswordField,
   select: SelectField,
+  multiselect: CheckboxField,
   radio: RadioField,
   checkbox: CheckboxField,
   switch: SwitchField,
@@ -33,6 +38,10 @@ const FIELD_COMPONENTS = {
   info: InfoField,
   divider: DividerField,
   button: ButtonField,
+  image: ImageField,
+  gallery: GalleryField,
+  progress: ProgressField,
+  svg: SvgField,
   location_permission: LocationPermissionField,
 };
 
