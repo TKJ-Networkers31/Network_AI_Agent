@@ -14,7 +14,10 @@
 //
 // PERUBAHAN (UI Layout): area pesan full-width (scrollbar di tepi kanan)
 // dengan konten dibatasi max-w-4xl di tengah; ChatInput menempel ke bawah.
-// Logic TIDAK berubah.
+//
+// FIX (Sprint 2.5 - Session): voice call membuat sesi lewat
+// ensureSession() (single-flight, sama dengan kirim pesan) dan diabaikan
+// kalau sedang menyambung - tidak ada lagi sesi ganda dari klik beruntun.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
@@ -54,6 +57,7 @@ export default function ChatPage({ onOpenMenu }) {
     regenerate,
     editMessage,
     markInteractionResolved,
+    ensureSession,
   } = useChatRuntime();
 
   const [tools, setTools] = useState([]);
@@ -183,17 +187,18 @@ export default function ChatPage({ onOpenMenu }) {
       return;
     }
 
+    // Klik beruntun saat masih menyambung diabaikan (cegah sesi ganda).
+    if (voiceConnecting) return;
+
     setVoiceConnecting(true);
 
     try {
-      let sessionId = activeId;
-
-      if (!sessionId) {
-        const created = await api.sessions.create();
-        sessionId = created.id;
-        setActiveId(sessionId);
-        loadSessions?.();
-      }
+      await ensureSession({
+        onNewSession: (newId) => {
+          setActiveId(newId);
+          loadSessions?.();
+        },
+      });
 
       await waitForConnection(8000);
 

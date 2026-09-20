@@ -9,6 +9,7 @@ import {
 import { useSessionsContext } from "./SessionsContext.jsx";
 import { useAiraSocketPool } from "../hooks/useAiraSocketPool.js";
 import { api } from "../api.js";
+import { createSingleFlight } from "../utils/singleFlight.js";
 
 const ChatRuntimeContext = createContext(null);
 
@@ -54,6 +55,12 @@ function makeRunId() {
  *
  * 4. FITUR: stopRun, regenerate, editMessage. Identitas pesan memakai
  *    `turnId` (id baris chat_turns dari server), BUKAN index array.
+ *
+ * 5. FIX (Sprint 2.5 - Session): pembuatan sesi baru SATU jalur lewat
+ *    ensureSession() + single-flight. Sebelumnya dua kirim beruntun di
+ *    New Chat (activeIdRef belum terupdate sebelum render) membuat dua
+ *    sesi di server, dan sesi yang selesai dibuat menarik tampilan user
+ *    balik walau ia sudah pindah ke history lain.
  */
 export function ChatRuntimeProvider({ children, isOnChatPage }) {
   const { activeId, upsertSession } = useSessionsContext();
@@ -77,6 +84,7 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
   const staleRunIdsRef = useRef(new Set()); // run_id yang sudah di-stop user
   const loadedSessionsRef = useRef(new Set());
   const voiceHandlersRef = useRef(null);
+  const createSessionRef = useRef(null); // single-flight pembuat sesi baru
 
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
@@ -398,7 +406,9 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
         setMessagesForSession(sid, [...turns, ...extras]);
       })
       .catch(() => {
-        // sesi baru / belum ada riwayat - biarkan messages tetap apa adanya
+        // sesi baru / belum ada riwayat - biarkan messages tetap apa adanya.
+        // Izinkan percobaan ulang saat sesi dibuka lagi.
+        loadedSessionsRef.current.delete(sid);
       })
       .finally(() => {
         setLoadingHistoryIds((prev) => {
@@ -423,6 +433,38 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
   // --------------------------------------------------------------
   // ACTIONS
   // --------------------------------------------------------------
+
+  /**
+   * ensureSession — SATU-SATUNYA jalur membuat sesi baru dari New Chat
+   * (kirim pesan DAN voice call). Kalau sudah ada sesi aktif, dikembalikan
+   * apa adanya. Kalau belum, pembuatan dilindungi single-flight: panggilan
+   * bersamaan berbagi SATU request create, jadi tidak ada sesi ganda.
+   *
+   * onNewSession hanya dipanggil kalau user MASIH di New Chat saat sesi
+   * selesai dibuat. Kalau ia sudah pindah ke sesi lain, tampilannya tidak
+   * ditarik balik; sesi baru tetap diproses dan muncul di sidebar (unread).
+   */
+  const ensureSession = useCallback(async ({ onNewSession } = {}) => {
+    const current = activeIdRef.current;
+    if (current) return current;
+
+    if (createSessionRef.current === null) {
+      createSessionRef.current = createSingleFlight(async (switchTo) => {
+        const created = await api.sessions.create();
+
+        // FIX prompt hilang: sesi baru pasti kosong - tandai "sudah dimuat"
+        // SEBELUM activeId berganti supaya tidak memicu fetch riwayat yang
+        // bisa menimpa bubble prompt.
+        loadedSessionsRef.current.add(created.id);
+
+        if (!activeIdRef.current) switchTo?.(created.id);
+
+        return created.id;
+      });
+    }
+
+    return createSessionRef.current(onNewSession);
+  }, []);
 
   /**
    * Satu-satunya jalur untuk memulai giliran:
@@ -513,25 +555,15 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
 
   const sendMessage = useCallback(
     async (text, { onNewSession } = {}) => {
-      let sid = activeIdRef.current;
+      const existing = activeIdRef.current;
 
-      if (sid && runsRef.current[sid]) return;
+      if (existing && runsRef.current[existing]) return;
 
-      if (!sid) {
-        const created = await api.sessions.create();
-        sid = created.id;
-
-        // FIX prompt hilang: sesi baru pasti kosong - tandai "sudah dimuat"
-        // SEBELUM activeId berganti supaya tidak memicu fetch riwayat yang
-        // bisa menimpa bubble prompt.
-        loadedSessionsRef.current.add(sid);
-
-        onNewSession?.(sid);
-      }
+      const sid = await ensureSession({ onNewSession });
 
       await runTurn({ sid, kind: "send", text });
     },
-    [runTurn]
+    [ensureSession, runTurn]
   );
 
   // Dipakai ChatPage.jsx saat user submit form/pilihan interaktif DIO
@@ -697,6 +729,7 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
         regenerate,
         editMessage,
         markInteractionResolved,
+        ensureSession,
       }}
     >
       {children}
