@@ -12,6 +12,8 @@ Builder ini HANYA MENGGABUNGKAN konteks yang sudah disediakan modul lain:
 
     identity, persona -> PersonaEngine.get_state()      (core/persona)
     runtime_state     -> time_context_block()           (core/time_utils)
+                         + snapshot Runtime State Engine (core/runtime_state,
+                           Sprint 2 / Worker 3) sebagai DATA saja
     memory            -> build_context_snippet()        (core/memory)
     location          -> build_location_context(sid)    (core/location)
     tool_context      -> ringkasan tool dari pemanggil  (Brain)
@@ -33,6 +35,13 @@ fungsi, sehingga mengimpor modul ini murah dan bebas efek samping.
 Penanganan konteks hilang: sumber yang None, kosong, atau raise -> section
 dilewati (None), tidak pernah menjatuhkan giliran. Yang raise dicatat di
 AIRAContext.warnings (hanya nama + tipe error, tanpa pesan error).
+
+Runtime State (Worker 3): snapshot state runtime (IDLE/LISTENING/THINKING/SPEAKING)
+dimasukkan ke ContextSection runtime_state.data["engine"]. HANYA data - teksnya
+tidak pernah masuk system prompt (state itu untuk konsumen non-prompt seperti
+UI/suara), jadi Runtime State tidak ikut "bernalar". Seperti tool_summary,
+provider ini TIDAK punya default di konstruktor (None = tanpa data state);
+Brain dan get_context_builder() yang menyuntikkannya.
 """
 
 from __future__ import annotations
@@ -87,6 +96,12 @@ def _default_location_text(session_id: Optional[str]) -> Optional[str]:
     return build_location_context(session_id)
 
 
+def _default_runtime_state() -> Optional[dict]:
+    """Snapshot Runtime State Engine global. Dipakai get_context_builder()."""
+    from core.runtime_state import runtime_state_snapshot
+    return runtime_state_snapshot()
+
+
 # ============================================================
 # HELPERS
 # ============================================================
@@ -129,7 +144,8 @@ class ContextBuilder:
     """
     Semua argumen opsional. None = pakai default AIRA. Untuk MEMATIKAN satu
     sumber, beri provider yang mengembalikan None (mis. `lambda: None`).
-    `tool_summary` tidak punya default (None = tanpa tool_context).
+    `tool_summary` dan `runtime_state` tidak punya default
+    (None = tanpa tool_context / tanpa data state runtime).
     """
 
     def __init__(
@@ -141,6 +157,7 @@ class ContextBuilder:
         runtime_text: Optional[Callable[[], Optional[str]]] = None,
         location_text: Optional[Callable[[Optional[str]], Optional[str]]] = None,
         tool_summary: Optional[Callable[[], Optional[dict]]] = None,
+        runtime_state: Optional[Callable[[], Optional[dict]]] = None,
     ):
         self._persona_state = persona_state or _default_persona_state
         self._prompt_composer = prompt_composer or _default_prompt_composer
@@ -148,6 +165,7 @@ class ContextBuilder:
         self._runtime_text = runtime_text or _default_runtime_text
         self._location_text = location_text or _default_location_text
         self._tool_summary = tool_summary
+        self._runtime_state = runtime_state
 
     # ------------------------------------------------------------ public
 
@@ -179,6 +197,13 @@ class ContextBuilder:
         context.runtime_state = self._text_section(
             SECTION_RUNTIME_STATE, "runtime", self._runtime_text, warnings,
         )
+
+        # Runtime State Engine (Worker 3): data saja, tidak pernah jadi teks prompt.
+        context.runtime_state = self._attach_runtime_state(
+            context.runtime_state,
+            self._call("runtime_state", self._runtime_state, warnings),
+        )
+
         context.memory = self._text_section(
             SECTION_MEMORY, "memory", self._memory_text, warnings,
         )
@@ -253,6 +278,28 @@ class ContextBuilder:
             return None
 
         return ContextSection(name, text=text, source=source)
+
+    @staticmethod
+    def _attach_runtime_state(
+        section: Optional[ContextSection], snapshot: Any,
+    ) -> Optional[ContextSection]:
+        """
+        Tempelkan snapshot Runtime State ke section runtime_state sebagai DATA.
+        - Snapshot kosong/bukan dict -> section apa adanya (bisa None).
+        - Section teks (waktu) sudah ada -> teksnya tidak disentuh, data digabung.
+        - Section belum ada -> dibuat data-only (text kosong => tidak pernah
+          masuk system prompt, lihat AIRAContext.extra_context()).
+        """
+        if not isinstance(snapshot, dict) or not snapshot:
+            return section
+
+        data = {"engine": _json_dict(snapshot)}
+
+        if section is None:
+            return ContextSection(SECTION_RUNTIME_STATE, data=data, source="runtime_state")
+
+        section.data = {**section.data, **data}
+        return section
 
     def _tool_section(self, warnings: list[str]) -> Optional[ContextSection]:
         if self._tool_summary is None:
@@ -342,6 +389,6 @@ def get_context_builder() -> ContextBuilder:
     if _builder_singleton is None:
         with _builder_lock:
             if _builder_singleton is None:
-                _builder_singleton = ContextBuilder()
+                _builder_singleton = ContextBuilder(runtime_state=_default_runtime_state)
 
     return _builder_singleton

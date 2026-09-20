@@ -21,6 +21,14 @@ dengan correlation_id yang SAMA:
 correlation_id diambil dari event_scope yang sudah aktif (ws.py mengaturnya
 per giliran); kalau tidak ada (REST/terminal) dibuat baru di sini.
 
+Runtime State (Sprint 2 / Worker 3): Brain memastikan Runtime State Engine aktif
+(get_runtime_state() otomatis subscribe ke Event Bus) sebelum event apa pun
+dipublish, dan menyuntikkan snapshot-nya ke ContextBuilder. Brain TIDAK menyimpan
+atau mengubah state sendiri - state hanya diturunkan dari event di atas.
+Aturan yang dijaga Brain untuk state: setiap thinking.start HARUS punya
+thinking.finish, termasuk saat Stop ditekan sesudah klasifikasi tapi sebelum
+task.started.
+
 think() menerima cancel_event (threading.Event) untuk tombol Stop.
 Tidak ada lagi parameter on_event: WebSocket menerima event lewat
 api/ws_bridge.py (subscriber Event Bus).
@@ -43,6 +51,7 @@ from core.orchestrator import AGENT_TOOL_CATEGORY, AGENT_TOOL_SCHEMAS, Orchestra
 from core.memory import ConversationMemory
 from core.model_router import get_model_router
 from core.model_types import SelectedModel, TaskClassification
+from core.runtime_state import get_runtime_state
 from core.task_classifier import get_task_classifier
 
 logger = logging.getLogger("aira.brain")
@@ -66,16 +75,32 @@ def _tool_summary() -> dict:
     return summarize_tool_schemas(AGENT_TOOL_SCHEMAS, AGENT_TOOL_CATEGORY)
 
 
+def _runtime_snapshot() -> dict:
+    """Snapshot Runtime State (JSON-safe) untuk section runtime_state di konteks."""
+    return get_runtime_state().snapshot().to_dict()
+
+
 class Brain:
 
     def __init__(self, memory: ConversationMemory, context_builder: Optional[ContextBuilder] = None):
         self.memory = memory
+        self._ensure_runtime_state()
         self.orchestrator = Orchestrator()
         self.classifier = get_task_classifier()
         self.router = get_model_router()
-        self.context_builder = context_builder or ContextBuilder(tool_summary=_tool_summary)
+        self.context_builder = context_builder or ContextBuilder(
+            tool_summary=_tool_summary, runtime_state=_runtime_snapshot,
+        )
 
     # ------------------------------------------------------------ helpers
+
+    @staticmethod
+    def _ensure_runtime_state() -> None:
+        """Engine harus sudah subscribe SEBELUM Brain mempublish event pertama."""
+        try:
+            get_runtime_state()
+        except Exception:
+            logger.exception("BRAIN | Runtime State Engine gagal aktif (diabaikan).")
 
     def _publish(self, event_name: str, **data) -> None:
         """Publish ke Event Bus; kegagalan apa pun tidak boleh menjatuhkan giliran."""
@@ -140,6 +165,10 @@ class Brain:
         selected = self._select(classification)
 
         if cancelled():
+            # thinking.start sudah dipublish di atas, tetapi blok try/finally di
+            # bawah belum tercapai: tutup dulu supaya Runtime State tidak
+            # menggantung di THINKING.
+            self._publish(EventNames.THINKING_FINISH)
             return BrainResponse(answer="", cancelled=True)
 
         self._publish(
