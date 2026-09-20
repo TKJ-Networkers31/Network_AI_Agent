@@ -229,3 +229,61 @@ html, body {
 .fade-scale-in {
   animation: reveal-fade 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+
+/* ============================================================
+   DROPDOWN (<select>) — tema gelap AIRA
+
+   Masalah: daftar opsi <select> dirender native oleh browser. Karena
+   select memakai latar transparan (bg-white/5), popup-nya jatuh ke
+   latar putih bawaan sementara teksnya putih -> tak terbaca.
+
+   Fix global (berlaku ke SEMUA select: form DIO, filter Logs/Models,
+   dialog model, Default Routing, dst) tanpa mengubah komponen apa pun.
+   Warna mengikuti theme/colors.js:
+     surface #111122 | surface-hover #1B1B30
+     text #F8FAFC | secondary #A1A1B5 | sakura #F472B6
+   ============================================================ */
+
+select {
+  color-scheme: dark; /* popup native ikut gelap (juga untuk macOS/iOS) */
+}
+
+/* Ganti panah bawaan browser dengan chevron yang seragam */
+select:not([multiple]) {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 2.25rem; /* ruang untuk chevron */
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23A1A1B5' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem 1rem;
+}
+
+/* Chevron jadi sakura saat fokus */
+select:not([multiple]):focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F472B6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+select:disabled {
+  cursor: not-allowed;
+}
+
+/* Popup opsi: latar gelap + teks terang */
+select option,
+select optgroup {
+  background-color: #111122;
+  color: #F8FAFC;
+}
+
+/* Placeholder "Pilih salah satu..." (option disabled) */
+select option:disabled {
+  color: #A1A1B5;
+}
+
+/* Opsi yang sedang terpilih */
+select option:checked {
+  background-color: #1B1B30;
+  color: #F472B6;
+}

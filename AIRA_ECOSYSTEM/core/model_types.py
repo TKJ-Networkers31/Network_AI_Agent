@@ -15,7 +15,7 @@ VALID_LABELS = (
     "vision", "voice", "retrieval", "automation",
 )
 DEFAULT_LABEL = "general"
-VALID_PROVIDERS = ("ollama", "openrouter", "gemini")
+VALID_PROVIDERS = ("ollama", "openrouter", "gemini", "nvidia")
 
 # Nilai berasal dari EventNames (satu sumber kebenaran).
 EVENT_TASK_CLASSIFIED = EventNames.TASK_CLASSIFIED

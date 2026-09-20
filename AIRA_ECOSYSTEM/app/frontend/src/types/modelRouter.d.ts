@@ -2,7 +2,7 @@ export type TaskLabel =
   | "general" | "reasoning" | "coding" | "networking"
   | "vision" | "voice" | "retrieval" | "automation";
 
-export type Provider = "ollama" | "openrouter" | "gemini";
+export type Provider = "ollama" | "openrouter" | "gemini" | "nvidia";
 
 export interface ModelRecord {
   id: string;

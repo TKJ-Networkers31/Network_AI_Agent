@@ -81,3 +81,5 @@ Changes to this constitution must be deliberate and documented in
 `docs/roadmap.md` as a decision, not silently edited. Source code changes
 are never sufficient justification to change this document — the
 document sets the rule; code must conform to it.
+
+

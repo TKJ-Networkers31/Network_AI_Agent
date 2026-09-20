@@ -54,12 +54,14 @@ TRANSIENT_ERROR_TYPES = {"rate_limit", "connection"}
 PROVIDER_ENV_KEYS: dict[str, str] = {
     "openrouter": "OPENROUTER_API",
     "gemini": "GEMINI_API_KEY",
+    "nvidia": "NVIDIA_API_KEY",
 }
 
 DEFAULT_ENDPOINTS: dict[str, str] = {
     "ollama": "http://localhost:11434",
     "openrouter": "https://openrouter.ai/api/v1",
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
 }
 
 
