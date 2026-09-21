@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { settingsApi } from "../../services/settingsApi.js";
 import { useToast } from "../Toast.jsx";
+import { applyGlobalSettingsUpdate } from "../../hooks/useGlobalSettings.js";
 
 // Field yang boleh diedit lewat panel ini, dan tipe kontrol yang dipakai.
 // Menambah setting baru cukup menambah baris di sini (backend sudah
@@ -48,6 +49,7 @@ export default function GlobalSettingsPanel() {
     try {
       const res = await settingsApi.update(key, value);
       setValues((prev) => ({ ...prev, [key]: res.value }));
+      applyGlobalSettingsUpdate(key, res.value);
       notify({ type: "success", message: "Pengaturan disimpan.", duration: 1800 });
     } catch (err) {
       setErrors((prev) => ({ ...prev, [key]: err.message }));

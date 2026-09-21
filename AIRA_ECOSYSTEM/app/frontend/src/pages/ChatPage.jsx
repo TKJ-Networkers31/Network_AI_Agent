@@ -1,32 +1,20 @@
 // AIRA_ECOSYSTEM/app/frontend/src/pages/ChatPage.jsx
 //
-// FIX (Optimalisasi Greeting):
-// - buildGreeting() dibungkus useMemo, key-nya `persona` saja, supaya greeting
-//   di Hero tidak "kedip" saat komponen re-render (loading/liveTools).
-// - Tidak ada pesan pembuka statis dari backend/LLM - Hero murni client-side.
+// (Riwayat perubahan Sprint 2.5 dipertahankan: streaming, thinking, session, dst.)
 //
-// PERUBAHAN (Chat Session):
-// - Tombol Stop (ChatInput), Edit prompt, Salin, dan Buat ulang jawaban
-//   (MessageBubble) disambungkan ke ChatRuntimeContext.
-// - `loading` / `switching` milik SESI AKTIF saja.
-// - Status "form sudah dikirim" disimpan di pesannya sendiri.
-// - Key bubble menyertakan session id.
-//
-// PERUBAHAN (UI Layout): area pesan full-width (scrollbar di tepi kanan)
-// dengan konten dibatasi max-w-4xl di tengah; ChatInput menempel ke bawah.
-//
-// FIX (Sprint 2.5 - Session): voice call membuat sesi lewat
-// ensureSession() (single-flight, sama dengan kirim pesan) dan diabaikan
-// kalau sedang menyambung - tidak ada lagi sesi ganda dari klik beruntun.
-//
-// PERUBAHAN (Sprint 2.5 - Thinking/Loading UX):
-// - Animasi thinking (LiveSteps) hanya dirender kalau ada isinya
-//   (shouldShowLiveSteps): begitu chunk pertama tiba fasenya kosong, jadi
-//   tidak tersisa wadah kosong yang menambah jarak di bawah pesan streaming.
-// - Auto-scroll memakai behavior "auto" selama streaming; "smooth" per chunk
-//   akan me-restart animasi scroll tiap potongan (patah-patah).
-// - `streaming` diteruskan ke MessageBubble (aksi salin/buat ulang disembunyikan
-//   sampai jawaban final menggantikan pesan streaming).
+// PERUBAHAN (Sprint 2.6 / W5 - Integrasi Cockpit):
+// - <WorkspaceCockpit> dipasang tepat di bawah TopBar (menempel ke TopBar lewat
+//   margin negatif; area pesan dan input tidak berubah).
+// - Satu-satunya sapaan = DynamicHero, dari Greeting Resolver W4:
+//     Global Settings -> useGlobalSettings -> resolveGreetingModel -> heroModel
+//     -> WorkspaceCockpit -> DynamicHero
+//   Hero.jsx (emblem + prompt cepat) tidak lagi menerima `greeting`; buildGreeting()
+//   lama tidak dipanggil dari sini (greeting.js tetap ada sebagai fallback di resolver).
+// - Data cockpit dari useCockpitData(): snapshot koneksi sekali + refresh berbasis
+//   event (tanpa polling), runtime dari ChatRuntimeContext yang sudah ada.
+// - Hero cockpit hanya tampil saat percakapan kosong DAN Settings sudah selesai
+//   dimuat (tidak ada kedip greeting sebelum nama terisi).
+// - TopBar menyembunyikan ConnectionIndicator (informasinya sudah ada di ConnectionDock).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
@@ -36,12 +24,16 @@ import VoiceControls from "../components/VoiceControls.jsx";
 import VoiceOverlay from "../components/VoiceOverlay.jsx";
 import LiveSteps from "../components/LiveSteps.jsx";
 import BootScreen from "../components/BootScreen.jsx";
+import WorkspaceCockpit from "../components/cockpit/WorkspaceCockpit.jsx";
 import { api } from "../api.js";
 import { useSessionsContext } from "../context/SessionsContext.jsx";
 import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { useVoiceCall } from "../hooks/useVoiceCall.js";
-import { buildGreeting } from "../utils/greeting.js";
+import { useGlobalSettings } from "../hooks/useGlobalSettings.js";
+import { useCockpitData } from "../hooks/useCockpitData.js";
+import { navigateForTool } from "../utils/cockpitAdapter.js";
+import { resolveGreetingModel } from "../utils/greetingResolver.js";
 import { shouldShowLiveSteps } from "../utils/runLifecycle.js";
 import Hero from "../Hero.jsx";
 
@@ -77,7 +69,27 @@ export default function ChatPage({ onOpenMenu }) {
 
   const { notify } = useToast();
 
-  const greetingText = useMemo(() => buildGreeting(persona), [persona]);
+  // ---- Sprint 2.6: settings + cockpit + hero model -------------------------
+  const settings = useGlobalSettings(); // null = belum dimuat, {} = gagal, {...} = snapshot
+  const cockpit = useCockpitData();
+
+  const heroVisible = !switching && messages.length === 0 && !loading;
+  const heroReady = settings !== null;
+
+  // heroVisible ikut dependency supaya periode ("pagi"/"siang"/...) dihitung ulang
+  // setiap kali sapaan ditampilkan lagi (mis. New Chat), tanpa timer.
+  const heroModel = useMemo(
+    () =>
+      resolveGreetingModel({
+        settings,
+        persona,
+        workspace: null, // belum ada konsep "workspace aktif" di sistem (FSE selalu aktif)
+        connections: cockpit.activeConnectionCount,
+        activity: cockpit.activity,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings, persona, cockpit.activeConnectionCount, cockpit.activity, heroVisible]
+  );
 
   // Posisi pesan non-lokal terakhir, dan pesan assistant yang boleh
   // menampilkan tombol "Buat ulang" (jawaban atas pesan user terakhir,
@@ -248,6 +260,18 @@ export default function ChatPage({ onOpenMenu }) {
         subtitle="Ngobrol atau ketik '/' untuk pakai tool langsung"
         onMenuClick={onOpenMenu}
         wsStatus={wsStatus}
+        hideConnectionIndicator
+      />
+
+      {/* Cockpit: instrument layer di atas percakapan (menempel ke TopBar) */}
+      <WorkspaceCockpit
+        className="-mt-3 sm:-mt-4"
+        heroModel={heroModel}
+        connections={cockpit.connections}
+        runtimeState={cockpit.runtime}
+        tools={cockpit.tools}
+        onToolSelect={navigateForTool}
+        showHero={heroVisible && heroReady}
       />
 
       {/* Area pesan: full-width (scrollbar di tepi kanan), konten di tengah */}
@@ -259,12 +283,7 @@ export default function ChatPage({ onOpenMenu }) {
             </p>
           )}
 
-          {!switching && messages.length === 0 && !loading && (
-            <Hero
-              greeting={greetingText}
-              onQuickPrompt={(text) => handleSend(text)}
-            />
-          )}
+          {heroVisible && <Hero onQuickPrompt={(text) => handleSend(text)} />}
 
           {!switching &&
             messages.map((m, i) => (

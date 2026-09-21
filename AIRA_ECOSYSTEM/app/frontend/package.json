@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test"
   },
   "dependencies": {
     "dompurify": "^3.1.6",
@@ -27,3 +28,5 @@
     "esbuild@0.21.5": true
   }
 }
+
+

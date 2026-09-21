@@ -3,6 +3,7 @@ import TopBar from "../components/TopBar.jsx";
 import { api } from "../api.js";
 import { useToast } from "../components/Toast.jsx";
 import ConnectionPanel from "../components/connection/ConnectionPanel.jsx";
+import { notifyConnectionsChanged } from "../utils/cockpitAdapter.js";
 
 export default function AkaneWorkspace({ onOpenMenu }) {
   const [devices, setDevices] = useState([]);
@@ -33,6 +34,7 @@ export default function AkaneWorkspace({ onOpenMenu }) {
         message: res.reused ? `Sudah tersambung ke ${deviceName}.` : `Terhubung ke ${deviceName}.`,
         duration: 2500,
       });
+      notifyConnectionsChanged();
     } catch (err) {
       notify({ type: "error", message: err.message });
     } finally {
@@ -51,6 +53,7 @@ export default function AkaneWorkspace({ onOpenMenu }) {
         port: Number(form.port) || 22,
       });
       notify({ type: "success", message: `Terhubung ke ${form.host}.`, duration: 2500 });
+      notifyConnectionsChanged();
       setManualOpen(false);
       setForm({ host: "", username: "admin", password: "", port: 22 });
     } catch (err) {
