@@ -1,0 +1,2520 @@
+--- a/AIRA_ECOSYSTEM/core/events.py
++++ b/AIRA_ECOSYSTEM/core/events.py
+@@ -67,6 +67,11 @@
+ 5. _log_event hanya menyusun payload kalau level DEBUG aktif (Planner kini
+    mem-publish banyak event per giliran).
+ 
++PERUBAHAN (Sprint 2.5 - Streaming):
++   EventNames.STREAM_START / STREAM_DELTA ditambahkan. Dipublish Planner
++   selama provider LLM benar-benar streaming; diteruskan ke WebSocket oleh
++   api/ws_bridge.py (STREAM_WS_EVENT_MAP). Tidak ada nama lama yang berubah.
++
+ Do NOT put in this file:
+     LLM reasoning, routing, tool execution, network logic, persona logic,
+     memory retrieval, security decisions.
+@@ -138,6 +143,10 @@
+ 
+     # RESPONSE
+     RESPONSE_READY = "response.ready"
++
++    # STREAM (chunk jawaban LLM saat provider streaming; Sprint 2.5)
++    STREAM_START = "stream.start"
++    STREAM_DELTA = "stream.delta"
+ 
+     # MEMORY
+     MEMORY_SAVED = "memory.saved"
+--- a/AIRA_ECOSYSTEM/core/brain.py
++++ b/AIRA_ECOSYSTEM/core/brain.py
+@@ -32,6 +32,13 @@
+ think() menerima cancel_event (threading.Event) untuk tombol Stop.
+ Tidak ada lagi parameter on_event: WebSocket menerima event lewat
+ api/ws_bridge.py (subscriber Event Bus).
++
++Streaming (Sprint 2.5): think(..., stream=True) meminta provider streaming.
++Brain hanya meneruskan flag ke Orchestrator; chunk mengalir Planner -> Event
++Bus (stream.start / stream.delta) -> WS bridge. Siklus event Brain di atas
++(thinking.*, task.*, response.ready) dan Runtime State TIDAK berubah. Hasil
++akhir tetap BrainResponse utuh (answer lengkap); field 'streamed' hanya
++info apakah ada panggilan yang benar-benar di-stream.
+ """
+ 
+ import logging
+@@ -68,6 +75,7 @@
+     interaction_schema: Optional[dict] = None
+     cancelled: bool = False
+     routing: Optional[dict] = None   # {"task": {...}, "model": {...}|None}
++    streamed: bool = False           # Sprint 2.5: ada panggilan LLM yang benar-benar di-stream
+ 
+ 
+ def _tool_summary() -> dict:
+@@ -140,15 +148,15 @@
+ 
+     # -------------------------------------------------------------- think
+ 
+-    def think(self, user_input: str, cancel_event=None) -> BrainResponse:
++    def think(self, user_input: str, cancel_event=None, stream: bool = False) -> BrainResponse:
+         # Satu giliran = satu correlation_id (pakai yang sudah ada dari
+         # ws.py kalau ada, supaya event WS dan event Brain nyambung).
+         correlation_id = current_event_context().get("correlation_id") or new_correlation_id()
+ 
+         with event_scope(correlation_id=correlation_id):
+-            return self._think(user_input, cancel_event)
+-
+-    def _think(self, user_input: str, cancel_event) -> BrainResponse:
++            return self._think(user_input, cancel_event, stream)
++
++    def _think(self, user_input: str, cancel_event, stream: bool = False) -> BrainResponse:
+         logger.info("BRAIN | menerima input user (%d char)", len(user_input))
+ 
+         def cancelled() -> bool:
+@@ -183,11 +191,15 @@
+         started = time.perf_counter()
+         outcome = {"error": True, "cancelled": False}   # kalau route() raise
+ 
++        # 'stream' hanya diteruskan kalau True: orchestrator/test double lama
++        # tanpa parameter stream tetap kompatibel.
++        route_kwargs = {"stream": True} if stream else {}
++
+         try:
+             result = self.orchestrator.route(
+                 user_input, self.memory,
+                 cancel_event=cancel_event, selected_model=selected,
+-                context=context,
++                context=context, **route_kwargs,
+             )
+             outcome = {
+                 "error": bool(result.get("error", False)),
+@@ -211,6 +223,7 @@
+             duration=result.get("duration", 0.0),
+             interaction_schema=result.get("interaction_schema"),
+             cancelled=bool(result.get("cancelled", False)),
++            streamed=bool(result.get("streamed", False)),
+             routing={
+                 "task": classification.to_dict(),
+                 "model": selected.to_dict() if selected else None,
+--- a/AIRA_ECOSYSTEM/core/orchestrator.py
++++ b/AIRA_ECOSYSTEM/core/orchestrator.py
+@@ -7,6 +7,8 @@
+   - selected_model : SelectedModel dari Model Router (dipilih Brain)
+   - context        : AIRAContext dari Context Builder (disusun Brain), diteruskan
+                      apa adanya ke Planner
++  - stream         : bool (Sprint 2.5) - minta provider streaming; diteruskan
++                     apa adanya ke Planner. Default False = perilaku lama.
+ Orchestrator tidak memilih model dan tidak menyusun konteks. Tidak ada lagi callback on_event: event
+ realtime lewat Event Bus.
+ """
+@@ -41,7 +43,10 @@
+             dangerous_tools=DANGEROUS_TOOLS,
+         )
+ 
+-    def route(self, user_input: str, memory, cancel_event=None, selected_model=None, context=None) -> dict:
++    def route(
++        self, user_input: str, memory, cancel_event=None, selected_model=None,
++        context=None, stream: bool = False,
++    ) -> dict:
+         start = time.perf_counter()
+         result = self.planner.run(
+             user_input, memory,
+@@ -49,6 +54,7 @@
+             cancel_event=cancel_event,
+             selected_model=selected_model,
+             context=context,
++            stream=stream,
+         )
+         result["duration"] = round(time.perf_counter() - start, 3)
+         return result
+--- a/AIRA_ECOSYSTEM/agents/rei/provider_client.py
++++ b/AIRA_ECOSYSTEM/agents/rei/provider_client.py
+@@ -16,12 +16,32 @@
+ Ollama: kalau model menolak tools ("does not support tools", mis. Gemma 3),
+ panggilan diulang sekali TANPA tools - jawaban tetap keluar, tapi tanpa tool.
+ API key dibaca dari .env (PROVIDER_ENV_KEYS), tidak disimpan di database.
++
++SPRINT 2.5 — STREAMING:
++  ProviderClient.chat_stream(...)   streaming NYATA: Ollama NDJSON
++        (/api/chat stream=true) dan OpenAI-compatible SSE (stream=true,
++        untuk OpenRouter / Gemini / NVIDIA). Tiap potongan teks yang baru
++        diterima langsung diteruskan lewat on_delta - TIDAK ada pemotongan
++        respons penuh. Hasil akhirnya berbentuk SAMA dengan chat()
++        ({"message","usage"} / {"error","error_type"}) ditambah
++        "streamed": True.
++  call_model(..., stream=sink)      jalur streaming; tanpa `stream` perilaku
++        lama (non-streaming) TIDAK berubah. Retry (transient), fallback
++        provider (policy), dan cek context tetap berlaku. Setiap request ke
++        provider memanggil sink.start(model) - client wajib mengosongkan
++        buffer teksnya karena retry/fallback memulai jawaban dari awal.
++        Provider yang menolak streaming ("stream_unsupported") diulang
++        non-streaming pada model yang sama.
++  Stop: cancel_event dicek tiap chunk; koneksi ditutup dan hasilnya
++        {"cancelled": True} (tanpa retry/fallback).
++Sink streaming = objek dengan start(model: dict) dan delta(text: str).
+ """
+ 
+ import json
+ import logging
+ import os
+ import time
++from contextlib import closing
+ from pathlib import Path
+ from typing import Optional
+ 
+@@ -79,8 +99,8 @@
+ def _classify_request_exception(exc: Exception) -> str:
+     if isinstance(exc, requests.exceptions.Timeout):
+         return "timeout"
+-    if isinstance(exc, requests.exceptions.ConnectionError):
+-        return "connection"
++    if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError)):
++        return "connection"  # ChunkedEncodingError = stream terputus di tengah jalan
+     if isinstance(exc, requests.exceptions.HTTPError):
+         return "rate_limit" if getattr(exc.response, "status_code", None) == 429 else "other"
+     return "other"
+@@ -134,9 +154,8 @@
+ 
+ # ============================================================ adapters
+ 
+-def _chat_ollama(model_id, messages, tools, temperature, max_tokens, think, timeout) -> dict:
+-    url = f"{_endpoint('ollama')}/api/chat"
+-    payload: dict = {"model": model_id, "messages": messages, "stream": False}
++def _ollama_payload(model_id, messages, tools, temperature, max_tokens, think, stream: bool) -> dict:
++    payload: dict = {"model": model_id, "messages": messages, "stream": stream}
+ 
+     if tools:
+         payload["tools"] = tools
+@@ -150,6 +169,13 @@
+         payload["options"] = options
+     if think is not None:
+         payload["think"] = think
++
++    return payload
++
++
++def _chat_ollama(model_id, messages, tools, temperature, max_tokens, think, timeout) -> dict:
++    url = f"{_endpoint('ollama')}/api/chat"
++    payload = _ollama_payload(model_id, messages, tools, temperature, max_tokens, think, stream=False)
+ 
+     try:
+         try:
+@@ -203,6 +229,314 @@
+         choices = data.get("choices") or [{}]
+         choice = choices[0] if choices else {}
+         return {"message": _normalize_message(choice.get("message") or {}), "usage": data.get("usage")}
++
++    except requests.exceptions.RequestException as exc:
++        return _request_error(provider, url, exc)
++    except ValueError as exc:
++        return {"error": f"{url} membalas body bukan JSON valid: {exc}", "error_type": "other"}
++
++
++# ============================================================ streaming (Sprint 2.5)
++
++# Status HTTP yang wajar untuk "provider/model ini tidak mendukung stream".
++_STREAM_UNSUPPORTED_STATUSES = {400, 404, 405, 415, 422, 501}
++
++
++def _is_cancelled(cancel_event) -> bool:
++    return cancel_event is not None and cancel_event.is_set()
++
++
++def _cancelled_result() -> dict:
++    return {"error": "Dibatalkan oleh user.", "error_type": "cancelled", "cancelled": True}
++
++
++def _safe_delta(on_delta, text: str) -> None:
++    """Sink yang rusak tidak boleh menjatuhkan panggilan LLM."""
++    if not text:
++        return
++    try:
++        on_delta(text)
++    except Exception:
++        logger.exception("on_delta gagal (diabaikan).")
++
++
++def _open_stream(url: str, payload: dict, timeout: float, headers: Optional[dict] = None):
++    """
++    POST dengan stream=True. Status >= 400: body error dibaca penuh (kecil)
++    supaya exc.response.text tersedia, lalu HTTPError dilempar. Status OK:
++    response dikembalikan TERBUKA - pemanggil wajib menutupnya.
++    """
++    response = requests.post(url, json=payload, headers=headers, timeout=timeout, stream=True)
++
++    if response.status_code >= 400:
++        try:
++            response.content
++        except requests.exceptions.RequestException:
++            pass
++        response.close()
++        response.raise_for_status()
++
++    return response
++
++
++def _http_error_body(exc: requests.exceptions.HTTPError) -> str:
++    try:
++        return exc.response.text.lower() if exc.response is not None else ""
++    except Exception:
++        return ""
++
++
++def _stream_unsupported(exc: requests.exceptions.HTTPError, body: str) -> bool:
++    status = getattr(exc.response, "status_code", None)
++    return status in _STREAM_UNSUPPORTED_STATUSES and "stream" in body
++
++
++def _stream_unsupported_result(label: str, exc: Exception) -> dict:
++    return {"error": f"{label} menolak streaming: {exc}", "error_type": "stream_unsupported"}
++
++
++def _stream_error_type(err) -> str:
++    code = err.get("code") if isinstance(err, dict) else None
++    return "rate_limit" if str(code) in ("429", "rate_limit_exceeded") else "other"
++
++
++def _chat_ollama_stream(
++    model_id, messages, tools, temperature, max_tokens, think, timeout, on_delta, cancel_event,
++) -> dict:
++    """Ollama /api/chat stream=true: NDJSON, satu objek JSON per baris."""
++    url = f"{_endpoint('ollama')}/api/chat"
++    payload = _ollama_payload(model_id, messages, tools, temperature, max_tokens, think, stream=True)
++
++    try:
++        try:
++            response = _open_stream(url, payload, timeout)
++        except requests.exceptions.HTTPError as exc:
++            body = _http_error_body(exc)
++            if payload.get("tools") and "does not support tools" in body:
++                logger.warning("Model '%s' tidak mendukung tools - mengulang tanpa tools.", model_id)
++                payload.pop("tools")
++                response = _open_stream(url, payload, timeout)
++            elif _stream_unsupported(exc, body):
++                return _stream_unsupported_result("Ollama", exc)
++            else:
++                raise
++
++        parts: list[str] = []
++        tool_calls: list = []
++        usage = None
++        done = False
++
++        with closing(response):
++            for raw in response.iter_lines(chunk_size=None):
++                if _is_cancelled(cancel_event):
++                    return _cancelled_result()
++
++                if not raw:
++                    continue
++
++                try:
++                    obj = json.loads(raw)
++                except ValueError:
++                    return {"error": "Ollama mengirim baris stream yang bukan JSON valid.", "error_type": "other"}
++
++                if not isinstance(obj, dict):
++                    continue
++
++                if obj.get("error"):
++                    return {"error": f"Ollama: {obj['error']}", "error_type": "other"}
++
++                message = obj.get("message") or {}
++
++                # 'thinking' (model reasoning) sengaja TIDAK diteruskan: sama
++                # seperti jalur non-streaming, hanya 'content' yang jadi jawaban.
++                text = message.get("content")
++                if text:
++                    parts.append(text)
++                    _safe_delta(on_delta, text)
++
++                if message.get("tool_calls"):
++                    tool_calls.extend(message["tool_calls"])
++
++                if obj.get("done"):
++                    usage = _extract_ollama_usage(obj)
++                    done = True
++                    break
++
++        if not done:
++            return {
++                "error": "Stream Ollama berakhir sebelum selesai (done=true tidak diterima).",
++                "error_type": "connection",
++            }
++
++        message = _normalize_message({"role": "assistant", "content": "".join(parts), "tool_calls": tool_calls})
++        return {"message": message, "usage": usage, "streamed": True}
++
++    except requests.exceptions.RequestException as exc:
++        return _request_error("ollama", url, exc)
++
++
++def _consume_sse(response, on_delta, cancel_event) -> dict:
++    """
++    Baca SSE OpenAI-compatible. Teks langsung diteruskan; tool_calls datang
++    sebagai fragmen (per index) dan digabung. 'finished' baru True kalau
++    finish_reason atau [DONE] diterima - stream yang putus sebelum itu
++    dianggap error "connection" (bukan jawaban parsial yang dianggap utuh).
++    """
++    parts: list[str] = []
++    slots: dict = {}
++    order: list = []
++    last_key = None
++    usage = None
++    finished = False
++
++    for raw in response.iter_lines(chunk_size=None):
++        if _is_cancelled(cancel_event):
++            return _cancelled_result()
++
++        if not raw:
++            continue
++
++        line = raw.decode("utf-8", errors="replace").strip()
++
++        # komentar keep-alive (": OPENROUTER PROCESSING"), "event:", "id:" dst.
++        if not line.startswith("data:"):
++            continue
++
++        data = line[5:].strip()
++
++        if data == "[DONE]":
++            finished = True
++            break
++
++        try:
++            obj = json.loads(data)
++        except ValueError:
++            return {"error": f"Chunk SSE bukan JSON valid: {data[:200]}", "error_type": "other"}
++
++        if not isinstance(obj, dict):
++            continue
++
++        if obj.get("error"):
++            err = obj["error"]
++            return {"error": f"Provider mengirim error di tengah stream: {err}", "error_type": _stream_error_type(err)}
++
++        if obj.get("usage"):
++            usage = obj["usage"]
++
++        for choice in obj.get("choices") or []:
++            delta = choice.get("delta") or {}
++
++            text = delta.get("content")
++            if isinstance(text, str) and text:
++                parts.append(text)
++                _safe_delta(on_delta, text)
++
++            for fragment in delta.get("tool_calls") or []:
++                key = fragment.get("index")
++                if key is None:  # sebagian provider tidak mengirim index
++                    key = fragment.get("id") or last_key or 0
++                last_key = key
++
++                slot = slots.get(key)
++                if slot is None:
++                    slot = slots[key] = {"id": None, "name": "", "arguments": ""}
++                    order.append(key)
++
++                if fragment.get("id"):
++                    slot["id"] = fragment["id"]
++
++                function = fragment.get("function") or {}
++                name = function.get("name")
++                if name and name != slot["name"]:
++                    slot["name"] += name
++                if function.get("arguments"):
++                    slot["arguments"] += function["arguments"]
++
++            reason = choice.get("finish_reason")
++            if reason == "error":
++                return {"error": "Provider mengakhiri stream dengan finish_reason=error.", "error_type": "other"}
++            if reason:
++                finished = True  # jangan break: chunk usage bisa menyusul
++
++    if not finished:
++        return {
++            "error": "Stream provider berakhir sebelum selesai (finish_reason/[DONE] tidak diterima).",
++            "error_type": "connection",
++        }
++
++    tool_calls = [
++        {
++            "id": slots[key]["id"] or f"call_{index}",
++            "type": "function",
++            "function": {"name": slots[key]["name"], "arguments": slots[key]["arguments"]},
++        }
++        for index, key in enumerate(order)
++        if slots[key]["name"]
++    ]
++
++    message = _normalize_message({"role": "assistant", "content": "".join(parts), "tool_calls": tool_calls})
++    return {"message": message, "usage": usage, "streamed": True}
++
++
++def _chat_openai_stream(
++    provider, model_id, messages, tools, temperature, max_tokens, timeout, on_delta, cancel_event,
++) -> dict:
++    api_key = _resolve_api_key(provider)
++
++    if not api_key:
++        return {
++            "error": f"API key {provider} belum diset (.env {PROVIDER_ENV_KEYS[provider]}).",
++            "error_type": "other",
++        }
++
++    url = f"{_endpoint(provider)}/chat/completions"
++    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
++
++    if provider == "openrouter":
++        headers["HTTP-Referer"] = "http://localhost"
++        headers["X-Title"] = "AIRA Ecosystem"
++
++    payload: dict = {
++        "model": model_id, "messages": messages, "stream": True,
++        "stream_options": {"include_usage": True},   # usage di chunk terakhir
++    }
++    if tools:
++        payload["tools"] = tools
++    if temperature is not None:
++        payload["temperature"] = temperature
++    if max_tokens is not None:
++        payload["max_tokens"] = max_tokens
++
++    try:
++        try:
++            response = _open_stream(url, payload, timeout, headers=headers)
++        except requests.exceptions.HTTPError as exc:
++            body = _http_error_body(exc)
++            if "stream_options" in body or "include_usage" in body:
++                logger.warning("Provider %s menolak stream_options - mengulang tanpa usage stream.", provider)
++                payload.pop("stream_options")
++                response = _open_stream(url, payload, timeout, headers=headers)
++            elif _stream_unsupported(exc, body):
++                return _stream_unsupported_result(provider, exc)
++            else:
++                raise
++
++        with closing(response):
++            content_type = (response.headers.get("Content-Type") or "").lower()
++
++            # Provider mengabaikan stream=true dan membalas JSON biasa:
++            # perlakukan sebagai non-streaming (jujur: streamed=False).
++            if "event-stream" not in content_type and "json" in content_type:
++                data = response.json()
++                choices = data.get("choices") or [{}]
++                choice = choices[0] if choices else {}
++                return {
++                    "message": _normalize_message(choice.get("message") or {}),
++                    "usage": data.get("usage"),
++                    "streamed": False,
++                }
++
++            return _consume_sse(response, on_delta, cancel_event)
+ 
+     except requests.exceptions.RequestException as exc:
+         return _request_error(provider, url, exc)
+@@ -241,6 +575,48 @@
+         return {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
+ 
+     @staticmethod
++    def chat_stream(
++        provider: str,
++        model: str,
++        messages: list,
++        tools: Optional[list] = None,
++        *,
++        on_delta,
++        cancel_event=None,
++        temperature: Optional[float] = None,
++        max_tokens: Optional[int] = None,
++        think: Optional[bool] = None,
++        timeout: Optional[float] = None,
++    ) -> dict:
++        """
++        Streaming NYATA. on_delta(text) dipanggil untuk tiap potongan teks yang
++        BARU diterima dari provider. Return sama seperti chat() plus
++        "streamed": True (False bila provider membalas JSON biasa), atau
++        {"error", "error_type": ... | "stream_unsupported" | "cancelled"}.
++        Tidak pernah raise.
++        """
++        provider = (provider or "").strip().lower()
++
++        try:
++            if provider == "ollama":
++                return _chat_ollama_stream(
++                    model, messages, tools, temperature, max_tokens, think,
++                    timeout or 300, on_delta, cancel_event,
++                )
++
++            if provider in PROVIDER_ENV_KEYS:
++                return _chat_openai_stream(
++                    provider, model, messages, tools, temperature, max_tokens,
++                    timeout or 120, on_delta, cancel_event,
++                )
++
++            return {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
++
++        except Exception as exc:
++            logger.exception("chat_stream %s gagal tak terduga", provider)
++            return {"error": f"Streaming gagal: {exc}", "error_type": "other"}
++
++    @staticmethod
+     def health_check(provider: str, model_id: Optional[str] = None) -> dict:
+         provider = (provider or "").strip().lower()
+ 
+@@ -291,11 +667,43 @@
+         logger.exception("Gagal publish model.failed (diabaikan).")
+ 
+ 
+-def _attempt(model: SelectedModel, messages: list, tools: list, retries: int) -> dict:
+-    def call() -> dict:
+-        return ProviderClient.chat(
++def _call_sink(fn, *args) -> None:
++    try:
++        fn(*args)
++    except Exception:
++        logger.exception("stream sink gagal (diabaikan).")
++
++
++def _stream_once(model: SelectedModel, messages: list, tools: list, stream, cancel_event) -> dict:
++    """SATU request streaming ke `model`. sink.start() dipanggil tiap request."""
++    _call_sink(stream.start, {
++        "id": model.id, "display_name": model.display_name,
++        "provider": model.provider, "fallback_from": model.fallback_from,
++    })
++
++    result = ProviderClient.chat_stream(
++        provider=model.provider, model=model.model_id, messages=messages, tools=tools,
++        on_delta=lambda text: _call_sink(stream.delta, text), cancel_event=cancel_event,
++    )
++
++    if result.get("error_type") == "stream_unsupported":
++        logger.warning("Model '%s' menolak streaming - mengulang non-streaming.", model.display_name)
++        result = ProviderClient.chat(
+             provider=model.provider, model=model.model_id, messages=messages, tools=tools,
+         )
++        if "error" not in result:
++            result["streamed"] = False
++
++    return result
++
++
++def _attempt(model: SelectedModel, messages: list, tools: list, retries: int, stream=None, cancel_event=None) -> dict:
++    def call() -> dict:
++        if stream is None:
++            return ProviderClient.chat(
++                provider=model.provider, model=model.model_id, messages=messages, tools=tools,
++            )
++        return _stream_once(model, messages, tools, stream, cancel_event)
+ 
+     result = call()
+     attempt = 0
+@@ -309,11 +717,22 @@
+     return result
+ 
+ 
+-def call_model(messages: list, tools: list, selected_model=None, *, policy=None, router=None) -> dict:
++def call_model(
++    messages: list, tools: list, selected_model=None, *,
++    policy=None, router=None, stream=None, cancel_event=None,
++) -> dict:
+     """
+     Titik masuk planner/auto_extract. `selected_model` (SelectedModel/dict)
+     berasal dari Model Router; None -> default label general.
+     Hasil sukses menyertakan key "model" (model yang benar-benar dipakai).
++
++    stream (Sprint 2.5): sink dengan start(model: dict) dan delta(text: str).
++    None (default) = jalur non-streaming lama, TIDAK berubah. Kalau diisi,
++    retry/fallback/cek context tetap berlaku; tiap request ke provider
++    (termasuk retry & fallback) memanggil sink.start() lagi. Hasil sukses
++    membawa "streamed" (True bila provider benar-benar streaming). Stop
++    (cancel_event) -> {"error", "error_type": "cancelled", "cancelled": True}
++    tanpa retry/fallback.
+     """
+     policy = policy or get_model_policy()
+     router = router or get_model_router()
+@@ -328,19 +747,28 @@
+ 
+     selected = policy.check_context(selected, estimate_tokens(messages, tools))
+ 
+-    result = _attempt(selected, messages, tools, retries=policy.retry_count())
++    result = _attempt(
++        selected, messages, tools, retries=policy.retry_count(),
++        stream=stream, cancel_event=cancel_event,
++    )
+ 
+     if "error" not in result:
+         result["model"] = selected.to_dict()
+         return result
+ 
++    if result.get("cancelled"):
++        return {"error": result["error"], "error_type": "cancelled", "cancelled": True}
++
+     _publish_model_failed(selected, result)
+ 
+     fallback = policy.on_provider_failure(selected, result.get("error_type", "other"))
+     if fallback is None:
+         return {"error": result["error"]}
+ 
+-    result = _attempt(fallback, messages, tools, retries=0)
++    result = _attempt(fallback, messages, tools, retries=0, stream=stream, cancel_event=cancel_event)
++
++    if result.get("cancelled"):
++        return {"error": result["error"], "error_type": "cancelled", "cancelled": True}
+ 
+     if "error" in result:
+         _publish_model_failed(fallback, result)
+--- a/AIRA_ECOSYSTEM/agents/rei/planner.py
++++ b/AIRA_ECOSYSTEM/agents/rei/planner.py
+@@ -34,6 +34,20 @@
+   persona/waktu/memory/lokasi sendiri. Kalau context=None (pemanggil yang
+   tidak lewat Brain), Planner meminta builder default membuatnya - tetap SATU
+   jalur penyusunan konteks, tidak ada injeksi ganda.
++
++Streaming (Sprint 2.5):
++  run(..., stream=True) meneruskan sink ke call_model() sehingga provider
++  yang mendukung streaming benar-benar di-stream. Sink (_StreamPublisher)
++  hanya mempublish ke Event Bus:
++      stream.start   awal SATU request ke provider (juga retry / fallback /
++                     panggilan LLM berikutnya sesudah tool) -> {call, attempt,
++                     model{id, display_name, provider, fallback_from}}
++      stream.delta   potongan teks baru -> {call, attempt, seq, text}
++  Satu giliran bisa punya beberapa 'call' (LLM -> tool -> LLM). Teks dari call
++  yang berakhir dengan tool_calls hanyalah pengantar; jawaban final tetap
++  message.content dari call terakhir (answer di result), yang menjadi
++  "complete" dan selalu menggantikan buffer client. stream=False (default)
++  = jalur lama tanpa perubahan apa pun.
+ """
+ 
+ import json
+@@ -58,6 +72,31 @@
+ SESSION_AWARE_TOOLS = {"request_location_permission"}
+ 
+ 
++class _StreamPublisher:
++    """
++    Sink streaming untuk SATU panggilan LLM (satu 'call' dalam giliran).
++    Hanya menerjemahkan callback provider_client menjadi event Event Bus;
++    session_id/run_id/correlation_id ikut otomatis dari event_scope aktif.
++    """
++
++    def __init__(self, emit, call: int):
++        self._emit = emit
++        self.call = call
++        self.attempt = 0
++        self.seq = 0
++
++    def start(self, model: dict) -> None:
++        self.attempt += 1
++        self.seq = 0
++        self._emit(EventNames.STREAM_START, {"call": self.call, "attempt": self.attempt, "model": model})
++
++    def delta(self, text: str) -> None:
++        self.seq += 1
++        self._emit(EventNames.STREAM_DELTA, {
++            "call": self.call, "attempt": self.attempt, "seq": self.seq, "text": text,
++        })
++
++
+ class Planner:
+ 
+     def __init__(self, tool_schemas, tool_category=None, dangerous_tools=None):
+@@ -65,7 +104,10 @@
+         self.tool_category = tool_category or {}
+         self.dangerous_tools = dangerous_tools or set()
+ 
+-    def run(self, user_input, memory, tool_executor, cancel_event=None, selected_model=None, context=None):
++    def run(
++        self, user_input, memory, tool_executor, cancel_event=None, selected_model=None,
++        context=None, stream=False,
++    ):
+ 
+         def emit(bus_event, payload):
+             try:
+@@ -87,6 +129,16 @@
+ 
+         pending_interaction_schema = None
+ 
++        # Streaming: satu sink per panggilan LLM; streamed=True kalau ADA
++        # panggilan yang benar-benar di-stream oleh provider.
++        stream_state = {"calls": 0, "streamed": False}
++
++        def new_stream_sink():
++            if not stream:
++                return None
++            stream_state["calls"] += 1
++            return _StreamPublisher(emit, stream_state["calls"])
++
+         def result_dict(answer, error=False, cancelled=False):
+             return {
+                 "answer": answer,
+@@ -94,6 +146,7 @@
+                 "token_usage": memory.token_tracker.last_usage,
+                 "session_token_usage": memory.token_tracker.as_dict(),
+                 "error": error,
++                "streamed": stream_state["streamed"],
+                 "interaction_schema": None if cancelled else pending_interaction_schema,
+                 **({"cancelled": True} if cancelled else {}),
+             }
+@@ -116,7 +169,13 @@
+ 
+         system_prompt = context.system_prompt
+ 
+-        response = self._call_with_retry(memory.get_messages(system_prompt), selected_model=selected_model)
++        response = self._call_with_retry(
++            memory.get_messages(system_prompt), selected_model=selected_model,
++            stream=new_stream_sink(), cancel_event=cancel_event,
++        )
++
++        if response.get("cancelled"):
++            return cancelled_result()
+ 
+         if "error" in response:
+             emit(EventNames.SYSTEM_ERROR, {"message": response["error"]})
+@@ -125,6 +184,7 @@
+             return out
+ 
+         self._track_usage(memory, response)
++        stream_state["streamed"] = stream_state["streamed"] or bool(response.get("streamed"))
+ 
+         tool_count = 0
+         call_signatures = {}
+@@ -256,21 +316,39 @@
+ 
+             emit(EventNames.THINKING_START, {"message": "Menyusun jawaban..."})
+ 
+-            response = self._call_with_retry(memory.get_messages(system_prompt), selected_model=selected_model)
++            response = self._call_with_retry(
++                memory.get_messages(system_prompt), selected_model=selected_model,
++                stream=new_stream_sink(), cancel_event=cancel_event,
++            )
++
++            if response.get("cancelled"):
++                return cancelled_result()
+ 
+             if "error" in response:
+                 emit(EventNames.SYSTEM_ERROR, {"message": response["error"]})
+                 return result_dict(f"Terjadi error saat menghubungi model: {response['error']}", error=True)
+ 
+             self._track_usage(memory, response)
++            stream_state["streamed"] = stream_state["streamed"] or bool(response.get("streamed"))
+ 
+     def _track_usage(self, memory, response):
+         usage = response.get("usage")
+         if usage:
+             memory.token_tracker.add(usage)
+ 
+-    def _call_with_retry(self, messages, selected_model=None, max_retries=MAX_EMPTY_RESPONSE_RETRIES):
+-        response = call_model(messages, self.tool_schemas, selected_model)
++    def _call_with_retry(
++        self, messages, selected_model=None, max_retries=MAX_EMPTY_RESPONSE_RETRIES,
++        stream=None, cancel_event=None,
++    ):
++        def call():
++            if stream is None:   # jalur lama: persis seperti sebelum Sprint 2.5
++                return call_model(messages, self.tool_schemas, selected_model)
++            return call_model(
++                messages, self.tool_schemas, selected_model,
++                stream=stream, cancel_event=cancel_event,
++            )
++
++        response = call()
+         attempt = 0
+ 
+         while (
+@@ -280,7 +358,7 @@
+         ):
+             attempt += 1
+             logger.info("Provider balas kosong, mencoba ulang (%d/%d)...", attempt, max_retries)
+-            response = call_model(messages, self.tool_schemas, selected_model)
++            response = call()
+ 
+         return response
+ 
+--- a/AIRA_ECOSYSTEM/api/ws_bridge.py
++++ b/AIRA_ECOSYSTEM/api/ws_bridge.py
+@@ -27,18 +27,24 @@
+   - Event harus punya metadata session_id DAN run_id (diisi ws.py lewat
+     core.events.event_scope). Giliran REST (/api/chat) tidak punya run_id,
+     jadi tidak pernah "bocor" ke WebSocket sesi yang kebetulan terbuka.
+-  - Hanya event yang ada di peta DEFAULT_WS_EVENT_MAP yang diteruskan.
+-    Event lain (response.ready, task.*, model.*, dst) tetap milik
+-    subscriber lain (Logger, dst) dan TIDAK dikirim ke client.
++  - Hanya event yang ada di peta DEFAULT_WS_EVENT_MAP + STREAM_WS_EVENT_MAP
++    yang diteruskan. Event lain (response.ready, task.*, model.*, dst) tetap
++    milik subscriber lain (Logger, dst) dan TIDAK dikirim ke client.
+   - Data dijadikan JSON-safe sebelum dikirim.
+ 
+ Urutan terhadap event "response": ws.py memanggil `await bridge.flush()`
+ sebelum mengirim response/error/cancelled, jadi semua tool_start/tool_finish
+ tiba lebih dulu (perilaku yang sama dengan drain lama).
++
++Streaming (Sprint 2.5): stream.start / stream.delta dari Planner ikut lewat
++jalur yang SAMA (satu antrean FIFO, satu consumer), jadi urutan
++start -> delta* -> tool_* -> start -> delta* -> response terjaga, dan
++flush() sebelum "response" menjamin tidak ada delta yang tiba sesudahnya.
+ """
+ 
+ import asyncio
+ import logging
++import os
+ import threading
+ import time
+ from typing import Any, Awaitable, Callable, Optional
+@@ -57,7 +63,41 @@
+     EventNames.SYSTEM_ERROR: "error",
+ }
+ 
++# Streaming jawaban LLM (Sprint 2.5). Dipisah dari DEFAULT_WS_EVENT_MAP supaya
++# peta protokol lama tidak berubah; bridge memakai gabungan keduanya.
++#   stream_start : awal SATU request ke provider (juga saat retry/fallback -
++#                  client WAJIB mengosongkan buffer teks untuk bubble ini)
++#   stream_delta : potongan teks yang benar-benar baru diterima dari provider
++# "complete" = event "response" milik ws.py; "error" = event "error" di atas.
++STREAM_WS_EVENT_MAP: dict[str, str] = {
++    EventNames.STREAM_START: "stream_start",
++    EventNames.STREAM_DELTA: "stream_delta",
++}
++
+ Sender = Callable[[str, dict], Awaitable[None]]
++
++_FALSE_VALUES = {"0", "false", "off", "no"}
++
++
++def stream_enabled_for_turn(raw: dict, is_voice_turn: bool = False) -> bool:
++    """
++    Apakah giliran WebSocket ini boleh streaming?
++
++      - AIRA_STREAMING=0|false|off|no  -> mati total (kill switch server).
++      - giliran suara                  -> tidak (TTS membacakan jawaban utuh).
++      - payload {"stream": false}      -> client memilih non-streaming.
++      - selain itu                     -> ya (default; client lama yang tidak
++                                          mengenal stream_* mengabaikannya).
++    """
++    if os.getenv("AIRA_STREAMING", "1").strip().lower() in _FALSE_VALUES:
++        return False
++
++    if is_voice_turn:
++        return False
++
++    flag = raw.get("stream") if isinstance(raw, dict) else None
++
++    return True if flag is None else bool(flag)
+ 
+ 
+ async def _default_sender(session_id: str, payload: dict) -> None:
+@@ -77,7 +117,11 @@
+     ):
+         self._bus = bus if bus is not None else event_bus
+         self._sender: Sender = sender or _default_sender
+-        self._map = dict(event_map if event_map is not None else DEFAULT_WS_EVENT_MAP)
++        self._map = dict(
++            event_map
++            if event_map is not None
++            else {**DEFAULT_WS_EVENT_MAP, **STREAM_WS_EVENT_MAP}
++        )
+ 
+         self._lock = threading.Lock()
+         self._loop: Optional[asyncio.AbstractEventLoop] = None
+--- a/AIRA_ECOSYSTEM/api/routers/ws.py
++++ b/AIRA_ECOSYSTEM/api/routers/ws.py
+@@ -19,6 +19,11 @@
+   milik ws.py sendiri (ack, transcript, response, cancelled, error fatal)
+   dikirim langsung lewat _emit(); sebelum response/error/cancelled,
+   bridge.flush() memastikan semua event tool tiba lebih dulu.
++- STREAMING (Sprint 2.5): giliran teks/DIO/regenerate meminta provider
++  streaming (stream_enabled_for_turn). Chunk sampai ke client sebagai
++  stream_start / stream_delta lewat jalur bridge yang sama; "response" tetap
++  menjadi event COMPLETE (answer utuh, + "streamed"). Kontrak lengkap:
++  docs/api_guideline.md.
+ 
+ DIO submission (form/izin lokasi):
+   Diproses lewat resolve_submission() (agents/rei/dio_tools.py) - helper
+@@ -42,7 +47,7 @@
+ from agents.yuki.tts import synthesize_bytes
+ from agents.rei.dio_tools import resolve_submission
+ from api.state import get_memory, persist_memory, add_global_usage, drop_cache
+-from api.ws_bridge import get_ws_bridge
++from api.ws_bridge import get_ws_bridge, stream_enabled_for_turn
+ from api.ws_manager import manager
+ from core.brain import Brain
+ from core.events import event_scope, new_correlation_id
+@@ -212,11 +217,12 @@
+     # WS bridge.
+     # --------------------------------------------------
+     brain = Brain(memory)
++    use_stream = stream_enabled_for_turn(raw, is_voice_turn)
+ 
+     await emit("ack", {"message": display_message})
+ 
+     try:
+-        result = await asyncio.to_thread(brain.think, llm_message, cancel_event)
++        result = await asyncio.to_thread(brain.think, llm_message, cancel_event, use_stream)
+     except Exception as exc:
+         logger.exception("WS think() gagal | session=%s", session_id)
+         memory.history = backup_history
+@@ -281,6 +287,7 @@
+         "duration": result.duration,
+         "token_usage": result.token_usage,
+         "error": result.error,
++        "streamed": result.streamed,
+         "session_title": row["title"] if row else "Chat baru",
+         "audio_base64": audio_b64_out,
+         "interaction_schema": result.interaction_schema,
+--- /dev/null
++++ b/AIRA_ECOSYSTEM/tests/test_streaming.py
+@@ -0,0 +1,1352 @@
++"""
++tests/test_streaming.py — unit test backend streaming (Sprint 2.5).
++
++Cakupan:
++  1. Provider client   : Ollama NDJSON + OpenAI-compatible SSE (fragmen tool_calls,
++                         usage, komentar keep-alive, stream terpotong, error di tengah,
++                         stream_options ditolak, provider mengabaikan stream, Stop).
++  2. Streaming NYATA   : server HTTP lokal ber-chunked yang MENAHAN sisa respons
++                         sampai client sudah menerima chunk pertama. Kalau client
++                         membuffer seluruh respons lalu memotongnya, test ini gagal
++                         (deadlock -> gate timeout).
++  3. call_model        : sink start/delta, retry, fallback, stream_unsupported ->
++                         non-streaming, cancelled tanpa fallback, jalur lama utuh.
++  4. Planner           : event stream.* di Event Bus, nomor call/attempt, tool loop,
++                         error, cancelled, jalur non-streaming tidak berubah.
++  5. Urutan + isolasi  : Planner -> Event Bus -> WS bridge, dua sesi paralel.
++  6. Flag & event      : stream_enabled_for_turn, EventNames, peta WS.
++  7. Brain             : flag stream diteruskan hanya kalau True (kompatibel dengan
++                         orchestrator lama), BrainResponse.streamed.
++  8. Runtime State     : event stream.* tidak mengubah state.
++
++Semua test berjalan offline (server hanya 127.0.0.1) dan memakai DB sementara.
++Test yang butuh Planner/Brain asli di-skip (bukan gagal) kalau dependency
++runtime-nya tidak terpasang.
++
++Jalankan dari root AIRA_ECOSYSTEM/:
++    python -m unittest tests.test_streaming -v
++"""
++
++import asyncio
++import copy
++import json
++import os
++import tempfile
++import threading
++import time
++import types
++import unittest
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from unittest import mock
++
++import requests
++
++import agents.rei.provider_client as pc
++from agents.rei.provider_client import ProviderClient, call_model, EMPTY_RESPONSE_MARKER
++from api.ws_bridge import (
++    DEFAULT_WS_EVENT_MAP, STREAM_WS_EVENT_MAP, WebSocketEventBridge, stream_enabled_for_turn,
++)
++from core.events import EventBus, EventNames, STANDARD_EVENTS, event_bus, event_scope
++from core.model_types import TaskClassification
++from tests.test_model_router import EventCapture, make_env
++
++MODEL = {"id": "glm", "display_name": "GLM 5.2", "provider": "openrouter", "fallback_from": None}
++
++
++# ============================================================ fake HTTP (requests.post)
++
++class FakeStreamResponse:
++    """Meniru requests.Response(stream=True). Item Exception di `lines` di-raise saat dibaca."""
++
++    def __init__(self, lines=(), status=200, headers=None, body=b""):
++        self.status_code = status
++        self.headers = headers or {}
++        self._lines = list(lines)
++        self._body = body
++        self.closed = False
++        self.read_lines = 0
++
++    @property
++    def content(self):
++        return self._body
++
++    @property
++    def text(self):
++        return self._body.decode("utf-8", errors="replace")
++
++    def json(self):
++        return json.loads(self._body)
++
++    def close(self):
++        self.closed = True
++
++    def raise_for_status(self):
++        if self.status_code >= 400:
++            raise requests.exceptions.HTTPError(f"{self.status_code} error", response=self)
++
++    def iter_lines(self, chunk_size=None, decode_unicode=False):
++        for line in self._lines:
++            if isinstance(line, Exception):
++                raise line
++            self.read_lines += 1
++            yield line if isinstance(line, bytes) else line.encode("utf-8")
++
++
++def nd(*objs):
++    """NDJSON Ollama: satu objek per baris."""
++    return [json.dumps(o).encode() for o in objs]
++
++
++def sse(*objs, done=True):
++    """SSE OpenAI-compatible: 'data: {...}' + baris kosong; opsional [DONE]."""
++    lines = []
++    for obj in objs:
++        lines += [b"data: " + json.dumps(obj).encode(), b""]
++    if done:
++        lines += [b"data: [DONE]", b""]
++    return lines
++
++
++def oa(content=None, tool_calls=None, finish=None, usage=None):
++    """Satu chunk chat.completion.chunk."""
++    chunk = {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]}
++    if content is not None:
++        chunk["choices"][0]["delta"]["content"] = content
++    if tool_calls is not None:
++        chunk["choices"][0]["delta"]["tool_calls"] = tool_calls
++    if usage is not None:
++        chunk["usage"] = usage
++    return chunk
++
++
++def patch_post(*responses):
++    """Ganti requests.post dengan antrean response palsu; kembalikan (patcher, calls)."""
++    calls, queue = [], list(responses)
++
++    def fake_post(url, json=None, headers=None, timeout=None, stream=False, **kwargs):
++        calls.append({"url": url, "json": copy.deepcopy(json), "headers": headers, "stream": stream})
++        return queue.pop(0)
++
++    return mock.patch.object(pc.requests, "post", fake_post), calls
++
++
++class Collector:
++    def __init__(self):
++        self.deltas = []
++
++    def __call__(self, text):
++        self.deltas.append(text)
++
++
++ENV_KEY = mock.patch.dict(os.environ, {"OPENROUTER_API": "test-key"})
++
++
++# ============================================================ 1. PROVIDER: OLLAMA
++
++class TestOllamaStream(unittest.TestCase):
++
++    def stream(self, response, **kwargs):
++        patcher, calls = patch_post(*response) if isinstance(response, tuple) else patch_post(response)
++        sink = Collector()
++        with patcher:
++            result = ProviderClient.chat_stream(
++                "ollama", "qwen3:1.7b", [{"role": "user", "content": "hi"}], [{"type": "function"}],
++                on_delta=sink, **kwargs,
++            )
++        return result, sink, calls
++
++    def test_deltas_arrive_in_order_and_are_joined(self):
++        response = FakeStreamResponse(nd(
++            {"message": {"role": "assistant", "content": "Ha"}, "done": False},
++            {"message": {"role": "assistant", "content": "lo"}, "done": False},
++            {"message": {"role": "assistant", "content": ""}, "done": True,
++             "prompt_eval_count": 10, "eval_count": 3},
++        ))
++
++        result, sink, calls = self.stream(response)
++
++        self.assertEqual(sink.deltas, ["Ha", "lo"])
++        self.assertEqual(result["message"]["content"], "Halo")
++        self.assertEqual(result["message"]["tool_calls"], [])
++        self.assertEqual(result["usage"], {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13})
++        self.assertTrue(result["streamed"])
++        self.assertTrue(calls[0]["json"]["stream"])
++        self.assertTrue(calls[0]["stream"])
++        self.assertTrue(response.closed)
++
++    def test_tool_calls_are_collected_and_thinking_is_not_a_delta(self):
++        call = {"function": {"name": "ping", "arguments": {"target": "1.1.1.1"}}}
++        response = FakeStreamResponse(nd(
++            {"message": {"role": "assistant", "content": "", "thinking": "mikir dulu"}, "done": False},
++            {"message": {"role": "assistant", "content": "Cek ya", "tool_calls": [call]}, "done": False},
++            {"message": {"role": "assistant", "content": ""}, "done": True},
++        ))
++
++        result, sink, _ = self.stream(response)
++
++        self.assertEqual(sink.deltas, ["Cek ya"])
++        self.assertEqual(result["message"]["tool_calls"], [call])
++        self.assertNotIn("mikir", json.dumps(result))
++
++    def test_stream_without_done_is_a_connection_error(self):
++        response = FakeStreamResponse(nd({"message": {"content": "sebagian"}, "done": False}))
++
++        result, sink, _ = self.stream(response)
++
++        self.assertEqual(result["error_type"], "connection")
++        self.assertNotIn("message", result)
++        self.assertEqual(sink.deltas, ["sebagian"])          # sudah terlanjur diteruskan
++
++    def test_error_line_and_invalid_json(self):
++        result, _, _ = self.stream(FakeStreamResponse(nd({"error": "model not found"})))
++        self.assertIn("model not found", result["error"])
++        self.assertEqual(result["error_type"], "other")
++
++        result, _, _ = self.stream(FakeStreamResponse([b"{bukan json"]))
++        self.assertEqual(result["error_type"], "other")
++
++    def test_connection_dropped_midway_is_transient_connection_error(self):
++        response = FakeStreamResponse(
++            nd({"message": {"content": "sebagi"}, "done": False})
++            + [requests.exceptions.ChunkedEncodingError("putus")]
++        )
++
++        result, _, _ = self.stream(response)
++
++        self.assertEqual(result["error_type"], "connection")
++        self.assertIn(result["error_type"], pc.TRANSIENT_ERROR_TYPES)
++
++    def test_model_without_tools_support_is_retried_without_tools(self):
++        first = FakeStreamResponse(status=400, body=b'{"error":"registry.ollama.ai/x does not support tools"}')
++        second = FakeStreamResponse(nd({"message": {"content": "ok"}, "done": True}))
++
++        result, sink, calls = self.stream((first, second))
++
++        self.assertIn("tools", calls[0]["json"])
++        self.assertNotIn("tools", calls[1]["json"])
++        self.assertEqual(sink.deltas, ["ok"])
++        self.assertTrue(result["streamed"])
++
++    def test_http_errors_are_classified(self):
++        result, _, _ = self.stream(FakeStreamResponse(status=429, body=b"slow down"))
++        self.assertEqual(result["error_type"], "rate_limit")
++
++        result, _, _ = self.stream(FakeStreamResponse(status=500, body=b"boom"))
++        self.assertEqual(result["error_type"], "other")
++
++    def test_stream_unsupported_is_reported_distinctly(self):
++        result, _, _ = self.stream(FakeStreamResponse(status=400, body=b'{"error":"streaming is not supported"}'))
++        self.assertEqual(result["error_type"], "stream_unsupported")
++
++    def test_cancel_stops_reading_and_closes_connection(self):
++        cancel = threading.Event()
++        response = FakeStreamResponse(nd(
++            {"message": {"content": "a"}, "done": False},
++            {"message": {"content": "b"}, "done": False},
++            {"message": {"content": "c"}, "done": False},
++            {"message": {"content": ""}, "done": True},
++        ))
++        seen = []
++
++        def on_delta(text):
++            seen.append(text)
++            cancel.set()
++
++        patcher, _ = patch_post(response)
++        with patcher:
++            result = ProviderClient.chat_stream(
++                "ollama", "m", [], None, on_delta=on_delta, cancel_event=cancel,
++            )
++
++        self.assertTrue(result["cancelled"])
++        self.assertEqual(result["error_type"], "cancelled")
++        self.assertEqual(seen, ["a"])                       # tidak ada delta baru sesudah Stop
++        self.assertLessEqual(response.read_lines, 2)        # Stop dicek saat chunk berikutnya tiba; sisanya tidak dibaca
++        self.assertTrue(response.closed)
++
++    def test_broken_sink_does_not_break_the_call(self):
++        response = FakeStreamResponse(nd({"message": {"content": "x"}, "done": True}))
++        patcher, _ = patch_post(response)
++
++        def bad(text):
++            raise RuntimeError("sink rusak")
++
++        with patcher, self.assertLogs("aira.rei.provider_client", level="ERROR"):
++            result = ProviderClient.chat_stream("ollama", "m", [], None, on_delta=bad)
++
++        self.assertEqual(result["message"]["content"], "x")
++
++    def test_payload_of_non_streaming_call_is_unchanged(self):
++        # _chat_ollama memakai helper payload yang sama: bentuknya harus tetap.
++        payload = pc._ollama_payload("m", [{"role": "user", "content": "x"}], None, None, None, None, stream=False)
++        self.assertEqual(payload, {"model": "m", "messages": [{"role": "user", "content": "x"}], "stream": False})
++
++        payload = pc._ollama_payload("m", [], [{"t": 1}], 0.2, 50, False, stream=True)
++        self.assertEqual(payload, {
++            "model": "m", "messages": [], "stream": True, "tools": [{"t": 1}],
++            "options": {"temperature": 0.2, "num_predict": 50}, "think": False,
++        })
++
++
++# ============================================================ 1b. PROVIDER: OPENAI-COMPATIBLE SSE
++
++class TestOpenAIStream(unittest.TestCase):
++
++    def setUp(self):
++        ENV_KEY.start()
++        self.addCleanup(ENV_KEY.stop)
++
++    def stream(self, *responses, provider="openrouter", tools=None, **kwargs):
++        patcher, calls = patch_post(*responses)
++        sink = Collector()
++        with patcher:
++            result = ProviderClient.chat_stream(
++                provider, "test/model", [{"role": "user", "content": "hi"}], tools,
++                on_delta=sink, **kwargs,
++            )
++        return result, sink, calls
++
++    def sse_response(self, *lines, **kwargs):
++        return FakeStreamResponse(lines, headers={"Content-Type": "text/event-stream"}, **kwargs)
++
++    def test_deltas_comments_and_usage(self):
++        lines = [b": OPENROUTER PROCESSING", b""] + sse(
++            oa(content="Ha"), oa(content="lo"), oa(finish="stop"),
++            {"choices": [], "usage": {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9}},
++        )
++
++        result, sink, calls = self.stream(self.sse_response(*lines))
++
++        self.assertEqual(sink.deltas, ["Ha", "lo"])
++        self.assertEqual(result["message"]["content"], "Halo")
++        self.assertEqual(result["usage"]["total_tokens"], 9)
++        self.assertTrue(result["streamed"])
++        self.assertTrue(calls[0]["json"]["stream"])
++        self.assertEqual(calls[0]["json"]["stream_options"], {"include_usage": True})
++        self.assertEqual(calls[0]["headers"]["Authorization"], "Bearer test-key")
++
++    def test_tool_call_fragments_are_merged_per_index(self):
++        lines = sse(
++            oa(tool_calls=[{"index": 0, "id": "call_a", "function": {"name": "ping", "arguments": ""}}]),
++            oa(tool_calls=[{"index": 0, "function": {"arguments": '{"tar'}}]),
++            oa(tool_calls=[{"index": 0, "function": {"arguments": 'get":"1.1.1.1"}'}}]),
++            oa(tool_calls=[{"index": 1, "id": "call_b", "function": {"name": "get_routes", "arguments": '{"device_name":"R1"}'}}]),
++            oa(finish="tool_calls"),
++        )
++
++        result, sink, _ = self.stream(self.sse_response(*lines))
++
++        calls = result["message"]["tool_calls"]
++        self.assertEqual([c["id"] for c in calls], ["call_a", "call_b"])
++        self.assertEqual([c["function"]["name"] for c in calls], ["ping", "get_routes"])
++        self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"target": "1.1.1.1"})
++        self.assertEqual(json.loads(calls[1]["function"]["arguments"]), {"device_name": "R1"})
++        self.assertEqual(sink.deltas, [])
++        self.assertEqual(result["message"]["content"], "")          # bukan marker kosong: ada tool_calls
++
++    def test_tool_calls_without_index_are_split_by_id(self):
++        lines = sse(
++            oa(tool_calls=[{"id": "x1", "function": {"name": "ping", "arguments": '{"target":"a"}'}}]),
++            oa(tool_calls=[{"id": "x2", "function": {"name": "nslookup", "arguments": '{"target":"b"}'}}]),
++            oa(finish="tool_calls"),
++        )
++
++        result, _, _ = self.stream(self.sse_response(*lines))
++
++        self.assertEqual([c["function"]["name"] for c in result["message"]["tool_calls"]], ["ping", "nslookup"])
++
++    def test_finish_reason_is_enough_without_done_marker(self):
++        result, sink, _ = self.stream(self.sse_response(*sse(oa(content="ok"), oa(finish="stop"), done=False)))
++
++        self.assertEqual(result["message"]["content"], "ok")
++        self.assertTrue(result["streamed"])
++
++    def test_truncated_stream_is_a_transient_error_not_a_partial_answer(self):
++        result, sink, _ = self.stream(self.sse_response(*sse(oa(content="sebagian"), done=False)))
++
++        self.assertEqual(result["error_type"], "connection")
++        self.assertNotIn("message", result)
++
++    def test_error_chunk_mid_stream(self):
++        lines = sse({"error": {"code": 429, "message": "limit"}}, done=False)
++        result, _, _ = self.stream(self.sse_response(*lines))
++        self.assertEqual(result["error_type"], "rate_limit")
++
++        lines = sse({"error": {"code": 500, "message": "x"}}, done=False)
++        result, _, _ = self.stream(self.sse_response(*lines))
++        self.assertEqual(result["error_type"], "other")
++
++        result, _, _ = self.stream(self.sse_response(*sse(oa(finish="error"), done=False)))
++        self.assertEqual(result["error_type"], "other")
++
++    def test_invalid_json_chunk(self):
++        result, _, _ = self.stream(self.sse_response(b"data: {rusak", b""))
++        self.assertEqual(result["error_type"], "other")
++
++    def test_provider_rejecting_stream_options_is_retried_without_them(self):
++        first = FakeStreamResponse(status=400, body=b'{"error":"Unknown field: stream_options"}')
++        second = self.sse_response(*sse(oa(content="ok"), oa(finish="stop")))
++
++        result, sink, calls = self.stream(first, second)
++
++        self.assertIn("stream_options", calls[0]["json"])
++        self.assertNotIn("stream_options", calls[1]["json"])
++        self.assertEqual(sink.deltas, ["ok"])
++        self.assertIsNone(result["usage"])
++
++    def test_provider_ignoring_stream_returns_honest_non_streamed_result(self):
++        body = json.dumps({
++            "choices": [{"message": {"role": "assistant", "content": "utuh"}}],
++            "usage": {"total_tokens": 5},
++        }).encode()
++        response = FakeStreamResponse(headers={"Content-Type": "application/json"}, body=body)
++
++        result, sink, _ = self.stream(response)
++
++        self.assertFalse(result["streamed"])
++        self.assertEqual(result["message"]["content"], "utuh")
++        self.assertEqual(sink.deltas, [])                    # tidak ada delta palsu
++
++    def test_stream_unsupported_error(self):
++        result, _, _ = self.stream(FakeStreamResponse(status=400, body=b"stream is not supported for this model"))
++        self.assertEqual(result["error_type"], "stream_unsupported")
++
++    def test_missing_key_and_unknown_provider(self):
++        with mock.patch.dict(os.environ, {"OPENROUTER_API": ""}):
++            result, _, _ = self.stream()
++        self.assertEqual(result["error_type"], "other")
++        self.assertIn("OPENROUTER_API", result["error"])
++
++        result = ProviderClient.chat_stream("tidak-ada", "m", [], on_delta=Collector())
++        self.assertEqual(result["error_type"], "other")
++
++    def test_cancel_closes_the_connection(self):
++        cancel = threading.Event()
++        response = self.sse_response(*sse(oa(content="a"), oa(content="b"), oa(finish="stop")))
++        seen = []
++
++        def on_delta(text):
++            seen.append(text)
++            cancel.set()
++
++        patcher, _ = patch_post(response)
++        with patcher:
++            result = ProviderClient.chat_stream(
++                "openrouter", "m", [], None, on_delta=on_delta, cancel_event=cancel,
++            )
++
++        self.assertTrue(result["cancelled"])
++        self.assertEqual(seen, ["a"])
++        self.assertTrue(response.closed)
++
++
++# ============================================================ 2. STREAMING NYATA (server HTTP lokal)
++
++class GatedServer:
++    """
++    Server chunked 127.0.0.1. Item `script` berupa bytes (dikirim sebagai satu
++    HTTP chunk lalu di-flush) atau threading.Event ("gate": server MENUNGGU
++    sampai test men-set-nya). Hasil tiap gate dicatat di `gates`.
++    """
++
++    def __init__(self, content_type, script):
++        outer = self
++        self.gates, self.body = [], None
++
++        class Handler(BaseHTTPRequestHandler):
++            protocol_version = "HTTP/1.1"
++
++            def log_message(self, *args):
++                pass
++
++            def do_POST(self):
++                length = int(self.headers.get("Content-Length", 0))
++                outer.body = json.loads(self.rfile.read(length))
++                self.send_response(200)
++                self.send_header("Content-Type", content_type)
++                self.send_header("Transfer-Encoding", "chunked")
++                self.send_header("Connection", "close")
++                self.end_headers()
++                self.close_connection = True
++
++                for item in script:
++                    if isinstance(item, threading.Event):
++                        outer.gates.append(item.wait(3))
++                        continue
++                    self.wfile.write(f"{len(item):x}\r\n".encode() + item + b"\r\n")
++                    self.wfile.flush()
++
++                self.wfile.write(b"0\r\n\r\n")
++                self.wfile.flush()
++
++        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
++        self.port = self.httpd.server_address[1]
++        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
++
++    def __enter__(self):
++        self.thread.start()
++        return self
++
++    def __exit__(self, *exc):
++        self.httpd.shutdown()
++        self.httpd.server_close()
++
++
++class TestRealIncrementalDelivery(unittest.TestCase):
++    """Bukti bahwa chunk sampai ke client SELAGI respons masih berjalan."""
++
++    def setUp(self):
++        env = mock.patch.dict(os.environ, {
++            "OPENROUTER_API": "test-key", "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
++        })
++        env.start()
++        self.addCleanup(env.stop)
++
++    def endpoints(self, port):
++        patcher = mock.patch.dict(pc.DEFAULT_ENDPOINTS, {
++            "ollama": f"http://127.0.0.1:{port}", "openrouter": f"http://127.0.0.1:{port}/v1",
++        })
++        patcher.start()
++        self.addCleanup(patcher.stop)
++
++    def test_ollama_first_chunk_is_delivered_before_server_sends_the_rest(self):
++        gate = threading.Event()
++        script = [
++            json.dumps({"message": {"content": "Halo "}, "done": False}).encode() + b"\n",
++            gate,                                                    # server tahan sampai delta 1 diterima
++            json.dumps({"message": {"content": "dunia"}, "done": False}).encode() + b"\n",
++            json.dumps({"message": {"content": ""}, "done": True, "prompt_eval_count": 4, "eval_count": 2}).encode() + b"\n",
++        ]
++        deltas = []
++
++        def on_delta(text):
++            deltas.append(text)
++            gate.set()
++
++        with GatedServer("application/x-ndjson", script) as server:
++            self.endpoints(server.port)
++            result = ProviderClient.chat_stream("ollama", "m", [{"role": "user", "content": "hi"}], None, on_delta=on_delta)
++
++        self.assertEqual(server.gates, [True], "client membuffer respons: delta pertama tidak tiba sebelum respons selesai")
++        self.assertEqual(deltas, ["Halo ", "dunia"])
++        self.assertEqual(result["message"]["content"], "Halo dunia")
++        self.assertTrue(result["streamed"])
++        self.assertTrue(server.body["stream"])
++
++    def test_sse_first_chunk_is_delivered_before_server_sends_the_rest(self):
++        gate = threading.Event()
++
++        def frame(obj):
++            return b"data: " + json.dumps(obj).encode() + b"\n\n"
++
++        script = [
++            b": OPENROUTER PROCESSING\n\n",
++            frame(oa(content="Ha")),
++            gate,
++            frame(oa(content="lo")),
++            frame(oa(finish="stop")),
++            b"data: [DONE]\n\n",
++        ]
++        deltas = []
++
++        def on_delta(text):
++            deltas.append(text)
++            gate.set()
++
++        with GatedServer("text/event-stream", script) as server:
++            self.endpoints(server.port)
++            result = ProviderClient.chat_stream(
++                "openrouter", "m", [{"role": "user", "content": "hi"}], None, on_delta=on_delta,
++            )
++
++        self.assertEqual(server.gates, [True], "client membuffer respons: delta pertama tidak tiba sebelum respons selesai")
++        self.assertEqual(deltas, ["Ha", "lo"])
++        self.assertEqual(result["message"]["content"], "Halo")
++        self.assertTrue(result["streamed"])
++
++    def test_call_model_streams_through_the_real_http_stack(self):
++        gate = threading.Event()
++        script = [
++            b"data: " + json.dumps(oa(content="A")).encode() + b"\n\n",
++            gate,
++            b"data: " + json.dumps(oa(content="B")).encode() + b"\n\n",
++            b"data: " + json.dumps(oa(finish="stop")).encode() + b"\n\n",
++            b"data: [DONE]\n\n",
++        ]
++        events = []
++
++        class Sink:
++            def start(self, model):
++                events.append(("start", model["id"]))
++
++            def delta(self, text):
++                events.append(("delta", text))
++                gate.set()
++
++        with tempfile.TemporaryDirectory() as tmp, GatedServer("text/event-stream", script) as server:
++            self.endpoints(server.port)
++            _, policy, router = make_env(tmp)
++            glm = router.select(TaskClassification(primary_label="coding"))
++
++            result = call_model([{"role": "user", "content": "hi"}], [], glm, policy=policy, router=router, stream=Sink())
++
++        self.assertEqual(server.gates, [True])
++        self.assertEqual(events, [("start", "glm"), ("delta", "A"), ("delta", "B")])
++        self.assertEqual(result["message"]["content"], "AB")
++        self.assertEqual(result["model"]["id"], "glm")
++        self.assertTrue(result["streamed"])
++
++
++# ============================================================ 3. call_model
++
++class RecordingSink:
++    def __init__(self):
++        self.events = []
++
++    def start(self, model):
++        self.events.append(("start", model["id"], model["fallback_from"]))
++
++    def delta(self, text):
++        self.events.append(("delta", text))
++
++
++def stream_ok(*chunks):
++    def step(on_delta):
++        for chunk in chunks:
++            on_delta(chunk)
++        return {
++            "message": {"role": "assistant", "content": "".join(chunks), "tool_calls": []},
++            "usage": None, "streamed": True,
++        }
++    return step
++
++
++def stream_fail(*chunks, error="putus", error_type="connection", **extra):
++    def step(on_delta):
++        for chunk in chunks:
++            on_delta(chunk)
++        return {"error": error, "error_type": error_type, **extra}
++    return step
++
++
++def scripted_stream(*steps):
++    calls = []
++
++    def fake(**kwargs):
++        step = steps[len(calls)]
++        calls.append(kwargs)
++        return step(kwargs["on_delta"])
++
++    return fake, calls
++
++
++class TestCallModelStreaming(unittest.TestCase):
++
++    def setUp(self):
++        self._tmp = tempfile.TemporaryDirectory()
++        self.addCleanup(self._tmp.cleanup)
++        self.store, self.policy, self.router = make_env(self._tmp.name)
++        self.glm = self.router.select(TaskClassification(primary_label="coding"))
++
++        sleep = mock.patch.object(pc.time, "sleep")
++        sleep.start()
++        self.addCleanup(sleep.stop)
++
++        forbidden = mock.patch.object(ProviderClient, "chat", side_effect=AssertionError("jalur non-streaming dipakai"))
++        self.chat = forbidden.start()
++        self.addCleanup(forbidden.stop)
++
++    def run_call(self, *steps, sink="default", cancel_event=None):
++        fake, calls = scripted_stream(*steps)
++        sink = RecordingSink() if sink == "default" else sink
++
++        with mock.patch.object(ProviderClient, "chat_stream", fake):
++            result = call_model(
++                [{"role": "user", "content": "hi"}], [], self.glm,
++                policy=self.policy, router=self.router, stream=sink, cancel_event=cancel_event,
++            )
++
++        return result, sink, calls
++
++    def test_success_emits_start_then_deltas_and_reports_model(self):
++        result, sink, calls = self.run_call(stream_ok("Ha", "lo"))
++
++        self.assertEqual(sink.events, [("start", "glm", None), ("delta", "Ha"), ("delta", "lo")])
++        self.assertEqual(result["message"]["content"], "Halo")
++        self.assertEqual(result["model"]["id"], "glm")
++        self.assertTrue(result["streamed"])
++        self.assertEqual(calls[0]["model"], "test/glm-5.2")
++        self.assertIsNone(calls[0]["cancel_event"])
++
++    def test_without_sink_the_old_non_streaming_path_is_used_unchanged(self):
++        self.chat.side_effect = None
++        self.chat.return_value = {"message": {"role": "assistant", "content": "ok", "tool_calls": []}, "usage": None}
++
++        with mock.patch.object(ProviderClient, "chat_stream", side_effect=AssertionError("stream dipakai")):
++            result = call_model([{"role": "user", "content": "hi"}], [], self.glm, policy=self.policy, router=self.router)
++
++        self.assertEqual(result["message"]["content"], "ok")
++        self.assertNotIn("streamed", result)
++        self.assertEqual(self.chat.call_args.kwargs["model"], "test/glm-5.2")
++
++    def test_transient_error_retries_and_restarts_the_stream(self):
++        self.assertTrue(self.store.set_policy(retry_provider=1)["success"])
++
++        result, sink, calls = self.run_call(stream_fail("sebagi"), stream_ok("Halo"))
++
++        self.assertEqual(len(calls), 2)
++        self.assertEqual(sink.events, [
++            ("start", "glm", None), ("delta", "sebagi"),
++            ("start", "glm", None), ("delta", "Halo"),         # start baru = buffer client dikosongkan
++        ])
++        self.assertEqual(result["message"]["content"], "Halo")
++
++    def test_provider_failure_falls_back_to_policy_model_and_streams_from_it(self):
++        with EventCapture("model.failed", "model.fallback") as cap:
++            result, sink, calls = self.run_call(
++                stream_fail("par", error="boom", error_type="other"), stream_ok("dari fallback"),
++            )
++
++        self.assertEqual(sink.events, [
++            ("start", "glm", None), ("delta", "par"),
++            ("start", "gemma3", "glm"), ("delta", "dari fallback"),
++        ])
++        self.assertEqual(result["model"]["id"], "gemma3")
++        self.assertEqual([c["model"] for c in calls], ["test/glm-5.2", "test/gemma3"])
++        self.assertEqual(len(cap.of("model.failed")), 1)
++        self.assertEqual(cap.of("model.fallback")[0]["to"], "gemma3")
++
++    def test_all_models_failing_returns_error_without_cancelled_flag(self):
++        result, sink, _ = self.run_call(
++            stream_fail(error="satu", error_type="other"), stream_fail(error="dua", error_type="other"),
++        )
++
++        self.assertEqual(result, {"error": "dua"})
++        self.assertEqual([e[0] for e in sink.events], ["start", "start"])
++
++    def test_stream_unsupported_falls_back_to_non_streaming_on_same_model(self):
++        self.chat.side_effect = None
++        self.chat.return_value = {"message": {"role": "assistant", "content": "utuh", "tool_calls": []}, "usage": None}
++
++        result, sink, calls = self.run_call(
++            stream_fail(error="no stream", error_type="stream_unsupported"),
++        )
++
++        self.assertEqual(len(calls), 1)
++        self.assertEqual(self.chat.call_args.kwargs["model"], "test/glm-5.2")
++        self.assertEqual(sink.events, [("start", "glm", None)])          # tanpa delta palsu
++        self.assertEqual(result["message"]["content"], "utuh")
++        self.assertFalse(result["streamed"])
++        self.assertEqual(result["model"]["id"], "glm")
++
++    def test_cancelled_returns_immediately_without_retry_fallback_or_failed_event(self):
++        self.assertTrue(self.store.set_policy(retry_provider=3)["success"])
++        cancel = threading.Event()
++
++        with EventCapture("model.failed", "model.fallback") as cap:
++            result, sink, calls = self.run_call(
++                stream_fail(error="Dibatalkan", error_type="cancelled", cancelled=True),
++                cancel_event=cancel,
++            )
++
++        self.assertEqual(len(calls), 1)
++        self.assertIs(calls[0]["cancel_event"], cancel)
++        self.assertTrue(result["cancelled"])
++        self.assertEqual(result["error_type"], "cancelled")
++        self.assertEqual(cap.events, [])
++
++    def test_broken_sink_never_breaks_the_call(self):
++        class Bad:
++            def start(self, model):
++                raise RuntimeError("start rusak")
++
++            def delta(self, text):
++                raise RuntimeError("delta rusak")
++
++        with self.assertLogs("aira.rei.provider_client", level="ERROR"):
++            result, _, _ = self.run_call(stream_ok("a", "b"), sink=Bad())
++
++        self.assertEqual(result["message"]["content"], "ab")
++
++
++# ============================================================ 4. PLANNER
++
++try:
++    import agents.rei.planner as planner_module
++    from agents.rei.planner import Planner
++    PLANNER_ERROR = None
++except ImportError as exc:                       # dependency runtime belum terpasang
++    planner_module, Planner, PLANNER_ERROR = None, None, exc
++
++
++class FakeTracker:
++    last_usage = None
++
++    def add(self, usage):
++        self.last_usage = usage
++
++    def as_dict(self):
++        return {}
++
++
++class FakeMemory:
++    def __init__(self, session_id="s-test"):
++        self.session_id = session_id
++        self.history = []
++        self.token_tracker = FakeTracker()
++
++    def add_user(self, content):
++        self.history.append({"role": "user", "content": content})
++
++    def add_message(self, message):
++        self.history.append(message)
++
++    def add_tool_result(self, content, tool_call_id=None):
++        self.history.append({"role": "tool", "content": content, "tool_call_id": tool_call_id})
++
++    def get_messages(self, system_prompt):
++        return [{"role": "system", "content": system_prompt}] + self.history
++
++
++CONTEXT = types.SimpleNamespace(system_prompt="SYS")
++PING = {"id": "c1", "function": {"name": "ping", "arguments": {"target": "1.1.1.1"}}}
++
++
++def say(*chunks, tool_calls=None):
++    """Langkah call_model palsu yang bersikap seperti provider streaming."""
++    def step(sink, messages):
++        if sink is not None:
++            sink.start(MODEL)
++            for chunk in chunks:
++                sink.delta(chunk)
++        return {
++            "message": {"role": "assistant", "content": "".join(chunks), "tool_calls": tool_calls or []},
++            "usage": None, "streamed": sink is not None,
++        }
++    return step
++
++
++def fail_with(error, *chunks, **extra):
++    def step(sink, messages):
++        if sink is not None:
++            sink.start(MODEL)
++            for chunk in chunks:
++                sink.delta(chunk)
++        return {"error": error, **extra}
++    return step
++
++
++def scripted_call_model(*steps):
++    calls = []
++
++    def fake(*args, **kwargs):
++        step = steps[len(calls)]
++        calls.append({"args": args, "kwargs": kwargs})
++        return step(kwargs.get("stream"), args[0])
++
++    return fake, calls
++
++
++class BusRecorder:
++    """Subscriber wildcard di Event Bus GLOBAL, difilter per session_id."""
++
++    def __init__(self, bus=event_bus, session_id=None):
++        self.bus, self.session_id, self.events, self._token = bus, session_id, [], None
++
++    def __enter__(self):
++        from core.events import WILDCARD
++        self._token = self.bus.subscribe(WILDCARD, self._on)
++        return self
++
++    def __exit__(self, *exc):
++        from core.events import WILDCARD
++        self.bus.unsubscribe(WILDCARD, self._token)
++
++    def _on(self, event):
++        if self.session_id is None or event.metadata.get("session_id") == self.session_id:
++            self.events.append(event)
++
++    def names(self, *prefixes):
++        return [e.event for e in self.events if not prefixes or e.event.startswith(prefixes)]
++
++    def of(self, name):
++        return [e for e in self.events if e.event == name]
++
++
++@unittest.skipIf(Planner is None, f"Planner tidak bisa diimpor: {PLANNER_ERROR}")
++class TestPlannerStreaming(unittest.TestCase):
++
++    def setUp(self):
++        self.saved = []
++        patch_extract = mock.patch.object(
++            planner_module, "extract_and_save_facts_async", lambda *a, **k: self.saved.append(a),
++        )
++        patch_extract.start()
++        self.addCleanup(patch_extract.stop)
++
++    def run_planner(self, *steps, stream=True, cancel_event=None, executor=None, session="s1", run="r1", memory=None):
++        fake, calls = scripted_call_model(*steps)
++        planner = Planner(tool_schemas=[], tool_category={"ping": "network"})
++        executor = executor or (lambda name, args: {"success": True, "output": "ok"})
++
++        with mock.patch.object(planner_module, "call_model", fake), \
++                BusRecorder(session_id=session) as recorder, \
++                event_scope(correlation_id=f"turn-{session}-{run}", session_id=session, run_id=run):
++            result = planner.run(
++                "halo", memory or FakeMemory(session), executor,
++                cancel_event=cancel_event, selected_model=None, context=CONTEXT, stream=stream,
++            )
++
++        return result, recorder, calls
++
++    def test_single_call_publishes_start_then_ordered_deltas(self):
++        result, recorder, calls = self.run_planner(say("Halo ", "dunia"))
++
++        self.assertEqual(result["answer"], "Halo dunia")
++        self.assertTrue(result["streamed"])
++        self.assertFalse(result["error"])
++        self.assertEqual(recorder.names("stream."), ["stream.start", "stream.delta", "stream.delta"])
++
++        start = recorder.of("stream.start")[0]
++        self.assertEqual(start.data["call"], 1)
++        self.assertEqual(start.data["attempt"], 1)
++        self.assertEqual(start.data["model"]["display_name"], "GLM 5.2")
++
++        deltas = recorder.of("stream.delta")
++        self.assertEqual([d.data["seq"] for d in deltas], [1, 2])
++        self.assertEqual("".join(d.data["text"] for d in deltas), result["answer"])
++        self.assertTrue(all(d.metadata["run_id"] == "r1" for d in deltas))       # session/run/correlation ikut scope
++        self.assertEqual(len({d.correlation_id for d in recorder.events}), 1)
++        self.assertEqual(calls[0]["kwargs"]["stream"].call, 1)
++
++    def test_tool_loop_streams_each_llm_call_and_answer_is_only_the_last(self):
++        result, recorder, _ = self.run_planner(
++            say("Saya cek dulu.", tool_calls=[PING]), say("Hasil: ", "OK"),
++        )
++
++        self.assertEqual(result["answer"], "Hasil: OK")                          # tanpa teks pengantar call 1
++        self.assertEqual(
++            recorder.names("stream.", "tool."),
++            ["stream.start", "stream.delta", "tool.start", "tool.progress", "tool.finish",
++             "stream.start", "stream.delta", "stream.delta"],
++        )
++        self.assertEqual([e.data["call"] for e in recorder.of("stream.start")], [1, 2])
++        self.assertEqual([e.data["seq"] for e in recorder.of("stream.delta")], [1, 1, 2])
++        self.assertTrue(result["streamed"])
++
++    def test_retry_or_fallback_inside_one_call_bumps_attempt_and_resets_seq(self):
++        def two_attempts(sink, messages):
++            sink.start(MODEL)
++            sink.delta("sebagian")
++            sink.start({**MODEL, "id": "gemma3", "fallback_from": "glm"})
++            sink.delta("lengkap")
++            return {"message": {"role": "assistant", "content": "lengkap", "tool_calls": []}, "usage": None, "streamed": True}
++
++        result, recorder, _ = self.run_planner(two_attempts)
++
++        starts = recorder.of("stream.start")
++        self.assertEqual([(s.data["call"], s.data["attempt"]) for s in starts], [(1, 1), (1, 2)])
++        self.assertEqual(starts[1].data["model"]["fallback_from"], "glm")
++        self.assertEqual(
++            [(d.data["attempt"], d.data["seq"], d.data["text"]) for d in recorder.of("stream.delta")],
++            [(1, 1, "sebagian"), (2, 1, "lengkap")],
++        )
++        self.assertEqual(result["answer"], "lengkap")
++
++    def test_empty_response_retry_reuses_the_same_sink_with_a_new_attempt(self):
++        empty = {"message": {"role": "assistant", "content": EMPTY_RESPONSE_MARKER, "tool_calls": []},
++                 "usage": None, "streamed": True}
++
++        def first(sink, messages):
++            sink.start(MODEL)
++            return empty
++
++        result, recorder, calls = self.run_planner(first, say("baru"))
++
++        self.assertIs(calls[0]["kwargs"]["stream"], calls[1]["kwargs"]["stream"])
++        self.assertEqual([(s.data["call"], s.data["attempt"]) for s in recorder.of("stream.start")], [(1, 1), (1, 2)])
++        self.assertEqual(result["answer"], "baru")
++
++    def test_non_streaming_turn_is_exactly_the_old_behaviour(self):
++        result, recorder, calls = self.run_planner(say("Halo"), stream=False)
++
++        self.assertEqual(result["answer"], "Halo")
++        self.assertFalse(result["streamed"])
++        self.assertEqual(recorder.names("stream."), [])
++        self.assertEqual(len(calls[0]["args"]), 3)                # (messages, tool_schemas, selected_model)
++        self.assertEqual(calls[0]["kwargs"], {})                  # tanpa stream/cancel_event
++
++    def test_default_run_is_non_streaming(self):
++        fake, calls = scripted_call_model(say("Halo"))
++        planner = Planner(tool_schemas=[])
++
++        with mock.patch.object(planner_module, "call_model", fake):
++            result = planner.run("halo", FakeMemory(), lambda n, a: {}, context=CONTEXT)
++
++        self.assertEqual(calls[0]["kwargs"], {})
++        self.assertFalse(result["streamed"])
++
++    def test_provider_error_after_partial_text_reports_error_and_answer_replaces_buffer(self):
++        result, recorder, _ = self.run_planner(fail_with("Semua model gagal", "sebagian"))
++
++        self.assertTrue(result["error"])
++        self.assertTrue(result["answer"].startswith("Terjadi error saat menghubungi model"))
++        self.assertFalse(result["streamed"])
++        self.assertEqual(recorder.names("stream.", "system."), ["stream.start", "stream.delta", "system.error"])
++        self.assertIsNone(result["token_usage"])
++
++    def test_cancelled_stream_returns_cancelled_without_error_event_or_memory_extraction(self):
++        cancel = threading.Event()
++        result, recorder, calls = self.run_planner(
++            fail_with("Dibatalkan", "sebagian", error_type="cancelled", cancelled=True), cancel_event=cancel,
++        )
++
++        self.assertTrue(result["cancelled"])
++        self.assertEqual(result["answer"], "")
++        self.assertNotIn("system.error", recorder.names())
++        self.assertEqual(self.saved, [])
++        self.assertIs(calls[0]["kwargs"]["cancel_event"], cancel)
++
++    def test_cancel_during_second_call_is_also_handled(self):
++        result, recorder, _ = self.run_planner(
++            say("cek", tool_calls=[PING]),
++            fail_with("Dibatalkan", "sebagian", error_type="cancelled", cancelled=True),
++        )
++
++        self.assertTrue(result["cancelled"])
++        self.assertNotIn("system.error", recorder.names())
++
++    def test_session_id_is_still_injected_for_session_aware_tools_while_streaming(self):
++        seen = []
++
++        def executor(name, args):
++            seen.append((name, args))
++            return {"success": True}
++
++        location = {"id": "c9", "function": {"name": "request_location_permission", "arguments": {"original_request": "aku dmn"}}}
++
++        self.run_planner(say("x", tool_calls=[location]), say("selesai"), executor=executor, session="sess-42")
++
++        self.assertEqual(seen[0][1]["session_id"], "sess-42")
++
++
++# ============================================================ 5. URUTAN + ISOLASI SESI (Planner -> Event Bus -> WS bridge)
++
++class FakeSender:
++    def __init__(self):
++        self.sent = []
++
++    async def __call__(self, session_id, payload):
++        self.sent.append((session_id, payload))
++
++    def of(self, session_id):
++        return [p for sid, p in self.sent if sid == session_id]
++
++
++class TestBridgeProtocol(unittest.TestCase):
++
++    def translate(self, name, data=None, **scope):
++        bus = EventBus()
++        bridge = WebSocketEventBridge(bus=bus, sender=FakeSender())
++        with event_scope(**scope):
++            event = bus.publish(name, data=data)
++        return bridge.translate(event)
++
++    def test_stream_events_map_to_underscore_ws_types(self):
++        self.assertEqual(STREAM_WS_EVENT_MAP, {
++            EventNames.STREAM_START: "stream_start", EventNames.STREAM_DELTA: "stream_delta",
++        })
++
++        session_id, payload = self.translate(
++            EventNames.STREAM_DELTA, {"call": 1, "attempt": 1, "seq": 3, "text": "Halo"},
++            session_id="s1", run_id="r1", correlation_id="c1",
++        )
++
++        self.assertEqual(session_id, "s1")
++        self.assertEqual(payload["type"], "stream_delta")
++        self.assertEqual(payload["data"], {
++            "call": 1, "attempt": 1, "seq": 3, "text": "Halo", "session_id": "s1", "run_id": "r1",
++        })
++        self.assertEqual(payload["correlation_id"], "c1")
++
++    def test_legacy_map_is_untouched(self):
++        self.assertNotIn(EventNames.STREAM_START, DEFAULT_WS_EVENT_MAP)
++        self.assertNotIn(EventNames.STREAM_DELTA, DEFAULT_WS_EVENT_MAP)
++
++    def test_custom_event_map_can_exclude_streaming(self):
++        bus = EventBus()
++        bridge = WebSocketEventBridge(bus=bus, sender=FakeSender(), event_map=DEFAULT_WS_EVENT_MAP)
++        with event_scope(session_id="s1", run_id="r1"):
++            event = bus.publish(EventNames.STREAM_DELTA, data={"text": "x"})
++        self.assertIsNone(bridge.translate(event))
++
++    def test_rest_turn_without_run_id_never_streams_to_a_socket(self):
++        self.assertIsNone(self.translate(EventNames.STREAM_DELTA, {"text": "x"}, session_id="s1"))
++
++    def test_stream_events_are_standard_events(self):
++        self.assertEqual(EventNames.STREAM_START, "stream.start")
++        self.assertEqual(EventNames.STREAM_DELTA, "stream.delta")
++        self.assertTrue({"stream.start", "stream.delta"} <= STANDARD_EVENTS)
++
++
++@unittest.skipIf(Planner is None, f"Planner tidak bisa diimpor: {PLANNER_ERROR}")
++class TestOrderingAndSessionIsolation(unittest.IsolatedAsyncioTestCase):
++
++    CHUNKS = 120
++
++    def fake_call_model(self, messages, tools, selected_model=None, **kwargs):
++        sink = kwargs["stream"]
++        tag = messages[-1]["content"]                       # "S1" / "S2"
++        sink.start(MODEL)
++        for i in range(self.CHUNKS):
++            sink.delta(f"{tag}-{i};")
++            if i % 7 == 0:
++                time.sleep(0.001)                          # beri kesempatan thread lain menyela
++        return {
++            "message": {"role": "assistant", "content": f"{tag}-selesai", "tool_calls": []},
++            "usage": None, "streamed": True,
++        }
++
++    def run_turn(self, session_id, run_id, tag):
++        planner = Planner(tool_schemas=[])
++        with event_scope(session_id=session_id, run_id=run_id):
++            return planner.run(tag, FakeMemory(session_id), lambda n, a: {}, context=CONTEXT, stream=True)
++
++    async def test_two_parallel_sessions_get_their_own_ordered_streams(self):
++        sender = FakeSender()
++        bridge = WebSocketEventBridge(bus=event_bus, sender=sender)
++        bridge.start(asyncio.get_running_loop())
++
++        try:
++            with mock.patch.object(planner_module, "call_model", self.fake_call_model), \
++                    mock.patch.object(planner_module, "extract_and_save_facts_async", lambda *a, **k: None):
++                r1, r2 = await asyncio.gather(
++                    asyncio.to_thread(self.run_turn, "s1", "r1", "S1"),
++                    asyncio.to_thread(self.run_turn, "s2", "r2", "S2"),
++                )
++
++            await bridge.flush()
++
++            # meniru ws.py: "response" (complete) dikirim SETELAH flush
++            await sender("s1", {"type": "response", "data": {"answer": r1["answer"]}})
++            await sender("s2", {"type": "response", "data": {"answer": r2["answer"]}})
++        finally:
++            await bridge.stop()
++
++        for sid, tag in (("s1", "S1"), ("s2", "S2")):
++            payloads = sender.of(sid)
++            types_ = [p["type"] for p in payloads]
++
++            self.assertEqual(types_[0], "thinking")
++            self.assertEqual(types_[1], "stream_start")
++            self.assertEqual(types_[2:-1], ["stream_delta"] * self.CHUNKS)
++            self.assertEqual(types_[-1], "response")                       # complete paling akhir
++
++            deltas = [p["data"] for p in payloads if p["type"] == "stream_delta"]
++            self.assertEqual([d["seq"] for d in deltas], list(range(1, self.CHUNKS + 1)))
++            self.assertEqual([d["text"] for d in deltas], [f"{tag}-{i};" for i in range(self.CHUNKS)])
++            self.assertTrue(all(d["session_id"] == sid for d in deltas))
++            self.assertEqual({d["run_id"] for d in deltas}, {"r1" if sid == "s1" else "r2"})
++
++    async def test_stream_events_precede_tool_events_and_response(self):
++        sender = FakeSender()
++        bridge = WebSocketEventBridge(bus=event_bus, sender=sender)
++        bridge.start(asyncio.get_running_loop())
++
++        steps = [say("Cek dulu.", tool_calls=[PING]), say("Selesai.")]
++        fake, _ = scripted_call_model(*steps)
++
++        try:
++            with mock.patch.object(planner_module, "call_model", fake), \
++                    mock.patch.object(planner_module, "extract_and_save_facts_async", lambda *a, **k: None):
++                result = await asyncio.to_thread(self.run_turn, "s1", "r1", "S1")
++
++            await bridge.flush()
++            await sender("s1", {"type": "response", "data": {"answer": result["answer"]}})
++        finally:
++            await bridge.stop()
++
++        types_ = [p["type"] for p in sender.of("s1")]
++        interesting = [t for t in types_ if t.startswith(("stream_", "tool_")) or t == "response"]
++
++        self.assertEqual(interesting, [
++            "stream_start", "stream_delta", "tool_start", "tool_progress", "tool_finish",
++            "stream_start", "stream_delta", "response",
++        ])
++
++
++# ============================================================ 6. FLAG STREAM
++
++class TestStreamFlag(unittest.TestCase):
++
++    def setUp(self):
++        env = mock.patch.dict(os.environ, {}, clear=False)
++        env.start()
++        self.addCleanup(env.stop)
++        os.environ.pop("AIRA_STREAMING", None)
++
++    def test_default_is_on(self):
++        self.assertTrue(stream_enabled_for_turn({"message": "hi"}))
++        self.assertTrue(stream_enabled_for_turn({"message": "hi", "stream": None}))
++
++    def test_client_can_opt_out_or_in(self):
++        self.assertFalse(stream_enabled_for_turn({"stream": False}))
++        self.assertTrue(stream_enabled_for_turn({"stream": True}))
++
++    def test_voice_turns_never_stream(self):
++        self.assertFalse(stream_enabled_for_turn({"stream": True}, is_voice_turn=True))
++
++    def test_server_kill_switch_overrides_the_client(self):
++        for value in ("0", "false", "OFF", " no "):
++            with mock.patch.dict(os.environ, {"AIRA_STREAMING": value}):
++                self.assertFalse(stream_enabled_for_turn({"stream": True}), value)
++
++        with mock.patch.dict(os.environ, {"AIRA_STREAMING": "1"}):
++            self.assertTrue(stream_enabled_for_turn({}))
++
++    def test_garbage_payload_is_safe(self):
++        self.assertTrue(stream_enabled_for_turn(None))
++        self.assertTrue(stream_enabled_for_turn("bukan-dict"))
++
++
++# ============================================================ 7. BRAIN
++
++try:
++    import core.brain as brain_module
++    BRAIN_ERROR = None
++except ImportError as exc:
++    brain_module, BRAIN_ERROR = None, exc
++
++
++class FakeClassifier:
++    def classify(self, prompt):
++        return TaskClassification(primary_label="networking", confidence=0.9)
++
++
++class FakeRouter:
++    def select(self, classification):
++        return None
++
++
++def make_orchestrator(accepts_stream, result=None):
++    calls = []
++    payload = result or {"answer": "ok", "steps": [], "error": False, "duration": 0.0}
++
++    if accepts_stream:
++        class Orchestrator:
++            def route(self, user_input, memory, cancel_event=None, selected_model=None, context=None, stream=False):
++                calls.append({"stream": stream})
++                return dict(payload)
++    else:
++        class Orchestrator:   # orchestrator/test double LAMA: tidak mengenal 'stream'
++            def route(self, user_input, memory, cancel_event=None, selected_model=None, context=None):
++                calls.append({})
++                return dict(payload)
++
++    Orchestrator.calls = calls
++    return Orchestrator
++
++
++@unittest.skipIf(brain_module is None, f"core.brain tidak bisa diimpor: {BRAIN_ERROR}")
++class TestBrainStreamFlag(unittest.TestCase):
++
++    def make_brain(self, orchestrator):
++        memory = types.SimpleNamespace(session_id="sess-1", history=[])
++        builder = types.SimpleNamespace(build=lambda *a, **k: None)
++
++        with mock.patch.multiple(
++            "core.brain", Orchestrator=orchestrator,
++            get_task_classifier=lambda: FakeClassifier(), get_model_router=lambda: FakeRouter(),
++        ):
++            return self.brain_module.Brain(memory, context_builder=builder)
++
++    brain_module = brain_module
++
++    def test_old_orchestrator_signature_still_works_and_stream_is_not_forced(self):
++        orchestrator = make_orchestrator(accepts_stream=False)
++        brain = self.make_brain(orchestrator)
++
++        response = brain.think("halo")
++
++        self.assertEqual(response.answer, "ok")
++        self.assertFalse(response.streamed)
++        self.assertEqual(orchestrator.calls, [{}])
++
++    def test_stream_false_is_not_passed_down(self):
++        orchestrator = make_orchestrator(accepts_stream=True)
++        brain = self.make_brain(orchestrator)
++
++        brain.think("halo", cancel_event=threading.Event(), stream=False)
++
++        self.assertEqual(orchestrator.calls, [{"stream": False}])       # default orchestrator, bukan diteruskan Brain
++
++    def test_stream_true_is_forwarded_and_streamed_flag_comes_back(self):
++        orchestrator = make_orchestrator(
++            accepts_stream=True, result={"answer": "utuh", "steps": [], "streamed": True, "duration": 0.1},
++        )
++        brain = self.make_brain(orchestrator)
++
++        response = brain.think("halo", stream=True)
++
++        self.assertEqual(orchestrator.calls, [{"stream": True}])
++        self.assertTrue(response.streamed)
++        self.assertEqual(response.answer, "utuh")                       # BrainResponse tetap utuh
++
++    def test_brain_response_stays_backward_compatible(self):
++        legacy = self.brain_module.BrainResponse("a", [], None, None, False, 0.0)
++        self.assertFalse(legacy.streamed)
++        self.assertFalse(self.brain_module.BrainResponse(answer="x").streamed)
++
++    def test_positional_think_call_used_by_ws_still_works(self):
++        orchestrator = make_orchestrator(accepts_stream=True)
++        brain = self.make_brain(orchestrator)
++
++        brain.think("halo", threading.Event(), True)                     # brain.think(msg, cancel_event, use_stream)
++
++        self.assertEqual(orchestrator.calls, [{"stream": True}])
++
++
++# ============================================================ 8. RUNTIME STATE
++
++try:
++    from core.runtime_state import RuntimeStateEngine, SUBSCRIBED_EVENTS
++    RUNTIME_ERROR = None
++except ImportError as exc:
++    RuntimeStateEngine, SUBSCRIBED_EVENTS, RUNTIME_ERROR = None, (), exc
++
++
++@unittest.skipIf(RuntimeStateEngine is None, f"Runtime State tidak tersedia: {RUNTIME_ERROR}")
++class TestRuntimeStateUnaffected(unittest.TestCase):
++
++    def test_stream_events_are_not_subscribed_by_the_engine(self):
++        self.assertFalse([name for name in SUBSCRIBED_EVENTS if name.startswith("stream.")])
++
++    @unittest.skipIf(Planner is None, f"Planner tidak bisa diimpor: {PLANNER_ERROR}")
++    def test_streaming_turn_goes_thinking_then_idle_and_nothing_else(self):
++        bus = EventBus()
++        engine = RuntimeStateEngine(bus)
++        engine.start()
++        changes = []
++        bus.subscribe("runtime.state_changed", lambda e: changes.append(e.data["state"]))
++        seen = []
++        bus.subscribe("*", lambda e: seen.append(e.event))
++
++        fake, _ = scripted_call_model(say("a", "b", "c"))
++        planner = Planner(tool_schemas=[])
++
++        with mock.patch.object(planner_module, "event_bus", bus), \
++                mock.patch.object(planner_module, "call_model", fake), \
++                mock.patch.object(planner_module, "extract_and_save_facts_async", lambda *a, **k: None), \
++                event_scope(correlation_id="turn-1", session_id="s1", run_id="r1"):
++            planner.run("halo", FakeMemory(), lambda n, a: {}, context=CONTEXT, stream=True)
++            self.assertEqual(engine.state, "THINKING")
++            bus.publish(EventNames.THINKING_FINISH)                       # ditutup Brain di kode asli
++
++        self.assertEqual(changes, ["THINKING", "IDLE"])
++        self.assertEqual(engine.state, "IDLE")
++        self.assertEqual(engine.stats()["transitions"], 2)
++        self.assertEqual(seen.count("stream.delta"), 3)                    # event stream benar-benar lewat bus
++
++
++if __name__ == "__main__":
++    unittest.main()
+--- a/docs/api_guideline.md
++++ b/docs/api_guideline.md
+@@ -65,8 +65,12 @@
+ 
+ Client sends:
+ ```json
+-{ "message": "ping ke google" }
++{ "message": "ping ke google", "run_id": "a1b2c3", "stream": true }
+ ```
++
++`run_id` (optional, client-generated) is echoed on every event of the turn so
++the client can drop stale events after **Stop**. `stream` (optional, default
++`true`) — see [Streaming](#streaming-sprint-25) below.
+ 
+ Server emits a stream of typed events for the same request:
+ 
+@@ -76,14 +80,110 @@
+ | `thinking` | Before/after each LLM call | `{ "message": "..." }` |
+ | `tool_start` | Before a tool executes | `{ "name", "category", "arguments" }` |
+ | `tool_finish` | After a tool executes | `{ "name", "category", "success", "duration" }` |
+-| `response` | Final answer for this turn | same shape as REST `/api/chat` response |
+-| `error` | Unrecoverable failure this turn | `{ "message": "..." }` |
++| `stream_start` | A request to the LLM provider begins (also on retry / fallback / the next LLM call after a tool) | `{ "call", "attempt", "model": {id, display_name, provider, fallback_from} }` |
++| `stream_delta` | A piece of text just received from the provider | `{ "call", "attempt", "seq", "text" }` |
++| `response` | **Complete** — final answer for this turn | same shape as REST `/api/chat` response, plus `"streamed": bool` |
++| `error` | Failure this turn | `{ "message": "...", "fatal"?: true }` |
++| `cancelled` | Turn stopped by the user | `{}` |
++
++Every event's `data` also carries `session_id` and `run_id`.
+ 
+ The WebSocket path calls the exact same `core.brain.Brain.think()` as the
+ REST path — it is a transport-only addition, not a parallel chat engine.
+ Reconnection with exponential backoff is handled client-side
+ (`useAiraSocket.js`); the server does not queue events across
+ disconnects.
++
++## Streaming (Sprint 2.5)
++
++Real provider streaming, not a sliced full response. A chunk is forwarded to
++the client the moment the provider sends it (verified against a local
++chunked HTTP server that withholds the rest of the body until the first chunk
++has arrived).
++
++### Provider capability
++
++| Provider | Wire format | Streamed content | Tool calls | Usage |
++|---|---|---|---|---|
++| `ollama` (`/api/chat`, `stream: true`) | NDJSON, one JSON object per line | `message.content` per line (`message.thinking` is **not** forwarded) | delivered whole in one line | final line (`prompt_eval_count`, `eval_count`) |
++| `openrouter`, `gemini`, `nvidia` (OpenAI-compatible, `stream: true`) | SSE `data: {...}` … `data: [DONE]` | `choices[0].delta.content` | fragments merged per `index` (or per `id` when `index` is missing) | last chunk via `stream_options.include_usage`; `null` if the provider ignores it |
++
++Fallbacks inside the provider client (`agents/rei/provider_client.py`):
++a provider that answers plain JSON instead of a stream → treated as
++non-streaming (`streamed: false`, no fake deltas); HTTP 4xx that mentions
++"stream" → same model is retried **non-streaming**; `stream_options`
++rejected → retried without it; Ollama "does not support tools" → retried
++without tools; stream cut before `finish_reason`/`[DONE]`/`done: true` →
++`connection` error (transient → retry, then policy fallback model). A cut
++stream is never accepted as a partial answer.
++
++### Contract
++
++Event order for one turn (all events carry `session_id`, `run_id`):
++
++```
++ack
++thinking
++stream_start   { call: 1, attempt: 1, model }
++stream_delta   { call: 1, attempt: 1, seq: 1, text }
++stream_delta   { call: 1, attempt: 1, seq: 2, text }
++…                                  ← LLM asked for tools:
++tool_start / tool_progress / tool_finish
++thinking
++stream_start   { call: 2, attempt: 1, model }
++stream_delta   …
++response       { answer, steps, streamed: true, … }     ← COMPLETE
++```
++
++| Contract name | WS event | Notes |
++|---|---|---|
++| start | `stream_start` | Begins a **fresh** text buffer for the assistant bubble. Sent once per provider request: a retry or fallback model produces another `stream_start` (`attempt` +1, `seq` restarts at 1, `model.fallback_from` set on fallback) — the client must **clear** its buffer. |
++| delta / chunk | `stream_delta` | Append `text` to the buffer. `seq` is 1-based and gapless within one `(call, attempt)`. |
++| complete | `response` | Authoritative. `answer` always replaces whatever was streamed. `streamed` says whether any provider call really streamed. |
++| error | `error` (`system.error` → `error`, or `fatal: true`) | If a `response` with `error: true` follows, its `answer` replaces the buffer. On a fatal `error` discard the buffer. |
++| stop | `cancelled` | Discard the buffer. |
++
++Rules a client can rely on:
++
++- One turn can contain several LLM **calls** (`call` = 1, 2, …): LLM → tools →
++  LLM. Text from a call that is followed by `tool_start` is only a preamble;
++  the final answer is the text of the last call, i.e. `response.answer`.
++- A turn where the provider does not stream (or `stream: false`) emits **no**
++  `stream_*` events; the client just receives `response`. Clients must
++  therefore render `response.answer` even if no delta arrived.
++- All `stream_delta`/`tool_*` events of a turn arrive **before** its `response`
++  (`ws.py` awaits `bridge.flush()` first); order within a session is FIFO.
++- Events of different sessions never mix (bridge filters on `session_id` +
++  `run_id`; REST turns have no `run_id` and never reach a socket).
++- Clients that do not know `stream_*` ignore them (unknown types are dropped),
++  so existing frontends keep working unchanged.
++- Rendering of Markdown / SVG / images / DIO forms stays entirely in the
++  frontend; `stream_delta.text` is raw model text. DIO `interaction_schema`
++  still arrives only in `response`.
++
++### Switches
++
++| Switch | Effect |
++|---|---|
++| `{"stream": false}` in the client message | That turn is non-streaming |
++| `AIRA_STREAMING=0` (env, server) | Streaming disabled for every WebSocket turn (kill switch) |
++| Voice turns (`voice_audio`) | Never stream (TTS reads the full answer) |
++| REST `POST /api/chat` | Always non-streaming; response unchanged |
++
++### Internal flow
++
++```
++ws.py  --think(msg, cancel_event, stream=True)-->  Brain  --route(..., stream=True)-->  Orchestrator
++   --> Planner.run(stream=True) --> call_model(stream=sink, cancel_event)
++   --> ProviderClient.chat_stream(on_delta)   (NDJSON / SSE)
++sink.start / sink.delta --> Event Bus: stream.start / stream.delta (+ session_id, run_id, correlation_id)
++   --> api/ws_bridge.py (STREAM_WS_EVENT_MAP) --> WebSocket
++```
++
++Retry, provider fallback (Model Policy), context check, Stop (`cancel_event`
++is checked on every chunk and closes the connection; no retry/fallback
++afterwards) and Runtime State (`thinking.start` … `thinking.finish` only —
++`stream.*` are not state events) behave as before.
+ 
+ ## Error conventions
+ 
+--- a/docs/architecture.md
++++ b/docs/architecture.md
+@@ -112,12 +112,13 @@
+ **Standard events** (`EventNames`): `chat.received`, `thinking.start/finish`,
+ `task.classified/started/finished`, `model.started/finished/failed/switched/
+ selected/fallback`, `tool.start/progress/finish`, `response.ready`,
+-`memory.saved`, `interaction.requested/started/generated/completed/cancelled`,
++`stream.start/delta` (Sprint 2.5), `memory.saved`, `interaction.requested/started/generated/completed/cancelled`,
+ `location.updated/cleared`, `system.error`.
+ 
+ Currently published: `chat.received`, `thinking.start/finish`,
+ `task.classified/started/finished`, `tool.*`, `response.ready`,
+-`system.error` (planner errors), `model.selected/fallback/failed`,
++`system.error` (planner errors), `stream.start/delta` (Planner, only when the
++turn streams), `model.selected/fallback/failed`,
+ `interaction.started/generated/completed/cancelled`, `location.*`,
+ `connection.*`, `file.*`. Defined but not yet published by anyone:
+ `model.started/finished/switched`, `memory.saved`, `interaction.requested`
+@@ -142,7 +143,7 @@
+   `api/main.py` startup (idempotently re-ensured when a socket connects).
+   It only forwards events that carry **both** `session_id` and `run_id`
+   (REST turns have no `run_id`, so they never leak into an open socket) and
+-  only those in `DEFAULT_WS_EVENT_MAP`:
++  only those in `DEFAULT_WS_EVENT_MAP` + `STREAM_WS_EVENT_MAP`:
+ 
+   | Event Bus | WebSocket `type` |
+   |---|---|
+@@ -151,8 +152,11 @@
+   | `tool.progress` | `tool_progress` |
+   | `tool.finish` | `tool_finish` |
+   | `system.error` | `error` |
+-
+-  The wire protocol seen by the frontend is unchanged.
++  | `stream.start` | `stream_start` |
++  | `stream.delta` | `stream_delta` |
++
++  The existing wire protocol is unchanged; `stream_*` are additive and
++  ignored by clients that do not know them.
+ - Protocol events owned by `ws.py` itself (`ack`, `transcript`,
+   `transcript_empty`, `response`, `cancelled`, fatal `error`) are still sent
+   directly. Before `response` / `cancelled` / fatal `error`, `ws.py` awaits
+@@ -161,6 +165,34 @@
+   legacy callback for callers that have not migrated; `ws.py` no longer
+   uses it.
+ 
++### LLM streaming (Sprint 2.5)
++
++Provider streaming is real end to end and rides the same path as the tool
++events, so ordering and session isolation come for free:
++
++```
++ProviderClient.chat_stream (NDJSON / SSE)  -- on_delta -->  call_model(stream=sink)
++   --> Planner _StreamPublisher --> Event Bus stream.start / stream.delta
++   --> WebSocketEventBridge (same FIFO queue as tool.*) --> client
++```
++
++- `Brain.think(..., stream=True)` → `Orchestrator.route(..., stream=True)` →
++  `Planner.run(..., stream=True)` → `call_model(..., stream=sink, cancel_event=...)`.
++  `stream` defaults to `False` at every layer; with `False` the code path is
++  the previous non-streaming one. Brain only forwards `stream` when it is
++  `True`, so an orchestrator/test double without that parameter still works.
++- Retry, Model Policy fallback and context check are unchanged; every
++  request to a provider (including retry/fallback) calls `sink.start()`, which
++  the client treats as "clear the buffer".
++- The final `BrainResponse` / WS `response` is still complete (`answer`
++  whole, plus `streamed`); it is the authoritative "complete" event.
++- Runtime State is untouched: it only reacts to `thinking.*`, `speech.*`,
++  `voice.listening.*` and `response.ready`, never to `stream.*`.
++- Kill switch: `AIRA_STREAMING=0`. Per-turn opt-out: `{"stream": false}`.
++
++Client-facing contract and provider capability table: see
++[`api_guideline.md`](api_guideline.md#streaming-sprint-25).
++
+ `api/ws_manager.py` tracks live connections per `session_id` and is
+ intentionally separate from `api/state.py` (which caches `ConversationMemory`
+ per session) — connection lifecycle and conversation state are different

@@ -27,18 +27,24 @@ Aturan penerusan:
   - Event harus punya metadata session_id DAN run_id (diisi ws.py lewat
     core.events.event_scope). Giliran REST (/api/chat) tidak punya run_id,
     jadi tidak pernah "bocor" ke WebSocket sesi yang kebetulan terbuka.
-  - Hanya event yang ada di peta DEFAULT_WS_EVENT_MAP yang diteruskan.
-    Event lain (response.ready, task.*, model.*, dst) tetap milik
-    subscriber lain (Logger, dst) dan TIDAK dikirim ke client.
+  - Hanya event yang ada di peta DEFAULT_WS_EVENT_MAP + STREAM_WS_EVENT_MAP
+    yang diteruskan. Event lain (response.ready, task.*, model.*, dst) tetap
+    milik subscriber lain (Logger, dst) dan TIDAK dikirim ke client.
   - Data dijadikan JSON-safe sebelum dikirim.
 
 Urutan terhadap event "response": ws.py memanggil `await bridge.flush()`
 sebelum mengirim response/error/cancelled, jadi semua tool_start/tool_finish
 tiba lebih dulu (perilaku yang sama dengan drain lama).
+
+Streaming (Sprint 2.5): stream.start / stream.delta dari Planner ikut lewat
+jalur yang SAMA (satu antrean FIFO, satu consumer), jadi urutan
+start -> delta* -> tool_* -> start -> delta* -> response terjaga, dan
+flush() sebelum "response" menjamin tidak ada delta yang tiba sesudahnya.
 """
 
 import asyncio
 import logging
+import os
 import threading
 import time
 from typing import Any, Awaitable, Callable, Optional
@@ -57,7 +63,41 @@ DEFAULT_WS_EVENT_MAP: dict[str, str] = {
     EventNames.SYSTEM_ERROR: "error",
 }
 
+# Streaming jawaban LLM (Sprint 2.5). Dipisah dari DEFAULT_WS_EVENT_MAP supaya
+# peta protokol lama tidak berubah; bridge memakai gabungan keduanya.
+#   stream_start : awal SATU request ke provider (juga saat retry/fallback -
+#                  client WAJIB mengosongkan buffer teks untuk bubble ini)
+#   stream_delta : potongan teks yang benar-benar baru diterima dari provider
+# "complete" = event "response" milik ws.py; "error" = event "error" di atas.
+STREAM_WS_EVENT_MAP: dict[str, str] = {
+    EventNames.STREAM_START: "stream_start",
+    EventNames.STREAM_DELTA: "stream_delta",
+}
+
 Sender = Callable[[str, dict], Awaitable[None]]
+
+_FALSE_VALUES = {"0", "false", "off", "no"}
+
+
+def stream_enabled_for_turn(raw: dict, is_voice_turn: bool = False) -> bool:
+    """
+    Apakah giliran WebSocket ini boleh streaming?
+
+      - AIRA_STREAMING=0|false|off|no  -> mati total (kill switch server).
+      - giliran suara                  -> tidak (TTS membacakan jawaban utuh).
+      - payload {"stream": false}      -> client memilih non-streaming.
+      - selain itu                     -> ya (default; client lama yang tidak
+                                          mengenal stream_* mengabaikannya).
+    """
+    if os.getenv("AIRA_STREAMING", "1").strip().lower() in _FALSE_VALUES:
+        return False
+
+    if is_voice_turn:
+        return False
+
+    flag = raw.get("stream") if isinstance(raw, dict) else None
+
+    return True if flag is None else bool(flag)
 
 
 async def _default_sender(session_id: str, payload: dict) -> None:
@@ -77,7 +117,11 @@ class WebSocketEventBridge:
     ):
         self._bus = bus if bus is not None else event_bus
         self._sender: Sender = sender or _default_sender
-        self._map = dict(event_map if event_map is not None else DEFAULT_WS_EVENT_MAP)
+        self._map = dict(
+            event_map
+            if event_map is not None
+            else {**DEFAULT_WS_EVENT_MAP, **STREAM_WS_EVENT_MAP}
+        )
 
         self._lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None

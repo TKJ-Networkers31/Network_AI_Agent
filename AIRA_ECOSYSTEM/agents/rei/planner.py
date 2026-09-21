@@ -16,7 +16,7 @@ Interaction schema (DIO):
 
 session_id:
   Tool di SESSION_AWARE_TOOLS menerima session_id yang disisipkan planner
-  dari memory.session_id (SessionMemory). LLM tidak diminta menyebutnya,
+  dari memory.session_id (SessionMemory). LLM tidak diminta menyebutkannya,
   dan 'arguments' di steps tetap argumen asli LLM.
 
 Stop:
@@ -34,6 +34,20 @@ Context:
   persona/waktu/memory/lokasi sendiri. Kalau context=None (pemanggil yang
   tidak lewat Brain), Planner meminta builder default membuatnya - tetap SATU
   jalur penyusunan konteks, tidak ada injeksi ganda.
+
+Streaming (Sprint 2.5):
+  run(..., stream=True) meneruskan sink ke call_model() sehingga provider
+  yang mendukung streaming benar-benar di-stream. Sink (_StreamPublisher)
+  hanya mempublish ke Event Bus:
+      stream.start   awal SATU request ke provider (juga retry / fallback /
+                     panggilan LLM berikutnya sesudah tool) -> {call, attempt,
+                     model{id, display_name, provider, fallback_from}}
+      stream.delta   potongan teks baru -> {call, attempt, seq, text}
+  Satu giliran bisa punya beberapa 'call' (LLM -> tool -> LLM). Teks dari call
+  yang berakhir dengan tool_calls hanyalah pengantar; jawaban final tetap
+  message.content dari call terakhir (answer di result), yang menjadi
+  "complete" dan selalu menggantikan buffer client. stream=False (default)
+  = jalur lama tanpa perubahan apa pun.
 """
 
 import json
@@ -58,6 +72,31 @@ DIO_SCHEMA_TOOLS = {"request_structured_input", "request_location_permission"}
 SESSION_AWARE_TOOLS = {"request_location_permission"}
 
 
+class _StreamPublisher:
+    """
+    Sink streaming untuk SATU panggilan LLM (satu 'call' dalam giliran).
+    Hanya menerjemahkan callback provider_client menjadi event Event Bus;
+    session_id/run_id/correlation_id ikut otomatis dari event_scope aktif.
+    """
+
+    def __init__(self, emit, call: int):
+        self._emit = emit
+        self.call = call
+        self.attempt = 0
+        self.seq = 0
+
+    def start(self, model: dict) -> None:
+        self.attempt += 1
+        self.seq = 0
+        self._emit(EventNames.STREAM_START, {"call": self.call, "attempt": self.attempt, "model": model})
+
+    def delta(self, text: str) -> None:
+        self.seq += 1
+        self._emit(EventNames.STREAM_DELTA, {
+            "call": self.call, "attempt": self.attempt, "seq": self.seq, "text": text,
+        })
+
+
 class Planner:
 
     def __init__(self, tool_schemas, tool_category=None, dangerous_tools=None):
@@ -65,7 +104,10 @@ class Planner:
         self.tool_category = tool_category or {}
         self.dangerous_tools = dangerous_tools or set()
 
-    def run(self, user_input, memory, tool_executor, cancel_event=None, selected_model=None, context=None):
+    def run(
+        self, user_input, memory, tool_executor, cancel_event=None, selected_model=None,
+        context=None, stream=False,
+    ):
 
         def emit(bus_event, payload):
             try:
@@ -87,6 +129,16 @@ class Planner:
 
         pending_interaction_schema = None
 
+        # Streaming: satu sink per panggilan LLM; streamed=True kalau ADA
+        # panggilan yang benar-benar di-stream oleh provider.
+        stream_state = {"calls": 0, "streamed": False}
+
+        def new_stream_sink():
+            if not stream:
+                return None
+            stream_state["calls"] += 1
+            return _StreamPublisher(emit, stream_state["calls"])
+
         def result_dict(answer, error=False, cancelled=False):
             return {
                 "answer": answer,
@@ -94,6 +146,7 @@ class Planner:
                 "token_usage": memory.token_tracker.last_usage,
                 "session_token_usage": memory.token_tracker.as_dict(),
                 "error": error,
+                "streamed": stream_state["streamed"],
                 "interaction_schema": None if cancelled else pending_interaction_schema,
                 **({"cancelled": True} if cancelled else {}),
             }
@@ -116,7 +169,13 @@ class Planner:
 
         system_prompt = context.system_prompt
 
-        response = self._call_with_retry(memory.get_messages(system_prompt), selected_model=selected_model)
+        response = self._call_with_retry(
+            memory.get_messages(system_prompt), selected_model=selected_model,
+            stream=new_stream_sink(), cancel_event=cancel_event,
+        )
+
+        if response.get("cancelled"):
+            return cancelled_result()
 
         if "error" in response:
             emit(EventNames.SYSTEM_ERROR, {"message": response["error"]})
@@ -125,6 +184,7 @@ class Planner:
             return out
 
         self._track_usage(memory, response)
+        stream_state["streamed"] = stream_state["streamed"] or bool(response.get("streamed"))
 
         tool_count = 0
         call_signatures = {}
@@ -256,21 +316,39 @@ class Planner:
 
             emit(EventNames.THINKING_START, {"message": "Menyusun jawaban..."})
 
-            response = self._call_with_retry(memory.get_messages(system_prompt), selected_model=selected_model)
+            response = self._call_with_retry(
+                memory.get_messages(system_prompt), selected_model=selected_model,
+                stream=new_stream_sink(), cancel_event=cancel_event,
+            )
+
+            if response.get("cancelled"):
+                return cancelled_result()
 
             if "error" in response:
                 emit(EventNames.SYSTEM_ERROR, {"message": response["error"]})
                 return result_dict(f"Terjadi error saat menghubungi model: {response['error']}", error=True)
 
             self._track_usage(memory, response)
+            stream_state["streamed"] = stream_state["streamed"] or bool(response.get("streamed"))
 
     def _track_usage(self, memory, response):
         usage = response.get("usage")
         if usage:
             memory.token_tracker.add(usage)
 
-    def _call_with_retry(self, messages, selected_model=None, max_retries=MAX_EMPTY_RESPONSE_RETRIES):
-        response = call_model(messages, self.tool_schemas, selected_model)
+    def _call_with_retry(
+        self, messages, selected_model=None, max_retries=MAX_EMPTY_RESPONSE_RETRIES,
+        stream=None, cancel_event=None,
+    ):
+        def call():
+            if stream is None:   # jalur lama: persis seperti sebelum Sprint 2.5
+                return call_model(messages, self.tool_schemas, selected_model)
+            return call_model(
+                messages, self.tool_schemas, selected_model,
+                stream=stream, cancel_event=cancel_event,
+            )
+
+        response = call()
         attempt = 0
 
         while (
@@ -280,7 +358,7 @@ class Planner:
         ):
             attempt += 1
             logger.info("Provider balas kosong, mencoba ulang (%d/%d)...", attempt, max_retries)
-            response = call_model(messages, self.tool_schemas, selected_model)
+            response = call()
 
         return response
 

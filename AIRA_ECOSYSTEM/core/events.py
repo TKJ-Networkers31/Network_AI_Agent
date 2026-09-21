@@ -67,6 +67,11 @@ PERUBAHAN (Worker 1 - Event Bus stabilization):
 5. _log_event hanya menyusun payload kalau level DEBUG aktif (Planner kini
    mem-publish banyak event per giliran).
 
+PERUBAHAN (Sprint 2.5 - Streaming):
+   EventNames.STREAM_START / STREAM_DELTA ditambahkan. Dipublish Planner
+   selama provider LLM benar-benar streaming; diteruskan ke WebSocket oleh
+   api/ws_bridge.py (STREAM_WS_EVENT_MAP). Tidak ada nama lama yang berubah.
+
 Do NOT put in this file:
     LLM reasoning, routing, tool execution, network logic, persona logic,
     memory retrieval, security decisions.
@@ -138,6 +143,10 @@ class EventNames:
 
     # RESPONSE
     RESPONSE_READY = "response.ready"
+
+    # STREAM (chunk jawaban LLM saat provider streaming; Sprint 2.5)
+    STREAM_START = "stream.start"
+    STREAM_DELTA = "stream.delta"
 
     # MEMORY
     MEMORY_SAVED = "memory.saved"

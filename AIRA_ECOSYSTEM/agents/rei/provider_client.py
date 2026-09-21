@@ -16,12 +16,32 @@ core/model_policy.py):
 Ollama: kalau model menolak tools ("does not support tools", mis. Gemma 3),
 panggilan diulang sekali TANPA tools - jawaban tetap keluar, tapi tanpa tool.
 API key dibaca dari .env (PROVIDER_ENV_KEYS), tidak disimpan di database.
+
+SPRINT 2.5 — STREAMING:
+  ProviderClient.chat_stream(...)   streaming NYATA: Ollama NDJSON
+        (/api/chat stream=true) dan OpenAI-compatible SSE (stream=true,
+        untuk OpenRouter / Gemini / NVIDIA). Tiap potongan teks yang baru
+        diterima langsung diteruskan lewat on_delta - TIDAK ada pemotongan
+        respons penuh. Hasil akhirnya berbentuk SAMA dengan chat()
+        ({"message","usage"} / {"error","error_type"}) ditambah
+        "streamed": True.
+  call_model(..., stream=sink)      jalur streaming; tanpa `stream` perilaku
+        lama (non-streaming) TIDAK berubah. Retry (transient), fallback
+        provider (policy), dan cek context tetap berlaku. Setiap request ke
+        provider memanggil sink.start(model) - client wajib mengosongkan
+        buffer teksnya karena retry/fallback memulai jawaban dari awal.
+        Provider yang menolak streaming ("stream_unsupported") diulang
+        non-streaming pada model yang sama.
+  Stop: cancel_event dicek tiap chunk; koneksi ditutup dan hasilnya
+        {"cancelled": True} (tanpa retry/fallback).
+Sink streaming = objek dengan start(model: dict) dan delta(text: str).
 """
 
 import json
 import logging
 import os
 import time
+from contextlib import closing
 from pathlib import Path
 from typing import Optional
 
@@ -79,8 +99,8 @@ def _resolve_api_key(provider: str) -> Optional[str]:
 def _classify_request_exception(exc: Exception) -> str:
     if isinstance(exc, requests.exceptions.Timeout):
         return "timeout"
-    if isinstance(exc, requests.exceptions.ConnectionError):
-        return "connection"
+    if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError)):
+        return "connection"  # ChunkedEncodingError = stream terputus di tengah jalan
     if isinstance(exc, requests.exceptions.HTTPError):
         return "rate_limit" if getattr(exc.response, "status_code", None) == 429 else "other"
     return "other"
@@ -134,9 +154,8 @@ def _post_json(url: str, payload: dict, timeout: float, headers: Optional[dict] 
 
 # ============================================================ adapters
 
-def _chat_ollama(model_id, messages, tools, temperature, max_tokens, think, timeout) -> dict:
-    url = f"{_endpoint('ollama')}/api/chat"
-    payload: dict = {"model": model_id, "messages": messages, "stream": False}
+def _ollama_payload(model_id, messages, tools, temperature, max_tokens, think, stream: bool) -> dict:
+    payload: dict = {"model": model_id, "messages": messages, "stream": stream}
 
     if tools:
         payload["tools"] = tools
@@ -150,6 +169,13 @@ def _chat_ollama(model_id, messages, tools, temperature, max_tokens, think, time
         payload["options"] = options
     if think is not None:
         payload["think"] = think
+
+    return payload
+
+
+def _chat_ollama(model_id, messages, tools, temperature, max_tokens, think, timeout) -> dict:
+    url = f"{_endpoint('ollama')}/api/chat"
+    payload = _ollama_payload(model_id, messages, tools, temperature, max_tokens, think, stream=False)
 
     try:
         try:
@@ -210,6 +236,314 @@ def _chat_openai_compatible(provider, model_id, messages, tools, temperature, ma
         return {"error": f"{url} membalas body bukan JSON valid: {exc}", "error_type": "other"}
 
 
+# ============================================================ streaming (Sprint 2.5)
+
+# Status HTTP yang wajar untuk "provider/model ini tidak mendukung stream".
+_STREAM_UNSUPPORTED_STATUSES = {400, 404, 405, 415, 422, 501}
+
+
+def _is_cancelled(cancel_event) -> bool:
+    return cancel_event is not None and cancel_event.is_set()
+
+
+def _cancelled_result() -> dict:
+    return {"error": "Dibatalkan oleh user.", "error_type": "cancelled", "cancelled": True}
+
+
+def _safe_delta(on_delta, text: str) -> None:
+    """Sink yang rusak tidak boleh menjatuhkan panggilan LLM."""
+    if not text:
+        return
+    try:
+        on_delta(text)
+    except Exception:
+        logger.exception("on_delta gagal (diabaikan).")
+
+
+def _open_stream(url: str, payload: dict, timeout: float, headers: Optional[dict] = None):
+    """
+    POST dengan stream=True. Status >= 400: body error dibaca penuh (kecil)
+    supaya exc.response.text tersedia, lalu HTTPError dilempar. Status OK:
+    response dikembalikan TERBUKA - pemanggil wajib menutupnya.
+    """
+    response = requests.post(url, json=payload, headers=headers, timeout=timeout, stream=True)
+
+    if response.status_code >= 400:
+        try:
+            response.content
+        except requests.exceptions.RequestException:
+            pass
+        response.close()
+        response.raise_for_status()
+
+    return response
+
+
+def _http_error_body(exc: requests.exceptions.HTTPError) -> str:
+    try:
+        return exc.response.text.lower() if exc.response is not None else ""
+    except Exception:
+        return ""
+
+
+def _stream_unsupported(exc: requests.exceptions.HTTPError, body: str) -> bool:
+    status = getattr(exc.response, "status_code", None)
+    return status in _STREAM_UNSUPPORTED_STATUSES and "stream" in body
+
+
+def _stream_unsupported_result(label: str, exc: Exception) -> dict:
+    return {"error": f"{label} menolak streaming: {exc}", "error_type": "stream_unsupported"}
+
+
+def _stream_error_type(err) -> str:
+    code = err.get("code") if isinstance(err, dict) else None
+    return "rate_limit" if str(code) in ("429", "rate_limit_exceeded") else "other"
+
+
+def _chat_ollama_stream(
+    model_id, messages, tools, temperature, max_tokens, think, timeout, on_delta, cancel_event,
+) -> dict:
+    """Ollama /api/chat stream=true: NDJSON, satu objek JSON per baris."""
+    url = f"{_endpoint('ollama')}/api/chat"
+    payload = _ollama_payload(model_id, messages, tools, temperature, max_tokens, think, stream=True)
+
+    try:
+        try:
+            response = _open_stream(url, payload, timeout)
+        except requests.exceptions.HTTPError as exc:
+            body = _http_error_body(exc)
+            if payload.get("tools") and "does not support tools" in body:
+                logger.warning("Model '%s' tidak mendukung tools - mengulang tanpa tools.", model_id)
+                payload.pop("tools")
+                response = _open_stream(url, payload, timeout)
+            elif _stream_unsupported(exc, body):
+                return _stream_unsupported_result("Ollama", exc)
+            else:
+                raise
+
+        parts: list[str] = []
+        tool_calls: list = []
+        usage = None
+        done = False
+
+        with closing(response):
+            for raw in response.iter_lines(chunk_size=None):
+                if _is_cancelled(cancel_event):
+                    return _cancelled_result()
+
+                if not raw:
+                    continue
+
+                try:
+                    obj = json.loads(raw)
+                except ValueError:
+                    return {"error": "Ollama mengirim baris stream yang bukan JSON valid.", "error_type": "other"}
+
+                if not isinstance(obj, dict):
+                    continue
+
+                if obj.get("error"):
+                    return {"error": f"Ollama: {obj['error']}", "error_type": "other"}
+
+                message = obj.get("message") or {}
+
+                # 'thinking' (model reasoning) sengaja TIDAK diteruskan: sama
+                # seperti jalur non-streaming, hanya 'content' yang jadi jawaban.
+                text = message.get("content")
+                if text:
+                    parts.append(text)
+                    _safe_delta(on_delta, text)
+
+                if message.get("tool_calls"):
+                    tool_calls.extend(message["tool_calls"])
+
+                if obj.get("done"):
+                    usage = _extract_ollama_usage(obj)
+                    done = True
+                    break
+
+        if not done:
+            return {
+                "error": "Stream Ollama berakhir sebelum selesai (done=true tidak diterima).",
+                "error_type": "connection",
+            }
+
+        message = _normalize_message({"role": "assistant", "content": "".join(parts), "tool_calls": tool_calls})
+        return {"message": message, "usage": usage, "streamed": True}
+
+    except requests.exceptions.RequestException as exc:
+        return _request_error("ollama", url, exc)
+
+
+def _consume_sse(response, on_delta, cancel_event) -> dict:
+    """
+    Baca SSE OpenAI-compatible. Teks langsung diteruskan; tool_calls datang
+    sebagai fragmen (per index) dan digabung. 'finished' baru True kalau
+    finish_reason atau [DONE] diterima - stream yang putus sebelum itu
+    dianggap error "connection" (bukan jawaban parsial yang dianggap utuh).
+    """
+    parts: list[str] = []
+    slots: dict = {}
+    order: list = []
+    last_key = None
+    usage = None
+    finished = False
+
+    for raw in response.iter_lines(chunk_size=None):
+        if _is_cancelled(cancel_event):
+            return _cancelled_result()
+
+        if not raw:
+            continue
+
+        line = raw.decode("utf-8", errors="replace").strip()
+
+        # komentar keep-alive (": OPENROUTER PROCESSING"), "event:", "id:" dst.
+        if not line.startswith("data:"):
+            continue
+
+        data = line[5:].strip()
+
+        if data == "[DONE]":
+            finished = True
+            break
+
+        try:
+            obj = json.loads(data)
+        except ValueError:
+            return {"error": f"Chunk SSE bukan JSON valid: {data[:200]}", "error_type": "other"}
+
+        if not isinstance(obj, dict):
+            continue
+
+        if obj.get("error"):
+            err = obj["error"]
+            return {"error": f"Provider mengirim error di tengah stream: {err}", "error_type": _stream_error_type(err)}
+
+        if obj.get("usage"):
+            usage = obj["usage"]
+
+        for choice in obj.get("choices") or []:
+            delta = choice.get("delta") or {}
+
+            text = delta.get("content")
+            if isinstance(text, str) and text:
+                parts.append(text)
+                _safe_delta(on_delta, text)
+
+            for fragment in delta.get("tool_calls") or []:
+                key = fragment.get("index")
+                if key is None:  # sebagian provider tidak mengirim index
+                    key = fragment.get("id") or last_key or 0
+                last_key = key
+
+                slot = slots.get(key)
+                if slot is None:
+                    slot = slots[key] = {"id": None, "name": "", "arguments": ""}
+                    order.append(key)
+
+                if fragment.get("id"):
+                    slot["id"] = fragment["id"]
+
+                function = fragment.get("function") or {}
+                name = function.get("name")
+                if name and name != slot["name"]:
+                    slot["name"] += name
+                if function.get("arguments"):
+                    slot["arguments"] += function["arguments"]
+
+            reason = choice.get("finish_reason")
+            if reason == "error":
+                return {"error": "Provider mengakhiri stream dengan finish_reason=error.", "error_type": "other"}
+            if reason:
+                finished = True  # jangan break: chunk usage bisa menyusul
+
+    if not finished:
+        return {
+            "error": "Stream provider berakhir sebelum selesai (finish_reason/[DONE] tidak diterima).",
+            "error_type": "connection",
+        }
+
+    tool_calls = [
+        {
+            "id": slots[key]["id"] or f"call_{index}",
+            "type": "function",
+            "function": {"name": slots[key]["name"], "arguments": slots[key]["arguments"]},
+        }
+        for index, key in enumerate(order)
+        if slots[key]["name"]
+    ]
+
+    message = _normalize_message({"role": "assistant", "content": "".join(parts), "tool_calls": tool_calls})
+    return {"message": message, "usage": usage, "streamed": True}
+
+
+def _chat_openai_stream(
+    provider, model_id, messages, tools, temperature, max_tokens, timeout, on_delta, cancel_event,
+) -> dict:
+    api_key = _resolve_api_key(provider)
+
+    if not api_key:
+        return {
+            "error": f"API key {provider} belum diset (.env {PROVIDER_ENV_KEYS[provider]}).",
+            "error_type": "other",
+        }
+
+    url = f"{_endpoint(provider)}/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = "http://localhost"
+        headers["X-Title"] = "AIRA Ecosystem"
+
+    payload: dict = {
+        "model": model_id, "messages": messages, "stream": True,
+        "stream_options": {"include_usage": True},   # usage di chunk terakhir
+    }
+    if tools:
+        payload["tools"] = tools
+    if temperature is not None:
+        payload["temperature"] = temperature
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+
+    try:
+        try:
+            response = _open_stream(url, payload, timeout, headers=headers)
+        except requests.exceptions.HTTPError as exc:
+            body = _http_error_body(exc)
+            if "stream_options" in body or "include_usage" in body:
+                logger.warning("Provider %s menolak stream_options - mengulang tanpa usage stream.", provider)
+                payload.pop("stream_options")
+                response = _open_stream(url, payload, timeout, headers=headers)
+            elif _stream_unsupported(exc, body):
+                return _stream_unsupported_result(provider, exc)
+            else:
+                raise
+
+        with closing(response):
+            content_type = (response.headers.get("Content-Type") or "").lower()
+
+            # Provider mengabaikan stream=true dan membalas JSON biasa:
+            # perlakukan sebagai non-streaming (jujur: streamed=False).
+            if "event-stream" not in content_type and "json" in content_type:
+                data = response.json()
+                choices = data.get("choices") or [{}]
+                choice = choices[0] if choices else {}
+                return {
+                    "message": _normalize_message(choice.get("message") or {}),
+                    "usage": data.get("usage"),
+                    "streamed": False,
+                }
+
+            return _consume_sse(response, on_delta, cancel_event)
+
+    except requests.exceptions.RequestException as exc:
+        return _request_error(provider, url, exc)
+    except ValueError as exc:
+        return {"error": f"{url} membalas body bukan JSON valid: {exc}", "error_type": "other"}
+
+
 # ============================================================ public client
 
 class ProviderClient:
@@ -239,6 +573,48 @@ class ProviderClient:
             return _chat_openai_compatible(provider, model, messages, tools, temperature, max_tokens, timeout or 120)
 
         return {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
+
+    @staticmethod
+    def chat_stream(
+        provider: str,
+        model: str,
+        messages: list,
+        tools: Optional[list] = None,
+        *,
+        on_delta,
+        cancel_event=None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        think: Optional[bool] = None,
+        timeout: Optional[float] = None,
+    ) -> dict:
+        """
+        Streaming NYATA. on_delta(text) dipanggil untuk tiap potongan teks yang
+        BARU diterima dari provider. Return sama seperti chat() plus
+        "streamed": True (False bila provider membalas JSON biasa), atau
+        {"error", "error_type": ... | "stream_unsupported" | "cancelled"}.
+        Tidak pernah raise.
+        """
+        provider = (provider or "").strip().lower()
+
+        try:
+            if provider == "ollama":
+                return _chat_ollama_stream(
+                    model, messages, tools, temperature, max_tokens, think,
+                    timeout or 300, on_delta, cancel_event,
+                )
+
+            if provider in PROVIDER_ENV_KEYS:
+                return _chat_openai_stream(
+                    provider, model, messages, tools, temperature, max_tokens,
+                    timeout or 120, on_delta, cancel_event,
+                )
+
+            return {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
+
+        except Exception as exc:
+            logger.exception("chat_stream %s gagal tak terduga", provider)
+            return {"error": f"Streaming gagal: {exc}", "error_type": "other"}
 
     @staticmethod
     def health_check(provider: str, model_id: Optional[str] = None) -> dict:
@@ -291,11 +667,43 @@ def _publish_model_failed(model: SelectedModel, result: dict) -> None:
         logger.exception("Gagal publish model.failed (diabaikan).")
 
 
-def _attempt(model: SelectedModel, messages: list, tools: list, retries: int) -> dict:
-    def call() -> dict:
-        return ProviderClient.chat(
+def _call_sink(fn, *args) -> None:
+    try:
+        fn(*args)
+    except Exception:
+        logger.exception("stream sink gagal (diabaikan).")
+
+
+def _stream_once(model: SelectedModel, messages: list, tools: list, stream, cancel_event) -> dict:
+    """SATU request streaming ke `model`. sink.start() dipanggil tiap request."""
+    _call_sink(stream.start, {
+        "id": model.id, "display_name": model.display_name,
+        "provider": model.provider, "fallback_from": model.fallback_from,
+    })
+
+    result = ProviderClient.chat_stream(
+        provider=model.provider, model=model.model_id, messages=messages, tools=tools,
+        on_delta=lambda text: _call_sink(stream.delta, text), cancel_event=cancel_event,
+    )
+
+    if result.get("error_type") == "stream_unsupported":
+        logger.warning("Model '%s' menolak streaming - mengulang non-streaming.", model.display_name)
+        result = ProviderClient.chat(
             provider=model.provider, model=model.model_id, messages=messages, tools=tools,
         )
+        if "error" not in result:
+            result["streamed"] = False
+
+    return result
+
+
+def _attempt(model: SelectedModel, messages: list, tools: list, retries: int, stream=None, cancel_event=None) -> dict:
+    def call() -> dict:
+        if stream is None:
+            return ProviderClient.chat(
+                provider=model.provider, model=model.model_id, messages=messages, tools=tools,
+            )
+        return _stream_once(model, messages, tools, stream, cancel_event)
 
     result = call()
     attempt = 0
@@ -309,11 +717,22 @@ def _attempt(model: SelectedModel, messages: list, tools: list, retries: int) ->
     return result
 
 
-def call_model(messages: list, tools: list, selected_model=None, *, policy=None, router=None) -> dict:
+def call_model(
+    messages: list, tools: list, selected_model=None, *,
+    policy=None, router=None, stream=None, cancel_event=None,
+) -> dict:
     """
     Titik masuk planner/auto_extract. `selected_model` (SelectedModel/dict)
     berasal dari Model Router; None -> default label general.
     Hasil sukses menyertakan key "model" (model yang benar-benar dipakai).
+
+    stream (Sprint 2.5): sink dengan start(model: dict) dan delta(text: str).
+    None (default) = jalur non-streaming lama, TIDAK berubah. Kalau diisi,
+    retry/fallback/cek context tetap berlaku; tiap request ke provider
+    (termasuk retry & fallback) memanggil sink.start() lagi. Hasil sukses
+    membawa "streamed" (True bila provider benar-benar streaming). Stop
+    (cancel_event) -> {"error", "error_type": "cancelled", "cancelled": True}
+    tanpa retry/fallback.
     """
     policy = policy or get_model_policy()
     router = router or get_model_router()
@@ -328,11 +747,17 @@ def call_model(messages: list, tools: list, selected_model=None, *, policy=None,
 
     selected = policy.check_context(selected, estimate_tokens(messages, tools))
 
-    result = _attempt(selected, messages, tools, retries=policy.retry_count())
+    result = _attempt(
+        selected, messages, tools, retries=policy.retry_count(),
+        stream=stream, cancel_event=cancel_event,
+    )
 
     if "error" not in result:
         result["model"] = selected.to_dict()
         return result
+
+    if result.get("cancelled"):
+        return {"error": result["error"], "error_type": "cancelled", "cancelled": True}
 
     _publish_model_failed(selected, result)
 
@@ -340,7 +765,10 @@ def call_model(messages: list, tools: list, selected_model=None, *, policy=None,
     if fallback is None:
         return {"error": result["error"]}
 
-    result = _attempt(fallback, messages, tools, retries=0)
+    result = _attempt(fallback, messages, tools, retries=0, stream=stream, cancel_event=cancel_event)
+
+    if result.get("cancelled"):
+        return {"error": result["error"], "error_type": "cancelled", "cancelled": True}
 
     if "error" in result:
         _publish_model_failed(fallback, result)

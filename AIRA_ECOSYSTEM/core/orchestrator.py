@@ -7,6 +7,8 @@ route() menerima:
   - selected_model : SelectedModel dari Model Router (dipilih Brain)
   - context        : AIRAContext dari Context Builder (disusun Brain), diteruskan
                      apa adanya ke Planner
+  - stream         : bool (Sprint 2.5) - minta provider streaming; diteruskan
+                     apa adanya ke Planner. Default False = perilaku lama.
 Orchestrator tidak memilih model dan tidak menyusun konteks. Tidak ada lagi callback on_event: event
 realtime lewat Event Bus.
 """
@@ -41,7 +43,10 @@ class Orchestrator:
             dangerous_tools=DANGEROUS_TOOLS,
         )
 
-    def route(self, user_input: str, memory, cancel_event=None, selected_model=None, context=None) -> dict:
+    def route(
+        self, user_input: str, memory, cancel_event=None, selected_model=None,
+        context=None, stream: bool = False,
+    ) -> dict:
         start = time.perf_counter()
         result = self.planner.run(
             user_input, memory,
@@ -49,6 +54,7 @@ class Orchestrator:
             cancel_event=cancel_event,
             selected_model=selected_model,
             context=context,
+            stream=stream,
         )
         result["duration"] = round(time.perf_counter() - start, 3)
         return result

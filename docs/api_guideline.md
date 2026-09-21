@@ -65,8 +65,12 @@ names fall through unchanged (treated as a normal message starting with
 
 Client sends:
 ```json
-{ "message": "ping ke google" }
+{ "message": "ping ke google", "run_id": "a1b2c3", "stream": true }
 ```
+
+`run_id` (optional, client-generated) is echoed on every event of the turn so
+the client can drop stale events after **Stop**. `stream` (optional, default
+`true`) — see [Streaming](#streaming-sprint-25) below.
 
 Server emits a stream of typed events for the same request:
 
@@ -76,14 +80,110 @@ Server emits a stream of typed events for the same request:
 | `thinking` | Before/after each LLM call | `{ "message": "..." }` |
 | `tool_start` | Before a tool executes | `{ "name", "category", "arguments" }` |
 | `tool_finish` | After a tool executes | `{ "name", "category", "success", "duration" }` |
-| `response` | Final answer for this turn | same shape as REST `/api/chat` response |
-| `error` | Unrecoverable failure this turn | `{ "message": "..." }` |
+| `stream_start` | A request to the LLM provider begins (also on retry / fallback / the next LLM call after a tool) | `{ "call", "attempt", "model": {id, display_name, provider, fallback_from} }` |
+| `stream_delta` | A piece of text just received from the provider | `{ "call", "attempt", "seq", "text" }` |
+| `response` | **Complete** — final answer for this turn | same shape as REST `/api/chat` response, plus `"streamed": bool` |
+| `error` | Failure this turn | `{ "message": "...", "fatal"?: true }` |
+| `cancelled` | Turn stopped by the user | `{}` |
+
+Every event's `data` also carries `session_id` and `run_id`.
 
 The WebSocket path calls the exact same `core.brain.Brain.think()` as the
 REST path — it is a transport-only addition, not a parallel chat engine.
 Reconnection with exponential backoff is handled client-side
 (`useAiraSocket.js`); the server does not queue events across
 disconnects.
+
+## Streaming (Sprint 2.5)
+
+Real provider streaming, not a sliced full response. A chunk is forwarded to
+the client the moment the provider sends it (verified against a local
+chunked HTTP server that withholds the rest of the body until the first chunk
+has arrived).
+
+### Provider capability
+
+| Provider | Wire format | Streamed content | Tool calls | Usage |
+|---|---|---|---|---|
+| `ollama` (`/api/chat`, `stream: true`) | NDJSON, one JSON object per line | `message.content` per line (`message.thinking` is **not** forwarded) | delivered whole in one line | final line (`prompt_eval_count`, `eval_count`) |
+| `openrouter`, `gemini`, `nvidia` (OpenAI-compatible, `stream: true`) | SSE `data: {...}` … `data: [DONE]` | `choices[0].delta.content` | fragments merged per `index` (or per `id` when `index` is missing) | last chunk via `stream_options.include_usage`; `null` if the provider ignores it |
+
+Fallbacks inside the provider client (`agents/rei/provider_client.py`):
+a provider that answers plain JSON instead of a stream → treated as
+non-streaming (`streamed: false`, no fake deltas); HTTP 4xx that mentions
+"stream" → same model is retried **non-streaming**; `stream_options`
+rejected → retried without it; Ollama "does not support tools" → retried
+without tools; stream cut before `finish_reason`/`[DONE]`/`done: true` →
+`connection` error (transient → retry, then policy fallback model). A cut
+stream is never accepted as a partial answer.
+
+### Contract
+
+Event order for one turn (all events carry `session_id`, `run_id`):
+
+```
+ack
+thinking
+stream_start   { call: 1, attempt: 1, model }
+stream_delta   { call: 1, attempt: 1, seq: 1, text }
+stream_delta   { call: 1, attempt: 1, seq: 2, text }
+…                                  ← LLM asked for tools:
+tool_start / tool_progress / tool_finish
+thinking
+stream_start   { call: 2, attempt: 1, model }
+stream_delta   …
+response       { answer, steps, streamed: true, … }     ← COMPLETE
+```
+
+| Contract name | WS event | Notes |
+|---|---|---|
+| start | `stream_start` | Begins a **fresh** text buffer for the assistant bubble. Sent once per provider request: a retry or fallback model produces another `stream_start` (`attempt` +1, `seq` restarts at 1, `model.fallback_from` set on fallback) — the client must **clear** its buffer. |
+| delta / chunk | `stream_delta` | Append `text` to the buffer. `seq` is 1-based and gapless within one `(call, attempt)`. |
+| complete | `response` | Authoritative. `answer` always replaces whatever was streamed. `streamed` says whether any provider call really streamed. |
+| error | `error` (`system.error` → `error`, or `fatal: true`) | If a `response` with `error: true` follows, its `answer` replaces the buffer. On a fatal `error` discard the buffer. |
+| stop | `cancelled` | Discard the buffer. |
+
+Rules a client can rely on:
+
+- One turn can contain several LLM **calls** (`call` = 1, 2, …): LLM → tools →
+  LLM. Text from a call that is followed by `tool_start` is only a preamble;
+  the final answer is the text of the last call, i.e. `response.answer`.
+- A turn where the provider does not stream (or `stream: false`) emits **no**
+  `stream_*` events; the client just receives `response`. Clients must
+  therefore render `response.answer` even if no delta arrived.
+- All `stream_delta`/`tool_*` events of a turn arrive **before** its `response`
+  (`ws.py` awaits `bridge.flush()` first); order within a session is FIFO.
+- Events of different sessions never mix (bridge filters on `session_id` +
+  `run_id`; REST turns have no `run_id` and never reach a socket).
+- Clients that do not know `stream_*` ignore them (unknown types are dropped),
+  so existing frontends keep working unchanged.
+- Rendering of Markdown / SVG / images / DIO forms stays entirely in the
+  frontend; `stream_delta.text` is raw model text. DIO `interaction_schema`
+  still arrives only in `response`.
+
+### Switches
+
+| Switch | Effect |
+|---|---|
+| `{"stream": false}` in the client message | That turn is non-streaming |
+| `AIRA_STREAMING=0` (env, server) | Streaming disabled for every WebSocket turn (kill switch) |
+| Voice turns (`voice_audio`) | Never stream (TTS reads the full answer) |
+| REST `POST /api/chat` | Always non-streaming; response unchanged |
+
+### Internal flow
+
+```
+ws.py  --think(msg, cancel_event, stream=True)-->  Brain  --route(..., stream=True)-->  Orchestrator
+   --> Planner.run(stream=True) --> call_model(stream=sink, cancel_event)
+   --> ProviderClient.chat_stream(on_delta)   (NDJSON / SSE)
+sink.start / sink.delta --> Event Bus: stream.start / stream.delta (+ session_id, run_id, correlation_id)
+   --> api/ws_bridge.py (STREAM_WS_EVENT_MAP) --> WebSocket
+```
+
+Retry, provider fallback (Model Policy), context check, Stop (`cancel_event`
+is checked on every chunk and closes the connection; no retry/fallback
+afterwards) and Runtime State (`thinking.start` … `thinking.finish` only —
+`stream.*` are not state events) behave as before.
 
 ## Error conventions
 

@@ -11,6 +11,10 @@ Startup:
 - Interaction memory dibersihkan dari entri kedaluwarsa (purge_expired).
 Shutdown:
 - Bridge dihentikan rapi, semua sesi SSH APCE ditutup.
+
+Perubahan (Sprint 2.6, Worker 1 — Global Settings Engine): mendaftarkan
+api/routers/settings.py, mengikuti pola router lain di bawah — satu-satunya
+perubahan pada file ini untuk fitur tersebut.
 """
 
 import asyncio
@@ -25,7 +29,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files, location
+from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files, location, settings
 from api.routers import ws
 from api.ws_bridge import get_ws_bridge
 from agents.akane.connection_manager import get_connection_manager
@@ -58,6 +62,7 @@ app.include_router(persona.router)
 app.include_router(connections.router)
 app.include_router(files.router)
 app.include_router(location.router)
+app.include_router(settings.router)
 app.include_router(ws.router)
 
 

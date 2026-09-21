@@ -19,6 +19,11 @@ Ringkasan desain:
   milik ws.py sendiri (ack, transcript, response, cancelled, error fatal)
   dikirim langsung lewat _emit(); sebelum response/error/cancelled,
   bridge.flush() memastikan semua event tool tiba lebih dulu.
+- STREAMING (Sprint 2.5): giliran teks/DIO/regenerate meminta provider
+  streaming (stream_enabled_for_turn). Chunk sampai ke client sebagai
+  stream_start / stream_delta lewat jalur bridge yang sama; "response" tetap
+  menjadi event COMPLETE (answer utuh, + "streamed"). Kontrak lengkap:
+  docs/api_guideline.md.
 
 DIO submission (form/izin lokasi):
   Diproses lewat resolve_submission() (agents/rei/dio_tools.py) - helper
@@ -42,7 +47,7 @@ from agents.yuki.stt import transcribe
 from agents.yuki.tts import synthesize_bytes
 from agents.rei.dio_tools import resolve_submission
 from api.state import get_memory, persist_memory, add_global_usage, drop_cache
-from api.ws_bridge import get_ws_bridge
+from api.ws_bridge import get_ws_bridge, stream_enabled_for_turn
 from api.ws_manager import manager
 from core.brain import Brain
 from core.events import event_scope, new_correlation_id
@@ -212,11 +217,12 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
     # WS bridge.
     # --------------------------------------------------
     brain = Brain(memory)
+    use_stream = stream_enabled_for_turn(raw, is_voice_turn)
 
     await emit("ack", {"message": display_message})
 
     try:
-        result = await asyncio.to_thread(brain.think, llm_message, cancel_event)
+        result = await asyncio.to_thread(brain.think, llm_message, cancel_event, use_stream)
     except Exception as exc:
         logger.exception("WS think() gagal | session=%s", session_id)
         memory.history = backup_history
@@ -281,6 +287,7 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
         "duration": result.duration,
         "token_usage": result.token_usage,
         "error": result.error,
+        "streamed": result.streamed,
         "session_title": row["title"] if row else "Chat baru",
         "audio_base64": audio_b64_out,
         "interaction_schema": result.interaction_schema,

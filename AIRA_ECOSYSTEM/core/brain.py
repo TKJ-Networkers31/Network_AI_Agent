@@ -32,6 +32,13 @@ task.started.
 think() menerima cancel_event (threading.Event) untuk tombol Stop.
 Tidak ada lagi parameter on_event: WebSocket menerima event lewat
 api/ws_bridge.py (subscriber Event Bus).
+
+Streaming (Sprint 2.5): think(..., stream=True) meminta provider streaming.
+Brain hanya meneruskan flag ke Orchestrator; chunk mengalir Planner -> Event
+Bus (stream.start / stream.delta) -> WS bridge. Siklus event Brain di atas
+(thinking.*, task.*, response.ready) dan Runtime State TIDAK berubah. Hasil
+akhir tetap BrainResponse utuh (answer lengkap); field 'streamed' hanya
+info apakah ada panggilan yang benar-benar di-stream.
 """
 
 import logging
@@ -68,6 +75,7 @@ class BrainResponse:
     interaction_schema: Optional[dict] = None
     cancelled: bool = False
     routing: Optional[dict] = None   # {"task": {...}, "model": {...}|None}
+    streamed: bool = False           # Sprint 2.5: ada panggilan LLM yang benar-benar di-stream
 
 
 def _tool_summary() -> dict:
@@ -140,15 +148,15 @@ class Brain:
 
     # -------------------------------------------------------------- think
 
-    def think(self, user_input: str, cancel_event=None) -> BrainResponse:
+    def think(self, user_input: str, cancel_event=None, stream: bool = False) -> BrainResponse:
         # Satu giliran = satu correlation_id (pakai yang sudah ada dari
         # ws.py kalau ada, supaya event WS dan event Brain nyambung).
         correlation_id = current_event_context().get("correlation_id") or new_correlation_id()
 
         with event_scope(correlation_id=correlation_id):
-            return self._think(user_input, cancel_event)
+            return self._think(user_input, cancel_event, stream)
 
-    def _think(self, user_input: str, cancel_event) -> BrainResponse:
+    def _think(self, user_input: str, cancel_event, stream: bool = False) -> BrainResponse:
         logger.info("BRAIN | menerima input user (%d char)", len(user_input))
 
         def cancelled() -> bool:
@@ -183,11 +191,15 @@ class Brain:
         started = time.perf_counter()
         outcome = {"error": True, "cancelled": False}   # kalau route() raise
 
+        # 'stream' hanya diteruskan kalau True: orchestrator/test double lama
+        # tanpa parameter stream tetap kompatibel.
+        route_kwargs = {"stream": True} if stream else {}
+
         try:
             result = self.orchestrator.route(
                 user_input, self.memory,
                 cancel_event=cancel_event, selected_model=selected,
-                context=context,
+                context=context, **route_kwargs,
             )
             outcome = {
                 "error": bool(result.get("error", False)),
@@ -211,6 +223,7 @@ class Brain:
             duration=result.get("duration", 0.0),
             interaction_schema=result.get("interaction_schema"),
             cancelled=bool(result.get("cancelled", False)),
+            streamed=bool(result.get("streamed", False)),
             routing={
                 "task": classification.to_dict(),
                 "model": selected.to_dict() if selected else None,

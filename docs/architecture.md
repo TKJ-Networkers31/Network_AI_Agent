@@ -112,12 +112,13 @@ scope if none is active, so one chat turn = one `correlation_id`.
 **Standard events** (`EventNames`): `chat.received`, `thinking.start/finish`,
 `task.classified/started/finished`, `model.started/finished/failed/switched/
 selected/fallback`, `tool.start/progress/finish`, `response.ready`,
-`memory.saved`, `interaction.requested/started/generated/completed/cancelled`,
+`stream.start/delta` (Sprint 2.5), `memory.saved`, `interaction.requested/started/generated/completed/cancelled`,
 `location.updated/cleared`, `system.error`.
 
 Currently published: `chat.received`, `thinking.start/finish`,
 `task.classified/started/finished`, `tool.*`, `response.ready`,
-`system.error` (planner errors), `model.selected/fallback/failed`,
+`system.error` (planner errors), `stream.start/delta` (Planner, only when the
+turn streams), `model.selected/fallback/failed`,
 `interaction.started/generated/completed/cancelled`, `location.*`,
 `connection.*`, `file.*`. Defined but not yet published by anyone:
 `model.started/finished/switched`, `memory.saved`, `interaction.requested`
@@ -142,7 +143,7 @@ Planner/Brain --publish--> Event Bus --subscriber--> api/ws_bridge.py
   `api/main.py` startup (idempotently re-ensured when a socket connects).
   It only forwards events that carry **both** `session_id` and `run_id`
   (REST turns have no `run_id`, so they never leak into an open socket) and
-  only those in `DEFAULT_WS_EVENT_MAP`:
+  only those in `DEFAULT_WS_EVENT_MAP` + `STREAM_WS_EVENT_MAP`:
 
   | Event Bus | WebSocket `type` |
   |---|---|
@@ -151,8 +152,11 @@ Planner/Brain --publish--> Event Bus --subscriber--> api/ws_bridge.py
   | `tool.progress` | `tool_progress` |
   | `tool.finish` | `tool_finish` |
   | `system.error` | `error` |
+  | `stream.start` | `stream_start` |
+  | `stream.delta` | `stream_delta` |
 
-  The wire protocol seen by the frontend is unchanged.
+  The existing wire protocol is unchanged; `stream_*` are additive and
+  ignored by clients that do not know them.
 - Protocol events owned by `ws.py` itself (`ack`, `transcript`,
   `transcript_empty`, `response`, `cancelled`, fatal `error`) are still sent
   directly. Before `response` / `cancelled` / fatal `error`, `ws.py` awaits
@@ -160,6 +164,34 @@ Planner/Brain --publish--> Event Bus --subscriber--> api/ws_bridge.py
 - `Brain.think(on_event=...)` / `Planner.run(on_event=...)` still accept the
   legacy callback for callers that have not migrated; `ws.py` no longer
   uses it.
+
+### LLM streaming (Sprint 2.5)
+
+Provider streaming is real end to end and rides the same path as the tool
+events, so ordering and session isolation come for free:
+
+```
+ProviderClient.chat_stream (NDJSON / SSE)  -- on_delta -->  call_model(stream=sink)
+   --> Planner _StreamPublisher --> Event Bus stream.start / stream.delta
+   --> WebSocketEventBridge (same FIFO queue as tool.*) --> client
+```
+
+- `Brain.think(..., stream=True)` → `Orchestrator.route(..., stream=True)` →
+  `Planner.run(..., stream=True)` → `call_model(..., stream=sink, cancel_event=...)`.
+  `stream` defaults to `False` at every layer; with `False` the code path is
+  the previous non-streaming one. Brain only forwards `stream` when it is
+  `True`, so an orchestrator/test double without that parameter still works.
+- Retry, Model Policy fallback and context check are unchanged; every
+  request to a provider (including retry/fallback) calls `sink.start()`, which
+  the client treats as "clear the buffer".
+- The final `BrainResponse` / WS `response` is still complete (`answer`
+  whole, plus `streamed`); it is the authoritative "complete" event.
+- Runtime State is untouched: it only reacts to `thinking.*`, `speech.*`,
+  `voice.listening.*` and `response.ready`, never to `stream.*`.
+- Kill switch: `AIRA_STREAMING=0`. Per-turn opt-out: `{"stream": false}`.
+
+Client-facing contract and provider capability table: see
+[`api_guideline.md`](api_guideline.md#streaming-sprint-25).
 
 `api/ws_manager.py` tracks live connections per `session_id` and is
 intentionally separate from `api/state.py` (which caches `ConversationMemory`

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import LocationPanel from "../components/location/LocationPanel.jsx";
+import GlobalSettingsPanel from "../components/settings/GlobalSettingsPanel.jsx";
 import { api } from "../api.js";
 
 export default function SettingsPage({ onOpenMenu }) {
@@ -27,6 +28,10 @@ export default function SettingsPage({ onOpenMenu }) {
           online/offline model? Semua itu sekarang ada di halaman{" "}
           <span className="text-accent-light font-medium">Models</span>.
         </p>
+      </div>
+
+      <div className="mb-6">
+        <GlobalSettingsPanel />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
