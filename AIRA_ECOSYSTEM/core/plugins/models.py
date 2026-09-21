@@ -16,6 +16,14 @@ ada di sini bersama modelnya, dipisah dari "membangun manifest dari
 dict" (core/plugins/manifest.py) — pola yang sama dengan
 core/dio/models.py + core/dio/validator.py: builder/parser tetap berhasil
 membentuk objek walau datanya cacat, validator yang menandai masalahnya.
+
+ALIGNMENT (Phase 1.3): PluginManifest adalah representasi KANONIK manifest
+plugin (single source of truth). Semua field manifest yang disepakati
+(id, name, version, description, author, api_version, compatibility,
+capabilities, permissions, dependencies) dimodelkan di sini, dan tipenya
+dipakai apa adanya oleh manifest_from_dict(), loader, dan validator.
+Validasi LENGKAP ada di core/plugins/validator.py; validate_manifest() di
+file ini tetap pemeriksaan struktural dasar Phase 1.
 """
 
 from __future__ import annotations
@@ -147,6 +155,29 @@ class PluginManifest:
     entry_point: path modul/class Python yang mengimplementasikan Plugin
     (string, mis. "plugins.contoh.main:ContohPlugin") - TIDAK di-import
     atau dieksekusi di sini; itu tanggung jawab loader Phase 2+.
+
+    Field dan tipenya (representasi kanonik; dipakai sama persis oleh
+    manifest_from_dict(), loader, dan validator):
+
+      Field spesifikasi
+        id, name, version   str
+        description         str            ("" = tidak diisi)
+        author              PluginAuthor
+        api_version         str            ("" = tidak dideklarasikan)
+        compatibility       PluginCompatibility
+        capabilities        list[str]      (deklarasi saja; BUKAN Capability Registry)
+        permissions         list[str]      (deklarasi saja; BUKAN Permission System)
+        dependencies        list[PluginDependency]
+
+      Field opsional di luar daftar spesifikasi (dipertahankan demi
+      kompatibilitas Phase 1; BUKAN kontrak wajib)
+        entry_point         Optional[str]
+        category            str
+        tags                list[str]
+
+    Field baru (api_version, capabilities, permissions) sengaja diletakkan
+    di AKHIR dan punya default, sehingga konstruksi posisional/keyword
+    Phase 1.1 tetap valid.
     """
 
     id: str
@@ -159,6 +190,9 @@ class PluginManifest:
     tags: list[str] = field(default_factory=list)
     dependencies: list[PluginDependency] = field(default_factory=list)
     compatibility: PluginCompatibility = field(default_factory=PluginCompatibility)
+    api_version: str = ""
+    capabilities: list[str] = field(default_factory=list)
+    permissions: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -167,9 +201,12 @@ class PluginManifest:
             "version": self.version,
             "description": self.description,
             "author": self.author.to_dict(),
+            "api_version": self.api_version,
             "entry_point": self.entry_point,
             "category": self.category,
             "tags": list(self.tags),
+            "capabilities": list(self.capabilities),
+            "permissions": list(self.permissions),
             "dependencies": [d.to_dict() for d in self.dependencies],
             "compatibility": self.compatibility.to_dict(),
         }
@@ -206,6 +243,11 @@ def validate_manifest(manifest: PluginManifest) -> PluginValidationResult:
     valid, tiap dependency id berformat valid. TIDAK memeriksa apakah
     dependency-nya benar-benar ada/terpasang (itu tugas resolver di fase
     berikutnya, bukan Phase 1).
+
+    CATATAN (Phase 1.3): ini pemeriksaan struktural DASAR dan logikanya
+    tidak berubah - ia belum memeriksa api_version/capabilities/permissions.
+    Validasi lengkap atas PluginManifest ada di
+    core/plugins/validator.py::validate_plugin_manifest.
     """
     issues: list[PluginValidationIssue] = []
 

@@ -42,7 +42,7 @@ from agents.rei import research_tools as rt
 from agents.rei import fs_tools as fs
 from core.memory import remember_fact, recall_facts, forget_fact
 from agents.rei import dio_tools as dio
-
+from agents.rei import conversation_tools as ct
 
 def recall(query: str) -> dict:
     results = recall_facts(query)
@@ -467,3 +467,7 @@ REI_TOOL_SCHEMAS = [
         },
     },
 ]
+
+REI_TOOLS.update(ct.CONVERSATION_TOOLS)
+REI_TOOL_CATEGORY.update(ct.CONVERSATION_TOOL_CATEGORY)
+REI_TOOL_SCHEMAS.extend(ct.CONVERSATION_TOOL_SCHEMAS)

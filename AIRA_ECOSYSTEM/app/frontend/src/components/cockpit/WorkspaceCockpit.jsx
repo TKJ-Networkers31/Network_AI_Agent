@@ -6,6 +6,10 @@ import ToolDock from "./ToolDock.jsx";
 import { COCKPIT_VARS } from "./tokens.js";
 import { activityFromConnections, buildHeroContext, normalizeConnection } from "./cockpitContracts.js";
 
+function hasHeroModel(model) {
+  return Boolean(model) && typeof model.greeting === "string" && model.greeting.trim() !== "";
+}
+
 /**
  * WorkspaceCockpit — instrumentasi kompak di ATAS percakapan.
  *
@@ -15,14 +19,16 @@ import { activityFromConnections, buildHeroContext, normalizeConnection } from "
  *
  * MURNI PRESENTASI: props masuk, callback keluar. Tidak ada fetch, polling,
  * timer, atau akses ChatRuntimeContext. Alur data yang benar:
- *   ConnectionManager -> Event Bus -> WebSocket runtime -> adapter (W5) -> props.
+ *   sumber state -> adapter (utils/cockpitAdapter.js + hooks/useCockpitData.js) -> props.
  *
  * Props data:
  *  - connections  : Connection[]   { id, label, type, status, metadata? }
  *  - activity     : Activity[]     { targetId, label, type, status }   (default: diturunkan dari connections)
  *  - runtimeState : { streaming, thinking }  PLACEHOLDER - diterima tapi belum dipakai
- *  - heroContext  : { displayName, timePeriod, workspaceLabel, connectionCount, activityState }
- *                   (default: dibangun dari connections/activity)
+ *  - heroModel    : { greeting, subtitle, time_period, status } dari Greeting Resolver (W4).
+ *                   Jika ada, dirender apa adanya oleh DynamicHero.
+ *  - heroContext  : jalur lama { displayName, timePeriod, workspaceLabel, connectionCount, activityState }
+ *                   (default: dibangun dari connections/activity, HANYA bila heroModel tidak ada)
  * Props UI:
  *  - tools, activeToolId, onToolSelect, iconRegistry
  *  - showHero (true) · showToolDock (true) · showType (false) · onOpenManager
@@ -35,6 +41,7 @@ export default function WorkspaceCockpit({
   // eslint-disable-next-line no-unused-vars
   runtimeState,
   heroContext,
+  heroModel,
   tools = [],
   activeToolId = null,
   onToolSelect,
@@ -56,10 +63,12 @@ export default function WorkspaceCockpit({
     [activity, normalized]
   );
 
-  const hero = useMemo(
-    () => heroContext || buildHeroContext({ connections: normalized, activity: activityList }),
-    [heroContext, normalized, activityList]
-  );
+  const hero = useMemo(() => {
+    // heroModel dirender apa adanya: konteks lama tidak perlu dibangun.
+    if (hasHeroModel(heroModel)) return heroContext;
+
+    return heroContext || buildHeroContext({ connections: normalized, activity: activityList });
+  }, [heroModel, heroContext, normalized, activityList]);
 
   return (
     <section
@@ -73,7 +82,7 @@ export default function WorkspaceCockpit({
         <WorkspaceStatus activity={activityList} />
       </div>
 
-      {showHero && <DynamicHero heroContext={hero} />}
+      {showHero && <DynamicHero heroContext={hero} heroModel={heroModel} />}
 
       {showToolDock && (
         <div className={showHero ? "" : "pt-2"}>
