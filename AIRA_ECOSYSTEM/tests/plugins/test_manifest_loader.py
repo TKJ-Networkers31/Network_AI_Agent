@@ -113,10 +113,10 @@ class TempCase(unittest.TestCase):
 
     def write(self, name: str, content, *, binary: bool = False) -> Path:
         path = self.tmp / name
-        if binary:
-            path.write_bytes(content)
-        else:
-            path.write_text(content, encoding="utf-8")
+        # Selalu tulis BYTE persis, jangan write_text(): mode teks menerjemahkan
+        # "\n" -> "\r\n" di Windows, sehingga ukuran file di disk berbeda dari
+        # len(content.encode()) dan test yang mengukur byte (batas ukuran) gagal.
+        path.write_bytes(content if binary else content.encode("utf-8"))
         return path
 
     def write_yaml(self, data, name: str = "plugin.yaml") -> Path:
