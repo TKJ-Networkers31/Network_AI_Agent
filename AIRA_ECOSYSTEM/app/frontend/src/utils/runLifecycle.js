@@ -1,40 +1,59 @@
 /**
  * utils/runLifecycle.js — transisi state SATU proses chat di frontend.
  *
- *   kirim -> thinking -> (chunk pertama) streaming -> response | error | cancel
+ *   kirim -> thinking -> (teks pertama) streaming -> response | error | cancel
  *
  * BUKAN sistem loading baru. State-nya tetap `runsBySession` di
  * ChatRuntimeContext (satu entri = satu proses berjalan) dan pesannya tetap
  * `messagesBySession`. File ini hanya memindahkan aturan transisi yang
  * sebelumnya tertanam di handleEvent() ke fungsi murni (tanpa React, tanpa
- * I/O) supaya bisa diuji dengan `node --test`, sambil menambah fase
- * "streaming". Animasi thinking (LiveSteps/ThinkingBubble) tidak disentuh.
+ * I/O) supaya bisa diuji dengan `node --test`.
  *
  * Bentuk `run`:
  *   { runId, status: "thinking" | "streaming", phase, liveTools }
  *
+ * KONTRAK STREAMING AKTUAL (backend Sprint 2.5, api/ws_bridge.py +
+ * docs/api_guideline.md) - dibaca dari implementasi, bukan ditebak:
+ *
+ *   { type: "stream_start", data: { session_id, run_id, call, attempt, model } }
+ *   { type: "stream_delta", data: { session_id, run_id, call, attempt, seq, text } }
+ *   { type: "response",     data: { answer, steps, streamed, ... } }   <- COMPLETE, otoritatif
+ *
+ *   - `stream_start` membuka buffer teks BARU untuk pasangan (call, attempt):
+ *     tiap request ke provider (juga retry / fallback / panggilan LLM sesudah
+ *     tool) mengirimnya lagi. Reset dilakukan MALAS: teks lama tetap tampil
+ *     sampai potongan pertama buffer baru tiba (tidak ada bubble kosong/kedip).
+ *   - `stream_delta.seq` dimulai dari 1 dan tanpa celah dalam satu (call, attempt).
+ *     Reducer HANYA menerima seq berikutnya yang persis: duplikat diabaikan, dan
+ *     kalau ada celah / kita bergabung di tengah stream (mis. socket tersambung
+ *     ulang) buffer itu ditandai `desynced` dan tidak ditambah lagi - teks di layar
+ *     selalu prefix yang utuh, tidak pernah berlubang. `response` yang menutup.
+ *   - Satu giliran bisa berisi beberapa `call` (LLM -> tool -> LLM). Teks call
+ *     yang berujung tool hanya pengantar; buffer call berikutnya menggantikannya.
+ *   - Tidak ada event stream untuk jawaban non-streaming: `response` saja sudah cukup.
+ *   - `interaction_schema` (DIO) dan hasil tool tidak ada di event stream; keduanya
+ *     hanya datang di `response`.
+ *
+ * `response_chunk` {delta} adalah nama placeholder lama sebelum backend selesai;
+ * tetap diterima sebagai alias tanpa pemeriksaan seq/call (append biasa).
+ *
  * Aturan yang dijaga:
- *   1. Streaming MONOTONIK: setelah chunk pertama, event thinking/ack susulan
- *      tidak mengembalikan fase thinking (animasi tidak restart). Chunk
- *      berikutnya mengembalikan objek run yang SAMA (tanpa re-render).
- *   2. Pesan streaming dibuat SEKALI di chunk pertama, ditambah di tempat, dan
- *      pada `response` DIGANTI di posisi yang sama (bukan di-push) - key
- *      bubble di ChatPage berbasis index, jadi tidak ada remount/animasi
- *      reveal ulang dan tidak ada bubble ganda.
+ *   1. Streaming MONOTONIK: setelah teks pertama, event thinking/ack susulan
+ *      tidak mengembalikan fase thinking (animasi tidak restart). Delta berikutnya
+ *      mengembalikan objek run yang SAMA (tanpa re-render).
+ *   2. Pesan streaming dibuat SEKALI di teks pertama, ditambah di tempat, dan
+ *      pada `response` DIGANTI di posisi yang sama (bukan di-push) - key bubble di
+ *      ChatPage berbasis index, jadi tidak ada remount/animasi reveal ulang dan
+ *      tidak ada bubble ganda. Pesan final yang berasal dari stream diberi
+ *      `streamed: true` supaya renderer bertahap tidak di-unmount saat finalize.
  *   3. Isi pesan tidak pernah diperiksa di sini: potongan yang memuat fence
- *      ```svg, gambar Markdown, atau jawaban ber-interaction_schema (DIO)
- *      tidak mengubah state proses. Payload `response` adalah sumber
- *      kebenaran akhir (answer, steps, interaction_schema, turn id).
- *   4. Event dari run basi (sudah di-Stop) atau run lain dibuang; chunk yang
+ *      ```svg, gambar Markdown, atau jawaban ber-interaction_schema (DIO) tidak
+ *      mengubah state proses. Payload `response` adalah sumber kebenaran akhir.
+ *   4. Event dari run basi (sudah di-Stop) atau run lain dibuang; delta yang
  *      datang saat tidak ada run (mis. sesudah response) juga dibuang.
  *   5. Error NON-fatal tidak mengakhiri proses: server SELALU mengirim
  *      `response` sesudahnya (api/routers/ws.py). Error fatal butuh snapshot
  *      rollback, jadi tetap ditangani failRun() di context.
- *
- * Kontrak event streaming (frontend siap menerima):
- *   { type: "response_chunk", data: { session_id, run_id, delta: "<teks>" } }
- * CATATAN: backend BELUM mengirim event ini (provider_client memakai
- * stream=false). Tanpa event ini alur tetap berjalan: thinking -> response.
  */
 
 export const RUN_STATUS = Object.freeze({
@@ -42,7 +61,9 @@ export const RUN_STATUS = Object.freeze({
   STREAMING: "streaming",
 });
 
-export const EVENT_RESPONSE_CHUNK = "response_chunk";
+export const EVENT_STREAM_START = "stream_start";
+export const EVENT_STREAM_DELTA = "stream_delta";
+export const EVENT_RESPONSE_CHUNK = "response_chunk"; // alias lama (placeholder)
 
 export const PHASE_SENDING = "Mengirim...";
 export const PHASE_ACK = "Menganalisis permintaan...";
@@ -50,6 +71,11 @@ export const PHASE_REGENERATING = "Membuat ulang jawaban...";
 const PHASE_FALLBACK = "Berpikir...";
 
 const NO_TOOLS = Object.freeze([]);
+
+/** Event yang boleh ditampung batcher (stream_start / stream_delta / alias lama). */
+export function isStreamEvent(type) {
+  return type === EVENT_STREAM_START || type === EVENT_STREAM_DELTA || type === EVENT_RESPONSE_CHUNK;
+}
 
 // ============================================================
 // RUN
@@ -128,7 +154,7 @@ export function applyToolFinish(run, data) {
   return { ...run, liveTools: nextTools };
 }
 
-/** Chunk pertama: thinking -> streaming (fase dikosongkan). Berikutnya: objek sama. */
+/** Teks pertama: thinking -> streaming (fase dikosongkan). Berikutnya: objek sama. */
 export function applyChunkToRun(run) {
   if (!run || isStreaming(run)) return run;
 
@@ -157,7 +183,7 @@ function findRunMessageIndex(messages, runId, { streamingOnly = false } = {}) {
   return -1;
 }
 
-/** Tambah potongan ke pesan streaming milik run ini (dibuat di chunk pertama). */
+/** Tambah potongan ke pesan streaming milik run ini (dibuat di potongan pertama). Jalur alias lama. */
 export function appendChunk(messages, runId, delta) {
   if (typeof delta !== "string" || delta === "") return messages;
 
@@ -183,6 +209,100 @@ export function appendChunk(messages, runId, delta) {
   return next;
 }
 
+function streamKeyOf(data) {
+  const { call, attempt } = data || {};
+
+  return Number.isInteger(call) && Number.isInteger(attempt) ? `${call}:${attempt}` : null;
+}
+
+/**
+ * `stream_start`: buffer baru untuk (call, attempt). Reset MALAS - teks lama
+ * tetap tampil sampai delta pertama buffer baru tiba. Tanpa pesan streaming
+ * (belum ada teks sama sekali) tidak ada yang perlu dilakukan; delta pertama
+ * membawa key-nya sendiri.
+ */
+export function applyStreamStart(messages, runId, data) {
+  const key = streamKeyOf(data);
+
+  if (key === null) return messages;
+
+  const idx = findRunMessageIndex(messages, runId, { streamingOnly: true });
+
+  if (idx === -1) return messages;
+
+  const current = messages[idx];
+
+  if (current.stream && current.stream.key === key) return messages; // start ganda
+
+  const next = messages.slice();
+  next[idx] = { ...current, stream: { key, seq: 0, reset: true, desynced: false } };
+
+  return next;
+}
+
+/**
+ * `stream_delta`: tambah teks HANYA kalau seq-nya persis berikutnya. Yang lain
+ * diabaikan (messages yang sama dikembalikan) supaya teks di layar tidak
+ * pernah berlubang / terduplikasi. Delta tanpa call/attempt/seq (alias lama)
+ * jatuh ke appendChunk().
+ */
+export function applyStreamDelta(messages, runId, { text, call, attempt, seq } = {}) {
+  if (typeof text !== "string" || text === "") return messages;
+
+  const key = streamKeyOf({ call, attempt });
+
+  if (key === null || !Number.isInteger(seq)) return appendChunk(messages, runId, text);
+
+  const idx = findRunMessageIndex(messages, runId, { streamingOnly: true });
+
+  if (idx === -1) {
+    // Bergabung di tengah stream (seq > 1): lewatkan; jangan tampilkan teks tanpa awalnya.
+    if (seq !== 1) return messages;
+
+    return [
+      ...messages,
+      {
+        role: "assistant",
+        content: text,
+        steps: [],
+        streaming: true,
+        runId: runId || null,
+        isNew: true,
+        stream: { key, seq, reset: false, desynced: false },
+      },
+    ];
+  }
+
+  const current = messages[idx];
+  const state = current.stream;
+  let content;
+  let nextState;
+
+  if (!state || state.key !== key) {
+    // Buffer baru yang start-nya tidak sempat terlihat: sah hanya kalau ini potongan pertamanya.
+    if (seq !== 1) return messages;
+
+    content = text;
+    nextState = { key, seq, reset: false, desynced: false };
+  } else if (state.desynced || seq <= state.seq) {
+    return messages;
+  } else if (seq !== state.seq + 1) {
+    // Celah: berhenti menambah teks buffer ini (prefix yang tampil tetap utuh).
+    const next = messages.slice();
+    next[idx] = { ...current, stream: { ...state, desynced: true } };
+
+    return next;
+  } else {
+    content = state.reset ? text : `${current.content || ""}${text}`;
+    nextState = { key, seq, reset: false, desynced: false };
+  }
+
+  const next = messages.slice();
+  next[idx] = { ...current, content, stream: nextState };
+
+  return next;
+}
+
 /**
  * Proses berakhir sebelum response (Stop / cancelled / error fatal): pesan
  * streaming yang sudah tampil dipertahankan sebagai pesan LOKAL (belum
@@ -193,8 +313,9 @@ export function settleStreamingMessage(messages, runId) {
 
   if (idx === -1) return messages;
 
+  const { stream: _stream, ...rest } = messages[idx];
   const next = messages.slice();
-  next[idx] = { ...messages[idx], streaming: false, local: true };
+  next[idx] = { ...rest, streaming: false, local: true };
 
   return next;
 }
@@ -218,6 +339,9 @@ export function applyResponse(messages, data) {
     }
   }
 
+  const idx = findRunMessageIndex(next, data.run_id);
+  const replaced = idx === -1 ? null : next[idx];
+
   const final = {
     role: "assistant",
     content: data.answer,
@@ -226,9 +350,9 @@ export function applyResponse(messages, data) {
     turnId: data.assistant_turn_id ?? null,
     isNew: true,
     runId: data.run_id ?? null,
+    // Berasal dari stream: renderer bertahap tetap terpasang (tanpa remount/kedip).
+    ...(replaced && replaced.streaming !== undefined ? { streamed: true } : {}),
   };
-
-  const idx = findRunMessageIndex(next, data.run_id);
 
   if (idx === -1) next.push(final);
   else next[idx] = final;
@@ -246,9 +370,10 @@ export function applyResponse(messages, data) {
  * pemanggil cukup membandingkan dengan `!==` untuk tahu apa yang perlu
  * ditulis ke state.
  *
- * Yang ditangani: ack, thinking, tool_start, tool_finish, response_chunk,
- * response, error non-fatal. Selebihnya (transcript, cancelled, error fatal,
- * efek samping unread/voice/snapshot) tetap di ChatRuntimeContext.
+ * Yang ditangani: ack, thinking, tool_start, tool_finish, stream_start,
+ * stream_delta (+ alias response_chunk), response, error non-fatal.
+ * Selebihnya (transcript, cancelled, error fatal, efek samping
+ * unread/voice/snapshot) tetap di ChatRuntimeContext.
  */
 export function reduceRunEvent(session, event, { staleRunIds = null } = {}) {
   const run = (session && session.run) || null;
@@ -276,14 +401,34 @@ export function reduceRunEvent(session, event, { staleRunIds = null } = {}) {
       if (!run || skip) return same;
       return { run: applyToolFinish(run, data), messages };
 
+    case EVENT_STREAM_START: {
+      if (!run || skip) return same;
+
+      const nextMessages = applyStreamStart(messages, data.run_id || run.runId, data);
+
+      return nextMessages === messages ? same : { run, messages: nextMessages };
+    }
+
+    case EVENT_STREAM_DELTA:
     case EVENT_RESPONSE_CHUNK: {
       if (!run || skip) return same;
-      if (typeof data.delta !== "string" || data.delta === "") return same;
 
-      return {
-        run: applyChunkToRun(run),
-        messages: appendChunk(messages, data.run_id || run.runId, data.delta),
-      };
+      const text = type === EVENT_RESPONSE_CHUNK ? data.delta : data.text;
+
+      if (typeof text !== "string" || text === "") return same;
+
+      const nextMessages = applyStreamDelta(messages, data.run_id || run.runId, {
+        text,
+        call: data.call,
+        attempt: data.attempt,
+        seq: data.seq,
+      });
+
+      // Diabaikan (duplikat / celah / bergabung di tengah): tidak ada teks baru,
+      // jadi fase thinking juga tidak berubah.
+      if (nextMessages === messages) return same;
+
+      return { run: applyChunkToRun(run), messages: nextMessages };
     }
 
     case "response":
@@ -303,6 +448,20 @@ export function reduceRunEvent(session, event, { staleRunIds = null } = {}) {
     default:
       return same;
   }
+}
+
+/**
+ * Lipat beberapa event (satu batch dari StreamBatcher) menjadi SATU hasil,
+ * supaya pemanggil menulis state React sekali, bukan sekali per event.
+ */
+export function reduceRunEvents(session, events, options) {
+  let state = { run: (session && session.run) || null, messages: (session && session.messages) || [] };
+
+  for (const event of events || []) {
+    state = reduceRunEvent(state, event, options);
+  }
+
+  return state;
 }
 
 // ============================================================

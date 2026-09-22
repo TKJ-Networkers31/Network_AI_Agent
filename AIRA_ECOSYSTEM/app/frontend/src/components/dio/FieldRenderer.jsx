@@ -59,11 +59,16 @@ export default function FieldRenderer({ field, value, error, onChange, onAction 
   // Field bertipe "button" atau "location_permission" tidak punya
   // value/onChange biasa - keduanya trigger onAction sendiri (yang
   // terakhir sambil menyisipkan koordinat lewat extraValues).
-  if (field.type === "button" || field.type === "location_permission") {
+  const ACTION_ONLY_TYPES = new Set(["button", "location_permission"]);
+  const DISPLAY_ONLY_TYPES = new Set(["image", "gallery", "progress", "svg"]);
+
+  if (ACTION_ONLY_TYPES.has(field.type)) {
     return <Component field={field} onAction={onAction} />;
   }
+  if (DISPLAY_ONLY_TYPES.has(field.type)) {
+    return <Component field={field} />;
+  }
 
-  return (
-    <Component field={field} value={value} onChange={(v) => onChange(field.id, v)} error={error} />
-  );
+  return <Component field={field} value={value} onChange={(v) => onChange(field.id, v)} error={error} />;
+ 
 }
