@@ -21,6 +21,8 @@ import ToolStep from "./ToolStep.jsx";
 import Markdown from "./Markdown.jsx";
 import Renderer from "./dio/Renderer.jsx";
 import CopyButton from "./CopyButton.jsx";
+import { useSelectionContext } from "../hooks/useSelectionContext.js";
+import SelectionToolbar from "./selection/SelectionToolbar.jsx";
 
 function ProcessSteps({ steps }) {
   const [open, setOpen] = useState(false);
@@ -214,10 +216,24 @@ export default function MessageBubble({
   onRegenerate,
   hasFollowing,
   onEdit,
+  messageId = null,
+  conversationId = null,
+  sessionId = null,
+  onSelectionAction,
 }) {
   const isUser = role === "user";
   const hasInteraction = !isUser && Boolean(interactionSchema);
   const [editing, setEditing] = useState(false);
+
+  const contentRef = useRef(null);
+  const { selection, clear: clearSelection } = useSelectionContext(contentRef, {
+    messageId, conversationId, sessionId,
+  });
+
+  function handleSelectionAction(actionId, sel) {
+    onSelectionAction?.(actionId, sel);
+    clearSelection();
+  }
 
   const canEdit = isUser && Boolean(content) && !isDioSubmissionText(content) && Boolean(onEdit);
   const showAssistantActions = !isUser && !local && !streaming && Boolean(content);
@@ -260,6 +276,7 @@ export default function MessageBubble({
         ) : (
           content && (
             <div
+              ref={contentRef}
               className={`rounded-xl2 px-4 py-3 text-sm leading-relaxed break-words
                 ${
                   isUser
@@ -272,6 +289,20 @@ export default function MessageBubble({
               {isUser ? content : <Markdown content={content} />}
             </div>
           )
+        )}
+
+        {selection && (
+          <div
+            data-selection-toolbar
+            onMouseDown={(e) => e.preventDefault()}
+            className="mt-1.5"
+          >
+            <SelectionToolbar
+              selection={selection}
+              onAction={handleSelectionAction}
+              onClose={clearSelection}
+            />
+          </div>
         )}
 
         {showActions && (

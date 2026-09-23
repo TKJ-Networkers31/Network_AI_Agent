@@ -29,7 +29,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files, location, settings
+from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files, location, settings, selection
 from api.routers import ws
 from api.ws_bridge import get_ws_bridge
 from agents.akane.connection_manager import get_connection_manager
@@ -63,6 +63,7 @@ app.include_router(connections.router)
 app.include_router(files.router)
 app.include_router(location.router)
 app.include_router(settings.router)
+app.include_router(selection.router)
 app.include_router(ws.router)
 
 
