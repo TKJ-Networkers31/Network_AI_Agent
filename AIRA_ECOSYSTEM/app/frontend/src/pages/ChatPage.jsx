@@ -15,6 +15,16 @@
 // - Hero cockpit hanya tampil saat percakapan kosong DAN Settings sudah selesai
 //   dimuat (tidak ada kedip greeting sebelum nama terisi).
 // - TopBar menyembunyikan ConnectionIndicator (informasinya sudah ada di ConnectionDock).
+//
+// PERUBAHAN (Sprint 2.6 - Composer Cockpit UI fix):
+// - Instrument row (ConnectionDock/WorkspaceStatus/ToolDock) DIPINDAH dari
+//   bawah TopBar ke tepat di atas ChatInput lewat <ComposerCockpit>, supaya
+//   AIRA terasa seperti copilot (composer-centric), bukan dashboard.
+// - DynamicHero (teks sapaan) TETAP di area percakapan, tampil bersama
+//   emblem <Hero> saat percakapan kosong - urutan dan kondisi tampilnya
+//   (heroVisible/heroReady) tidak berubah.
+// - WorkspaceCockpit.jsx TIDAK dihapus (masih dipertahankan untuk kompatibilitas
+//   kalau dipakai di tempat lain); ChatPage sekarang memakai ComposerCockpit.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
@@ -24,7 +34,8 @@ import VoiceControls from "../components/VoiceControls.jsx";
 import VoiceOverlay from "../components/VoiceOverlay.jsx";
 import LiveSteps from "../components/LiveSteps.jsx";
 import BootScreen from "../components/BootScreen.jsx";
-import WorkspaceCockpit from "../components/cockpit/WorkspaceCockpit.jsx";
+import ComposerCockpit from "../components/cockpit/ComposerCockpit.jsx";
+import DynamicHero from "../components/cockpit/DynamicHero.jsx";
 import { api } from "../api.js";
 import { useSessionsContext } from "../context/SessionsContext.jsx";
 import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
@@ -263,17 +274,6 @@ export default function ChatPage({ onOpenMenu }) {
         hideConnectionIndicator
       />
 
-      {/* Cockpit: instrument layer di atas percakapan (menempel ke TopBar) */}
-      <WorkspaceCockpit
-        className="-mt-3 sm:-mt-4"
-        heroModel={heroModel}
-        connections={cockpit.connections}
-        runtimeState={cockpit.runtime}
-        tools={cockpit.tools}
-        onToolSelect={navigateForTool}
-        showHero={heroVisible && heroReady}
-      />
-
       {/* Area pesan: full-width (scrollbar di tepi kanan), konten di tengah */}
       <div className="flex-1 overflow-y-auto min-h-0 -mx-3 sm:-mx-5 lg:-mx-6 px-3 sm:px-5 lg:px-6">
         <div className="max-w-4xl mx-auto w-full space-y-3 sm:space-y-4 pb-3">
@@ -283,6 +283,8 @@ export default function ChatPage({ onOpenMenu }) {
             </p>
           )}
 
+          {/* Sapaan tetap di area percakapan (bukan di composer) */}
+          {heroVisible && heroReady && <DynamicHero heroModel={heroModel} />}
           {heroVisible && <Hero onQuickPrompt={(text) => handleSend(text)} />}
 
           {!switching &&
@@ -317,6 +319,16 @@ export default function ChatPage({ onOpenMenu }) {
           <div ref={bottomRef} />
         </div>
       </div>
+
+      {/* Composer: Composer Cockpit (compact instrument row) menempel
+          langsung di atas ChatInput - satu unit visual, bukan header
+          terpisah dari conversation. */}
+      <ComposerCockpit
+        connections={cockpit.connections}
+        activity={cockpit.activity}
+        tools={cockpit.tools}
+        onToolSelect={navigateForTool}
+      />
 
       {/* Input menempel ke bawah (full-bleed diatur di dalam ChatInput) */}
       <ChatInput
