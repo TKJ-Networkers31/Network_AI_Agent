@@ -15,6 +15,10 @@ Shutdown:
 Perubahan (Sprint 2.6, Worker 1 — Global Settings Engine): mendaftarkan
 api/routers/settings.py, mengikuti pola router lain di bawah — satu-satunya
 perubahan pada file ini untuk fitur tersebut.
+
+Perubahan (Sprint 2.7, Wave 1, Worker 2 — Universal Attachment): mendaftarkan
+api/routers/attachments.py, mengikuti pola yang sama persis (satu baris
+import + satu baris include_router, tidak ada logic baru di file ini).
 """
 
 import asyncio
@@ -29,7 +33,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files, location, settings, selection
+from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files, location, settings, selection, attachments
 from api.routers import ws
 from api.ws_bridge import get_ws_bridge
 from agents.akane.connection_manager import get_connection_manager
@@ -64,6 +68,7 @@ app.include_router(files.router)
 app.include_router(location.router)
 app.include_router(settings.router)
 app.include_router(selection.router)
+app.include_router(attachments.router)
 app.include_router(ws.router)
 
 
