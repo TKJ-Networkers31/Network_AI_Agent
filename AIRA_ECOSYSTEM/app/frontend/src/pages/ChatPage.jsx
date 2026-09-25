@@ -25,6 +25,29 @@
 //   (heroVisible/heroReady) tidak berubah.
 // - WorkspaceCockpit.jsx TIDAK dihapus (masih dipertahankan untuk kompatibilitas
 //   kalau dipakai di tempat lain); ChatPage sekarang memakai ComposerCockpit.
+//
+// SPRINT 2.7 (W8 - Dynamic Capability UI):
+// - Komponen diganti dari satu fungsi jadi wrapper tipis <ChatPage> yang
+//   memasang <CapabilityProvider> (sinyal attachment/artifact/location/
+//   conversation) di sekeliling <ChatPageInner> yang berisi SELURUH logic
+//   lama tanpa perubahan. Ini supaya komponen dalam bisa memakai
+//   useCapabilityContext() untuk membaca hasil fetch kapabilitas.
+// - Dua area baru dirender sebagai sibling murni (tidak mengubah komponen
+//   yang sudah ada): <CapabilityHeroRow> di bawah Hero (saat percakapan
+//   kosong) dan <CapabilityDock> tepat di atas <ComposerCockpit>.
+// - `handleCapabilityInvoke` (dispatcher generik, lihat
+//   utils/capabilityInvoke.js) diteruskan ke ChatInput (chat_input) dan ke
+//   tiap MessageBubble (message_actions).
+// - Sinyal konteks: `has_location` di-set true/false mengikuti submit DIO
+//   grant_location/deny_location yang SUDAH ADA (tidak ada DIO baru).
+//   `has_artifact` dihitung dengan heuristik ringan (pesan mengandung blok
+//   SVG/graph) - lihat catatan keterbatasan di laporan pengiriman soal
+//   kenapa ini pendekatan sementara, bukan deteksi penuh seperti di
+//   Markdown.jsx. `has_attachment` disediakan (setter ada di context) tapi
+//   TIDAK ADA state UI attachment yang mengisinya di paket ini - ChatInput
+//   belum punya fitur lampirkan file.
+// - Streaming, phase, liveTools, dan seluruh alur kirim/edit/regenerate
+//   pesan TIDAK disentuh.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
@@ -36,9 +59,12 @@ import LiveSteps from "../components/LiveSteps.jsx";
 import BootScreen from "../components/BootScreen.jsx";
 import ComposerCockpit from "../components/cockpit/ComposerCockpit.jsx";
 import DynamicHero from "../components/cockpit/DynamicHero.jsx";
+import CapabilityDock from "../components/capabilities/CapabilityDock.jsx";
+import CapabilityHeroRow from "../components/capabilities/CapabilityHeroRow.jsx";
 import { api } from "../api.js";
 import { useSessionsContext } from "../context/SessionsContext.jsx";
 import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
+import { CapabilityProvider, useCapabilityContext } from "../context/CapabilityContext.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { useVoiceCall } from "../hooks/useVoiceCall.js";
 import { useGlobalSettings } from "../hooks/useGlobalSettings.js";
@@ -46,9 +72,20 @@ import { useCockpitData } from "../hooks/useCockpitData.js";
 import { navigateForTool } from "../utils/cockpitAdapter.js";
 import { resolveGreetingModel } from "../utils/greetingResolver.js";
 import { shouldShowLiveSteps } from "../utils/runLifecycle.js";
+import { invokeCapability } from "../utils/capabilityInvoke.js";
 import Hero from "../Hero.jsx";
 
 export default function ChatPage({ onOpenMenu }) {
+  const { activeId } = useSessionsContext();
+
+  return (
+    <CapabilityProvider conversationId={activeId}>
+      <ChatPageInner onOpenMenu={onOpenMenu} />
+    </CapabilityProvider>
+  );
+}
+
+function ChatPageInner({ onOpenMenu }) {
   const { sessions, activeId, setActiveId, loadSessions, sessionsReady } =
     useSessionsContext();
 
@@ -79,6 +116,7 @@ export default function ChatPage({ onOpenMenu }) {
   const bottomRef = useRef(null);
 
   const { notify } = useToast();
+  const { setHasArtifact, setHasLocation } = useCapabilityContext();
 
   // ---- Sprint 2.6: settings + cockpit + hero model -------------------------
   const settings = useGlobalSettings(); // null = belum dimuat, {} = gagal, {...} = snapshot
@@ -127,6 +165,18 @@ export default function ChatPage({ onOpenMenu }) {
 
     return { lastNonLocalIdx: lastNonLocal, regenIdx: regen };
   }, [messages]);
+
+  // SPRINT 2.7 (W8): sinyal "has_artifact" - heuristik ringan berbasis
+  // konten pesan (blok SVG/graph/JSON terstruktur), BUKAN duplikasi penuh
+  // dari deteksi looksLikeSvg/looksLikeGraphJson di Markdown.jsx. Cukup
+  // untuk memberi backend sinyal kasar "ada ilustrasi di percakapan ini".
+  useEffect(() => {
+    const hasArtifact = messages.some((m) => {
+      const text = m.content || "";
+      return /```\s*(svg|xml|graph)/i.test(text) || /<svg[\s>]/i.test(text);
+    });
+    setHasArtifact(hasArtifact);
+  }, [messages, setHasArtifact]);
 
   const voiceCall = useVoiceCall({
     onSendAudio: (payload) => {
@@ -185,6 +235,19 @@ export default function ChatPage({ onOpenMenu }) {
     });
   }
 
+  // SPRINT 2.7 (W8): dispatcher generik untuk kapabilitas dinamis - dipakai
+  // oleh ChatInput (chat_input), MessageBubble (message_actions), Hero
+  // (hero), dan CapabilityDock (capability_dock). Tidak menggantikan
+  // handleSend/sendDioSubmission yang sudah ada; hanya membungkusnya
+  // sebagai salah satu "tipe aksi" yang capabilityInvoke tahu cara jalankan.
+  async function handleCapabilityInvoke(capability) {
+    return invokeCapability(capability, {
+      onSend: handleSend,
+      notify,
+      onWorkspaceChange: () => {},
+    });
+  }
+
   function handleInteractionSubmit(index, actionId, values) {
     const message = messages[index];
     const schema = message?.interactionSchema;
@@ -206,6 +269,12 @@ export default function ChatPage({ onOpenMenu }) {
         : cancelled
         ? "❌ Dibatalkan."
         : "📝 Form terkirim.";
+
+    // SPRINT 2.7 (W8): sinyal has_location untuk CapabilityContext - dua
+    // action id ini sudah ada sebelum W8, hanya ditambah efek samping
+    // pembaruan sinyal, tidak ada perubahan pada alur DIO itu sendiri.
+    if (actionId === "grant_location") setHasLocation(true);
+    if (actionId === "deny_location") setHasLocation(false);
 
     markInteractionResolved(index);
 
@@ -286,6 +355,7 @@ export default function ChatPage({ onOpenMenu }) {
           {/* Sapaan tetap di area percakapan (bukan di composer) */}
           {heroVisible && heroReady && <DynamicHero heroModel={heroModel} />}
           {heroVisible && <Hero onQuickPrompt={(text) => handleSend(text)} />}
+          {heroVisible && <CapabilityHeroRow onInvoke={handleCapabilityInvoke} />}
 
           {!switching &&
             messages.map((m, i) => (
@@ -307,6 +377,9 @@ export default function ChatPage({ onOpenMenu }) {
                 onRegenerate={regenerate}
                 hasFollowing={i < lastNonLocalIdx}
                 onEdit={m.role === "user" ? (text) => editMessage(i, text) : undefined}
+                messageId={m.id ?? i}
+                conversationId={activeId}
+                onCapabilityInvoke={handleCapabilityInvoke}
               />
             ))}
 
@@ -319,6 +392,11 @@ export default function ChatPage({ onOpenMenu }) {
           <div ref={bottomRef} />
         </div>
       </div>
+
+      {/* SPRINT 2.7 (W8): Capability Dock - strip terpisah dari
+          ComposerCockpit (yang tidak diubah), reaktif terhadap
+          attachment/artifact/location/conversation lewat CapabilityContext. */}
+      <CapabilityDock onInvoke={handleCapabilityInvoke} />
 
       {/* Composer: Composer Cockpit (compact instrument row) menempel
           langsung di atas ChatInput - satu unit visual, bukan header
@@ -337,6 +415,7 @@ export default function ChatPage({ onOpenMenu }) {
         isRunning={loading}
         onStop={() => stopRun()}
         tools={tools}
+        onCapabilityInvoke={handleCapabilityInvoke}
         voiceControls={
           <VoiceControls
             supported={voiceCall.supported}

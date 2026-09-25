@@ -140,3 +140,17 @@ def get_artifact_store() -> ArtifactStore:
             if _store_singleton is None:
                 _store_singleton = ArtifactStore()
     return _store_singleton
+
+    def get_by_storage_reference(self, storage_reference: str) -> Optional[Artifact]:
+        """Reverse lookup: workspace path -> Artifact (workspace <-> conversation
+        integration, core/workspace_links). None if no artifact owns this path."""
+        if not storage_reference:
+            return None
+
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM artifacts WHERE storage_reference = ? ORDER BY created_at DESC LIMIT 1",
+                (storage_reference,),
+            ).fetchone()
+
+        return self._row_to_artifact(row) if row else None

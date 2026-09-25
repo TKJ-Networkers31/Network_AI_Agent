@@ -16,6 +16,17 @@
 // sedang diisi potongan jawaban. Aksi (salin/buat ulang) disembunyikan sampai
 // pesan final menggantikannya di posisi yang sama (bubble tidak remount, jadi
 // animasi reveal tidak diputar ulang). Bagian lain tidak berubah.
+//
+// SPRINT 2.7 (W8 - Dynamic Capability UI):
+// - Baris aksi (Salin/Edit/Buat ulang) sekarang juga merender kapabilitas
+//   dinamis area "message_actions" lewat <MessageCapabilityActions>, HANYA
+//   saat `showActions` sudah true (pesan tidak sedang streaming & bukan
+//   pesan lokal) - supaya tidak ada fetch capability untuk tiap pesan yang
+//   sedang jalan. Konteksnya reaktif terhadap seleksi teks pesan ini
+//   (`selection` dari useSelectionContext yang sudah ada).
+// - Prop baru `onCapabilityInvoke` (opsional), diteruskan apa adanya ke
+//   MessageCapabilityActions. Tidak ada perubahan pada logic Copy/Edit/
+//   Regenerate/DIO yang sudah ada.
 import { useEffect, useRef, useState } from "react";
 import ToolStep from "./ToolStep.jsx";
 import Markdown from "./Markdown.jsx";
@@ -23,6 +34,7 @@ import Renderer from "./dio/Renderer.jsx";
 import CopyButton from "./CopyButton.jsx";
 import { useSelectionContext } from "../hooks/useSelectionContext.js";
 import SelectionToolbar from "./selection/SelectionToolbar.jsx";
+import MessageCapabilityActions from "./capabilities/MessageCapabilityActions.jsx";
 
 function ProcessSteps({ steps }) {
   const [open, setOpen] = useState(false);
@@ -220,6 +232,7 @@ export default function MessageBubble({
   conversationId = null,
   sessionId = null,
   onSelectionAction,
+  onCapabilityInvoke,
 }) {
   const isUser = role === "user";
   const hasInteraction = !isUser && Boolean(interactionSchema);
@@ -331,6 +344,15 @@ export default function MessageBubble({
                 <RegenerateIcon />
               </ActionButton>
             )}
+
+            <MessageCapabilityActions
+              messageId={messageId}
+              conversationId={conversationId}
+              sessionId={sessionId}
+              role={role}
+              hasSelection={Boolean(selection)}
+              onInvoke={onCapabilityInvoke}
+            />
           </div>
         )}
       </div>

@@ -7,9 +7,18 @@
 //
 // CATATAN: -mx-3 sm:-mx-5 lg:-mx-6 dan -mb-3 sm:-mb-4 HARUS sama dengan
 // padding wrapper halaman di App.jsx (px-3 sm:px-5 lg:px-6, pb-3 sm:pb-4).
+//
+// SPRINT 2.7 (W8 - Dynamic Capability UI):
+// - Slot baru <CapabilityInputSlot> di samping voiceControls, merender
+//   kapabilitas area "chat_input" yang dikirim backend (mis. quick-action
+//   ikon selain mic). Prop baru `onCapabilityInvoke` (opsional) diteruskan
+//   apa adanya - kalau tidak dipakai oleh pemanggil, slot tetap merender
+//   tapi klik tidak melakukan apa-apa (aman, tidak melempar error).
+// - Tidak ada logic kirim pesan/slash menu/Enter yang berubah.
 
 import { useRef, useState } from "react";
 import SlashMenu from "./SlashMenu.jsx";
+import CapabilityInputSlot from "./capabilities/CapabilityInputSlot.jsx";
 
 export default function ChatInput({
   onSend,
@@ -18,6 +27,7 @@ export default function ChatInput({
   voiceControls,
   isRunning = false,
   onStop,
+  onCapabilityInvoke,
 }) {
   const [value, setValue] = useState("");
   const [showSlash, setShowSlash] = useState(false);
@@ -68,6 +78,8 @@ export default function ChatInput({
           className="flex items-end gap-2 bg-white/[0.04] border border-border rounded-card p-2 focus-within:border-sakura/40 transition"
         >
           {voiceControls}
+
+          <CapabilityInputSlot onInvoke={onCapabilityInvoke} />
 
           <textarea
             ref={textareaRef}

@@ -71,6 +71,25 @@ export const api = {
 
   tools: () => request("/tools"),
 
+  // SPRINT 2.7 (W8 - Dynamic Capability UI): backend adalah satu-satunya
+  // sumber kebenaran soal kapabilitas apa yang tersedia di tiap area UI
+  // (hero, chat_input, capability_dock, message_actions, file_actions).
+  // Frontend hanya mengirim `area` + sinyal konteks (attachment, selection,
+  // artifact, location, conversation, file_path, dst) dan merender apa pun
+  // yang dikembalikan - lihat hooks/useCapabilities.js.
+  capabilities: {
+    list: (params = {}) => {
+      const qs = new URLSearchParams(
+        Object.fromEntries(
+          Object.entries(params).filter(
+            ([, v]) => v !== undefined && v !== null && v !== "" && v !== false
+          )
+        )
+      ).toString();
+      return request(`/capabilities${qs ? `?${qs}` : ""}`);
+    },
+  },
+
   sessions: {
     list: () => request("/sessions"),
     create: () => request("/sessions", { method: "POST" }),

@@ -199,3 +199,24 @@ def get_attachment_store() -> AttachmentStore:
             if _store_singleton is None:
                 _store_singleton = AttachmentStore()
     return _store_singleton
+
+    def get_by_storage_reference(
+        self, storage_reference: str, include_deleted: bool = False,
+    ) -> Optional[Attachment]:
+        """Reverse lookup: workspace path -> Attachment (workspace <-> conversation
+        integration, core/workspace_links). None if no attachment owns this path."""
+        if not storage_reference:
+            return None
+
+        query = "SELECT * FROM attachments WHERE storage_reference = ?"
+        params: list = [storage_reference]
+
+        if not include_deleted:
+            query += " AND status != 'deleted'"
+
+        query += " ORDER BY created_at DESC LIMIT 1"
+
+        with closing(self._connect()) as conn:
+            row = conn.execute(query, params).fetchone()
+
+        return self._row_to_attachment(row) if row else None
