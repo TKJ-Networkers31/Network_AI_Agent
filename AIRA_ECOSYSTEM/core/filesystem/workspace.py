@@ -22,7 +22,16 @@ from core.events import event_bus
 
 logger = logging.getLogger("aira.filesystem.workspace")
 
-SUBFOLDERS = ("Projects", "Documents", "Images", "Temp", "Trash", ".aira_history")
+SUBFOLDERS = (
+    "Projects",
+    "Documents",
+    "Images",
+    "Temp",
+    "Trash",
+    ".aira_history",
+    "Artifacts",
+    "Attachments",
+)
 
 
 class PathTraversalError(Exception):
