@@ -9,10 +9,20 @@ WebSocket menerimanya lewat api/ws_bridge.py. Tidak ada lagi callback
 on_event: hanya ada SATU sistem event.
 
 Interaction schema (DIO):
-  Tool di DIO_SCHEMA_TOOLS (request_structured_input,
-  request_location_permission) mengembalikan 'interaction_schema'. Planner
-  menyimpannya sebagai pending_interaction_schema dan menyertakannya di
-  setiap return, sehingga sampai ke frontend.
+  Tool APA PUN yang mengembalikan success=True + 'interaction_schema'
+  (request_structured_input, request_location_permission, atau tool lain
+  seperti maps_search / tool device yang butuh pilihan perangkat) dianggap
+  "AIRA sedang bertanya ke user". Perilakunya:
+    1. schema disimpan sebagai pending_interaction_schema dan ikut di return
+       sehingga sampai ke frontend.
+    2. Loop BERHENTI di situ (tidak ada panggilan LLM tambahan). Teks yang
+       sudah ditulis LLM SEBELUM memanggil tool (message.content) dipakai
+       sebagai jawaban -> user melihat: [teks penjelasan] + [form]. Kalau
+       LLM tidak menulis teks, dipakai description/title schema.
+    3. Tool call lain di batch yang sama ditunda (dijawab "ditunda") supaya
+       format riwayat pesan tetap valid.
+    4. Riwayat diberi pesan assistant sintetis supaya giliran berikutnya
+       (submission form) tetap konsisten untuk LLM.
 
 session_id:
   Tool di SESSION_AWARE_TOOLS menerima session_id yang disisipkan planner
@@ -30,27 +40,17 @@ Model:
 
 Context:
   'context' (AIRAContext dari core/context, disusun Brain) dipakai apa adanya:
-  context.system_prompt menjadi system prompt. Planner TIDAK lagi menyusun
-  persona/waktu/memory/lokasi sendiri. Kalau context=None (pemanggil yang
-  tidak lewat Brain), Planner meminta builder default membuatnya - tetap SATU
-  jalur penyusunan konteks, tidak ada injeksi ganda.
+  context.system_prompt menjadi system prompt.
 
 Streaming (Sprint 2.5):
   run(..., stream=True) meneruskan sink ke call_model() sehingga provider
-  yang mendukung streaming benar-benar di-stream. Sink (_StreamPublisher)
-  hanya mempublish ke Event Bus:
-      stream.start   awal SATU request ke provider (juga retry / fallback /
-                     panggilan LLM berikutnya sesudah tool) -> {call, attempt,
-                     model{id, display_name, provider, fallback_from}}
-      stream.delta   potongan teks baru -> {call, attempt, seq, text}
-  Satu giliran bisa punya beberapa 'call' (LLM -> tool -> LLM). Teks dari call
-  yang berakhir dengan tool_calls hanyalah pengantar; jawaban final tetap
-  message.content dari call terakhir (answer di result), yang menjadi
-  "complete" dan selalu menggantikan buffer client. stream=False (default)
-  = jalur lama tanpa perubahan apa pun.
+  yang mendukung streaming benar-benar di-stream (stream.start /
+  stream.delta di Event Bus). Teks pengantar sebelum tool call ikut
+  ter-stream, lalu 'response' (COMPLETE) membawa answer + interaction_schema.
 """
 
 import json
+import re
 import time
 import logging
 
@@ -65,11 +65,32 @@ MAX_TOOL_CALLS = 10
 MAX_EMPTY_RESPONSE_RETRIES = 1
 MAX_REPEATED_IDENTICAL_CALLS = 2
 
-# Tool yang hasilnya membawa interaction_schema untuk dirender frontend.
+# Dipertahankan demi kompatibilitas import lama. Deteksi interaksi sekarang
+# berbasis ADANYA 'interaction_schema' di hasil tool, bukan nama tool.
 DIO_SCHEMA_TOOLS = {"request_structured_input", "request_location_permission"}
 
 # Tool yang butuh session_id (diisi planner, BUKAN diminta dari LLM).
-SESSION_AWARE_TOOLS = {"request_location_permission"}
+SESSION_AWARE_TOOLS = {"request_location_permission", "maps_search", "maps_route"}
+
+DEFAULT_INTERACTION_TEXT = "Aku butuh info tambahan dulu ya."
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _intro_text(message, schema) -> str:
+    """Teks yang tampil di atas form: tulisan LLM sebelum tool call, atau
+    fallback dari schema."""
+    text = _THINK_RE.sub("", (message or {}).get("content") or "").strip()
+
+    if text and text != EMPTY_RESPONSE_MARKER:
+        return text
+
+    if isinstance(schema, dict):
+        fallback = (schema.get("description") or schema.get("title") or "").strip()
+        if fallback:
+            return fallback
+
+    return DEFAULT_INTERACTION_TEXT
 
 
 class _StreamPublisher:
@@ -207,9 +228,23 @@ class Planner:
 
             emit(EventNames.THINKING_START, {"message": f"Menggunakan {len(tool_calls)} tool..."})
 
+            interaction_pending = False
+
             for call in tool_calls:
                 if is_cancelled():
                     return cancelled_result()
+
+                # AIRA sudah bertanya ke user lewat form: sisa tool call di
+                # batch ini ditunda (tetap dijawab supaya riwayat valid).
+                if interaction_pending:
+                    memory.add_tool_result(
+                        json.dumps({
+                            "success": False,
+                            "error": "Ditunda: menunggu jawaban user pada form interaktif.",
+                        }),
+                        tool_call_id=call.get("id"),
+                    )
+                    continue
 
                 if tool_count >= MAX_TOOL_CALLS:
                     steps.append({"type": "limit_reached", "message": "Batas jumlah tool call tercapai."})
@@ -225,6 +260,9 @@ class Planner:
                         arguments = json.loads(arguments)
                     except json.JSONDecodeError:
                         arguments = {}
+
+                if not isinstance(arguments, dict):
+                    arguments = {}
 
                 category = self.tool_category.get(name, "tool")
 
@@ -275,7 +313,7 @@ class Planner:
                 emit(EventNames.TOOL_START, {"name": name, "category": category, "arguments": arguments})
                 emit(EventNames.TOOL_PROGRESS, {"name": name, "category": category, "message": f"Menjalankan {name}..."})
 
-                # FIX: session_id disisipkan planner, bukan diminta dari LLM.
+                # session_id disisipkan planner, bukan diminta dari LLM.
                 exec_args = (
                     {**arguments, "session_id": session_id}
                     if name in SESSION_AWARE_TOOLS
@@ -288,13 +326,15 @@ class Planner:
 
                 tool_count += 1
 
-                # FIX: kedua tool DIO membawa schema keluar lewat return planner.
-                if (
-                    name in DIO_SCHEMA_TOOLS
+                asks_user = bool(
+                    isinstance(result, dict)
                     and result.get("success")
                     and result.get("interaction_schema")
-                ):
+                )
+
+                if asks_user:
                     pending_interaction_schema = result["interaction_schema"]
+                    interaction_pending = True
 
                 steps.append({
                     "type": "tool_call", "name": name, "category": category,
@@ -309,10 +349,27 @@ class Planner:
                     "duration": round(step_duration, 3),
                 })
 
-                memory.add_tool_result(json.dumps(result, ensure_ascii=False), tool_call_id=call.get("id"))
+                # Schema form besar tidak perlu masuk riwayat LLM.
+                tool_payload = (
+                    {
+                        "success": True,
+                        "tool": name,
+                        "interaction_shown": True,
+                        "message": "Form/pilihan interaktif sudah ditampilkan ke user. Menunggu jawabannya.",
+                    }
+                    if asks_user else result
+                )
+
+                memory.add_tool_result(json.dumps(tool_payload, ensure_ascii=False), tool_call_id=call.get("id"))
 
             if is_cancelled():
                 return cancelled_result()
+
+            if interaction_pending:
+                # Berhenti: teks pengantar LLM + form. Tanpa panggilan LLM tambahan.
+                intro = _intro_text(message, pending_interaction_schema)
+                memory.add_message({"role": "assistant", "content": intro})
+                return result_dict(intro)
 
             emit(EventNames.THINKING_START, {"message": "Menyusun jawaban..."})
 
@@ -364,5 +421,5 @@ class Planner:
 
 
 def _preview(result, limit=400):
-    text = json.dumps(result, ensure_ascii=False)
+    text = json.dumps(result, ensure_ascii=False, default=str)
     return text[:limit] + "...(truncated)" if len(text) > limit else text

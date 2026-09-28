@@ -7,6 +7,10 @@ Tool untuk LLM:
   - request_location_permission(): izin GPS browser + menyimpan permintaan
     asli user supaya dilanjutkan otomatis setelah izin diberikan.
 
+Helper backend (dipakai core/orchestrator.py, bukan tool LLM):
+  - request_device_choice(): pilihan perangkat dari inventory kalau
+    device_name kosong / tidak dikenal.
+
 Alur submission (dipakai chat.py DAN ws.py lewat satu helper):
   resolve_submission(dio_submission) -> (display_message, llm_message)
 
@@ -19,12 +23,17 @@ KEAMANAN:
 
 session_id untuk request_location_permission diisi otomatis oleh
 agents/rei/planner.py - LLM tidak diminta menyebutkannya.
+
+Input dari LLM ditoleransi: model kecil sering mengirim missing_fields /
+choices / options sebagai string, string-JSON, atau list string. Semua
+dinormalisasi di sini; item yang tidak bisa dipakai dibuang, bukan
+membuat tool crash.
 """
 
 import json
 import re
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from core.dio import get_dio
 from core.dio.models import InteractionPlan, MissingField, ChoiceOption
@@ -45,14 +54,68 @@ def _is_sensitive(key) -> bool:
     return bool(SENSITIVE_KEY_RE.search(str(key)))
 
 
-def _to_missing_field(raw: dict) -> MissingField:
-    options = [
-        ChoiceOption(value=o["value"], label=o.get("label", o["value"]))
-        for o in raw.get("options", [])
-    ]
+# ======================================================= NORMALISASI INPUT
+
+def _coerce_list(value: Any) -> list:
+    """None/str/JSON-string/list/objek tunggal -> list."""
+    if value is None:
+        return []
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            return [text]
+        return parsed if isinstance(parsed, list) else [parsed]
+
+    if isinstance(value, (list, tuple)):
+        return list(value)
+
+    return [value]
+
+
+def _to_choice(raw: Any) -> Optional[ChoiceOption]:
+    if isinstance(raw, ChoiceOption):
+        return raw
+
+    if isinstance(raw, (str, int, float)) and not isinstance(raw, bool):
+        text = str(raw)
+        return ChoiceOption(value=text, label=text)
+
+    if isinstance(raw, dict):
+        value = raw.get("value")
+        if value is None:
+            value = raw.get("label") or raw.get("name")
+        if value is None:
+            return None
+        return ChoiceOption(value=str(value), label=str(raw.get("label") or value))
+
+    return None
+
+
+def _to_missing_field(raw: Any) -> Optional[MissingField]:
+    if isinstance(raw, MissingField):
+        return raw
+
+    if isinstance(raw, str):
+        key = raw.strip()
+        return MissingField(key=key) if key else None
+
+    if not isinstance(raw, dict):
+        return None
+
+    key = raw.get("key") or raw.get("name")
+    if not key:
+        return None
+
+    options = [c for c in (_to_choice(o) for o in _coerce_list(raw.get("options"))) if c is not None]
+
     return MissingField(
-        key=raw["key"],
-        data_type=raw.get("data_type", "string"),
+        key=str(key),
+        data_type=str(raw.get("data_type") or "string"),
         label=raw.get("label"),
         required=raw.get("required", True),
         options=options,
@@ -62,10 +125,6 @@ def _to_missing_field(raw: dict) -> MissingField:
         min=raw.get("min"),
         max=raw.get("max"),
     )
-
-
-def _to_choice(raw: dict) -> ChoiceOption:
-    return ChoiceOption(value=raw["value"], label=raw.get("label", raw["value"]))
 
 
 # ============================================================ TOOL: form umum
@@ -88,12 +147,15 @@ def request_structured_input(
     LLM bisa memperbaiki panggilannya - bukan menampilkan form rusak.
     """
 
+    fields = [f for f in (_to_missing_field(m) for m in _coerce_list(missing_fields)) if f is not None]
+    options = [c for c in (_to_choice(c) for c in _coerce_list(choices)) if c is not None]
+
     plan = InteractionPlan(
-        intent=intent,
-        missing_data=[_to_missing_field(m) for m in (missing_fields or [])],
-        choices=[_to_choice(c) for c in (choices or [])],
-        danger=danger,
-        needs_review=needs_review,
+        intent=str(intent or "input"),
+        missing_data=fields,
+        choices=options,
+        danger=bool(danger),
+        needs_review=bool(needs_review),
     )
     plan.suggested_mode = select_mode(plan)
 
@@ -116,6 +178,35 @@ def request_structured_input(
     }
 
 
+def request_device_choice(tool_name: str, devices: list, reason: Optional[str] = None) -> dict:
+    """
+    Pilihan perangkat dari inventory (dipanggil orchestrator kalau tool
+    jaringan butuh device_name tapi kosong/tidak dikenal). Bukan tool LLM.
+    Submission form membawa {"device_name": "<nama>"}.
+    """
+    options = []
+
+    for device in devices or []:
+        name = str(device.get("name") or "").strip()
+        if not name:
+            continue
+        host = device.get("host")
+        options.append({"value": name, "label": f"{name} ({host})" if host else name})
+
+    result = request_structured_input(
+        intent="pick_device",
+        missing_fields=[{
+            "key": "device_name", "label": "Perangkat",
+            "data_type": "choice", "options": options,
+        }],
+        title="Pilih perangkat",
+        description=reason or "Perangkat mana yang mau dipakai?",
+    )
+    result["requested_for"] = tool_name
+
+    return result
+
+
 # ======================================================= TOOL: izin lokasi
 
 def request_location_permission(
@@ -124,8 +215,8 @@ def request_location_permission(
     session_id: Optional[str] = None,
 ) -> dict:
     """
-    Dipanggil LLM saat permintaan user butuh lokasi presisi SEKARANG dan
-    lokasi akses sesi belum bersumber dari GPS browser.
+    Dipanggil LLM (atau tool maps) saat permintaan user butuh lokasi presisi
+    SEKARANG dan lokasi akses sesi belum bersumber dari GPS browser.
 
     `session_id` diisi otomatis oleh planner - JANGAN diminta dari LLM.
     """
@@ -317,8 +408,9 @@ def build_submission_message(
             llm_message = (
                 "[Instruksi sistem: User TIDAK memberikan lokasi GPS yang valid "
                 f"(alasan: {reason}). JANGAN memanggil request_location_permission lagi "
-                "di giliran ini. Jawab permintaan asli user berikut TANPA data lokasi "
-                f"presisi, atau jelaskan kenapa lokasi dibutuhkan: \"{original_request}\"]"
+                "di giliran ini. Untuk pencarian tempat/rute pakai allow_approximate=true "
+                "(lokasi perkiraan) atau tanyakan nama daerah. Jawab permintaan asli user "
+                f"berikut TANPA data lokasi presisi: \"{original_request}\"]"
             )
 
         return display_message, llm_message

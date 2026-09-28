@@ -9,19 +9,24 @@ Startup:
 - WebSocketEventBridge di-start di event loop utama (sekaligus bind_loop
   ke Event Bus).
 - Interaction memory dibersihkan dari entri kedaluwarsa (purge_expired).
+- (SPRINT 2.7.1 P0) Capability Registry dipopulasi dari tool schemas
+  (AGENT_TOOL_SCHEMAS) dan dari External Context provider (Google Maps).
+  Kedua fungsi register_* SUDAH ADA sejak Sprint 2.7
+  (core/capability/integration.py, core/external_context/capability_bridge.py)
+  tapi tidak pernah dipanggil sebelumnya.
 Shutdown:
 - Bridge dihentikan rapi, semua sesi SSH APCE ditutup.
 
-Perubahan (Sprint 2.6, Worker 1 — Global Settings Engine): mendaftarkan
-api/routers/settings.py, mengikuti pola router lain di bawah — satu-satunya
-perubahan pada file ini untuk fitur tersebut.
-
-Perubahan (Sprint 2.7, Wave 1, Worker 2 — Universal Attachment): mendaftarkan
-api/routers/attachments.py, mengikuti pola yang sama persis (satu baris
-import + satu baris include_router, tidak ada logic baru di file ini).
+SPRINT 2.7.1 (P0 Recovery): file ini sekarang juga mendaftarkan
+api/routers/vision.py dan api/routers/workspace_links.py (sudah ada sejak
+Sprint 2.7 tapi tidak pernah di-include_router - 404 di production), serta
+api/routers/capabilities.py dan api/routers/artifacts.py (baru, thin HTTP
+adapter di atas core/capability dan core/artifacts yang sudah ada -
+BUKAN subsistem baru).
 """
 
 import asyncio
+import logging
 import threading
 from pathlib import Path
 
@@ -33,7 +38,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import chat, providers, memory, devices, sessions, tools, logs, models, persona, connections, files, location, settings, selection, attachments
+from api.routers import (
+    chat, providers, memory, devices, sessions, tools, logs, models, persona,
+    connections, files, location, settings, selection, attachments,
+    vision, workspace_links, capabilities, artifacts,
+)
 from api.routers import ws
 from api.ws_bridge import get_ws_bridge
 from agents.akane.connection_manager import get_connection_manager
@@ -69,6 +78,10 @@ app.include_router(location.router)
 app.include_router(settings.router)
 app.include_router(selection.router)
 app.include_router(attachments.router)
+app.include_router(vision.router)          # === SPRINT 2.7.1 P0 FIX ===
+app.include_router(workspace_links.router)  # === SPRINT 2.7.1 P0 FIX ===
+app.include_router(capabilities.router)     # === SPRINT 2.7.1 P0 FIX (baru) ===
+app.include_router(artifacts.router)        # === SPRINT 2.7.1 P0 FIX (baru) ===
 app.include_router(ws.router)
 
 
@@ -90,6 +103,39 @@ def _startup_purge_interaction_memory():
         get_interaction_memory().purge_expired()
     except Exception:
         pass
+
+
+@app.on_event("startup")
+def _startup_capability_registry():
+    """
+    (SPRINT 2.7.1 P0.1) Populate the Capability Registry so GET
+    /api/capabilities (and every frontend area reading from it - Hero,
+    Composer Cockpit dock, chat input slot, message actions) actually has
+    something to return. Both register_* functions already existed since
+    Sprint 2.7 but were never invoked anywhere in the app.
+    """
+    logger = logging.getLogger("aira.startup.capability")
+
+    try:
+        from core.orchestrator import AGENT_TOOL_SCHEMAS, AGENT_TOOL_CATEGORY, DANGEROUS_TOOLS
+        from core.capability.integration import register_tool_capabilities
+
+        result = register_tool_capabilities(AGENT_TOOL_SCHEMAS, AGENT_TOOL_CATEGORY, DANGEROUS_TOOLS)
+        logger.info(
+            "CAPABILITY | tool bridge: %d registered, %d skipped, %d error.",
+            len(result["registered"]), len(result["skipped"]), len(result["errors"]),
+        )
+    except Exception:
+        logger.exception("Gagal registrasi tool capabilities saat startup.")
+
+    try:
+        from core.external_context.factory import get_google_maps_provider
+        from core.external_context.capability_bridge import register_provider_capabilities
+
+        result = register_provider_capabilities(get_google_maps_provider())
+        logger.info("CAPABILITY | provider bridge: %d registered.", len(result["registered"]))
+    except Exception:
+        logger.exception("Gagal registrasi provider capabilities saat startup.")
 
 
 @app.on_event("startup")

@@ -15,10 +15,34 @@
 //   apa adanya - kalau tidak dipakai oleh pemanggil, slot tetap merender
 //   tapi klik tidak melakukan apa-apa (aman, tidak melempar error).
 // - Tidak ada logic kirim pesan/slash menu/Enter yang berubah.
+//
+// SPRINT 2.7.1 (P0 recovery — flow A "upload file → AIRA dapat context"):
+// - Tombol lampirkan file (paperclip) ditambah di samping voiceControls.
+//   Klik membuka <input type="file"> tersembunyi; file yang dipilih
+//   diteruskan lewat prop baru `onAttachFile(file)` ke ChatPage - komponen
+//   ini sendiri TIDAK memanggil API, murni UI, sama seperti pola
+//   voiceControls yang sudah ada. Tombol hanya muncul kalau `onAttachFile`
+//   diberikan (opsional, tidak memaksa pemanggil lain menyediakannya).
+// - `attachedFileName` (opsional) menampilkan nama file terakhir yang
+//   berhasil terlampir ke sesi ini sebagai indikator kecil di atas input.
 
 import { useRef, useState } from "react";
 import SlashMenu from "./SlashMenu.jsx";
 import CapabilityInputSlot from "./capabilities/CapabilityInputSlot.jsx";
+
+function AttachIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" style={{ width: 15, height: 15 }}>
+      <path
+        d="M17 8v8a4 4 0 0 1-8 0V6a2.5 2.5 0 0 1 5 0v9a1 1 0 0 1-2 0V8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 export default function ChatInput({
   onSend,
@@ -28,10 +52,13 @@ export default function ChatInput({
   isRunning = false,
   onStop,
   onCapabilityInvoke,
+  onAttachFile,
+  attachedFileName = null,
 }) {
   const [value, setValue] = useState("");
   const [showSlash, setShowSlash] = useState(false);
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   function handleChange(e) {
     const v = e.target.value;
@@ -64,6 +91,12 @@ export default function ChatInput({
     }
   }
 
+  function handleFilePicked(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // supaya file yang sama bisa dipilih ulang
+    if (file && onAttachFile) onAttachFile(file);
+  }
+
   const slashQuery = showSlash ? value.slice(1) : "";
 
   return (
@@ -73,11 +106,38 @@ export default function ChatInput({
           <SlashMenu tools={tools} query={slashQuery} onPick={pickTool} />
         )}
 
+        {attachedFileName && (
+          <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-white/50 px-1">
+            <AttachIcon />
+            <span className="truncate">{attachedFileName}</span>
+          </div>
+        )}
+
         <form
           onSubmit={submit}
           className="flex items-end gap-2 bg-white/[0.04] border border-border rounded-card p-2 focus-within:border-sakura/40 transition"
         >
           {voiceControls}
+
+          {onAttachFile && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={handleFilePicked}
+              />
+              <button
+                type="button"
+                title="Lampirkan file"
+                aria-label="Lampirkan file"
+                onClick={() => fileInputRef.current?.click()}
+                className="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-pill text-white/40 hover:text-white hover:bg-white/10 transition"
+              >
+                <AttachIcon />
+              </button>
+            </>
+          )}
 
           <CapabilityInputSlot onInvoke={onCapabilityInvoke} />
 

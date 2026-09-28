@@ -1,27 +1,28 @@
 """
-agents/akane/connection_manager.py — AKANE Persistent Connection Engine
+agents/akane/connection_manager.py — AIRA Persistent Connection Engine
 (APCE), Phase 2.2.
+
+Nama resmi APCE sekarang "AIRA Persistent Connection Engine" (sebelumnya
+"AKANE Persistent Connection Engine"). Path file tetap
+agents/akane/connection_manager.py supaya import lama tidak patah; event di
+Event Bus kini ditandai agent="AIRA".
 
 SATU-SATUNYA modul yang boleh membuka/menutup/menjalankan perintah lewat
 tools/ssh/shell.py (PersistentShell / invoke_shell). REI dan
 network_tools TIDAK BOLEH memanggil paramiko atau tools/ssh/shell.py
 secara langsung - semua harus lewat ConnectionManager di file ini.
 
+Integrasi DIO: orchestrator (core/orchestrator.py) memastikan device_name
+valid SEBELUM execute_for_device() dipanggil - kalau kosong/ambigu AIRA
+bertanya lewat form pilihan perangkat.
+
 FIX (Optimalisasi APCE):
-1. Race condition TOCTOU di open_connection(): sebelumnya cek
-   MAX_CONCURRENT_SESSIONS dilakukan DI DALAM lock, tapi shell.open()
-   (I/O lambat, blocking) dipanggil DI LUAR lock. Dua request
-   open_connection() untuk device BERBEDA yang datang bersamaan bisa
-   sama-sama lolos cek limit sebelum salah satu tercatat di
-   self._sessions, sehingga limit bisa terlampaui. Fix: slot direservasi
-   ke self._pending_hosts SAAT MASIH DALAM LOCK yang sama dengan
-   pengecekan limit, dilepas lagi di blok finally apa pun hasilnya.
-2. tools/ssh/shell.py::PersistentShell.execute() sekarang mengembalikan
-   dict {"output", "prompt_matched"} bukan string mentah - execute() di
-   sini diupdate untuk membaca bentuk baru itu dan menambahkan field
-   "warning" ke hasil kalau prompt_matched=False, supaya caller (REI/
-   LLM/UI) tahu output mungkin terpotong alih-alih diam-diam dianggap
-   sukses penuh.
+1. Race condition TOCTOU di open_connection(): slot direservasi ke
+   self._pending_hosts SAAT MASIH DALAM LOCK yang sama dengan pengecekan
+   MAX_CONCURRENT_SESSIONS, dilepas lagi di blok finally apa pun hasilnya.
+2. PersistentShell.execute() mengembalikan dict {"output", "prompt_matched"};
+   execute() di sini menambahkan field "warning" kalau prompt_matched=False
+   supaya output yang mungkin terpotong tidak dianggap sukses penuh.
 """
 
 import os
@@ -42,6 +43,9 @@ from core.events import event_bus
 from core.logger import get_logger, log_event
 
 logger = get_logger("connection_manager")
+
+# Penanda sumber event untuk APCE di Event Bus / log.
+EVENT_AGENT = "AIRA"
 
 BASE_DIR = Path(__file__).resolve().parents[2]  # AIRA_ECOSYSTEM/
 INVENTORY_FILE = BASE_DIR / "inventory" / "router.yaml"
@@ -99,6 +103,14 @@ class ConnectionManager:
         with self._lock:
             return self._session_locks.setdefault(session_id, threading.Lock())
 
+    @staticmethod
+    def _publish(event_name: str, **kwargs) -> None:
+        """Event Bus tidak boleh menggagalkan operasi koneksi."""
+        try:
+            event_bus.publish(event_name, agent=EVENT_AGENT, **kwargs)
+        except Exception:
+            logger.exception("APCE | gagal publish %s (diabaikan).", event_name)
+
     # ------------------------------------------------------------
     # PUBLIC: OPEN / CLOSE / EXECUTE
     # ------------------------------------------------------------
@@ -130,7 +142,7 @@ class ConnectionManager:
             active_count = sum(1 for s in self._sessions.values() if s.status != STATUS_CLOSED)
             pending_count = len(self._pending_hosts)
 
-            # FIX: reservasi slot di sini, MASIH DALAM LOCK yang sama dengan
+            # Reservasi slot di sini, MASIH DALAM LOCK yang sama dengan
             # pengecekan limit, sebelum shell.open() (I/O lambat) dipanggil
             # di luar lock. `key` yang sudah pending untuk dirinya sendiri
             # tidak dihitung dobel.
@@ -149,8 +161,8 @@ class ConnectionManager:
                 shell.open(host=host, port=port, username=username, password=password)
             except Exception as exc:
                 logger.error("Gagal membuka koneksi ke %s: %s", host, exc)
-                event_bus.publish(
-                    "connection.error", agent="AKANE",
+                self._publish(
+                    "connection.error",
                     data={"host": host, "username": username, "error": str(exc)},
                 )
                 return {"success": False, "error": str(exc)}
@@ -171,8 +183,8 @@ class ConnectionManager:
                 context={"session_id": session_id, "host": host, "username": username},
             )
 
-            event_bus.publish(
-                "connection.opened", agent="AKANE",
+            self._publish(
+                "connection.opened",
                 data={"session_id": session_id, **session.to_dict()},
             )
 
@@ -229,8 +241,8 @@ class ConnectionManager:
             context={"session_id": session_id, "host": session.host, "reason": reason},
         )
 
-        event_bus.publish(
-            "connection.closed", agent="AKANE",
+        self._publish(
+            "connection.closed",
             data={"session_id": session_id, "host": session.host, "reason": reason},
         )
 
@@ -262,15 +274,15 @@ class ConnectionManager:
                         username=session.username,
                         password=os.getenv("SSH_PASSWORD"),
                     )
-                    event_bus.publish(
-                        "connection.opened", agent="AKANE",
+                    self._publish(
+                        "connection.opened",
                         data={"session_id": session_id, **session.to_dict(), "reconnected": True},
                     )
                 except Exception as exc:
                     session.status = STATUS_ERROR
                     session.last_error = f"Reconnect gagal: {exc}"
-                    event_bus.publish(
-                        "connection.error", agent="AKANE",
+                    self._publish(
+                        "connection.error",
                         data={"session_id": session_id, "error": session.last_error},
                     )
                     return {"success": False, "session_id": session_id, "command": command, "error": session.last_error}
@@ -278,16 +290,15 @@ class ConnectionManager:
             session.status = STATUS_BUSY
 
             try:
-                # FIX: shell.execute() sekarang mengembalikan dict
-                # {"output", "prompt_matched"} - lihat tools/ssh/shell.py.
+                # shell.execute() mengembalikan dict {"output", "prompt_matched"}.
                 exec_result = session.shell.execute(command, timeout=timeout)
                 output = exec_result["output"]
                 prompt_matched = exec_result["prompt_matched"]
 
                 session.touch()
 
-                event_bus.publish(
-                    "connection.command", agent="AKANE", tool=session.device_name or session.host,
+                self._publish(
+                    "connection.command", tool=session.device_name or session.host,
                     data={
                         "session_id": session_id, "command": command,
                         "success": True, "prompt_matched": prompt_matched,
@@ -315,8 +326,8 @@ class ConnectionManager:
 
                 logger.error("Command '%s' gagal di session=%s: %s", command, session_id, exc)
 
-                event_bus.publish(
-                    "connection.error", agent="AKANE", tool=session.device_name or session.host,
+                self._publish(
+                    "connection.error", tool=session.device_name or session.host,
                     data={"session_id": session_id, "command": command, "error": str(exc)},
                 )
 
@@ -388,7 +399,7 @@ class ConnectionManager:
         for session_id in candidates:
             logger.info("Session %s idle > %ds, menutup otomatis.", session_id, IDLE_TIMEOUT_SECONDS)
             self.close_connection(session_id, reason="idle_timeout")
-            event_bus.publish("connection.timeout", agent="AKANE", data={"session_id": session_id})
+            self._publish("connection.timeout", data={"session_id": session_id})
 
     def shutdown(self):
         """Dipanggil dari FastAPI shutdown event (lihat api/main.py) - tutup

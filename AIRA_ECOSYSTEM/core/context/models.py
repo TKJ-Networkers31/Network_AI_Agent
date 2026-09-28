@@ -8,7 +8,7 @@ reasoning, dan tanpa import modul AIRA lain (aman diimpor di mana saja).
 
 Dua kelompok section:
 
-  PROMPT_SECTIONS  (runtime_state, memory, location)
+  PROMPT_SECTIONS  (runtime_state, memory, location, attachment)
       Teksnya disisipkan ke system prompt, TEPAT SEKALI, lewat
       AIRAContext.extra_context() -> PersonaEngine.build(extra_context).
 
@@ -22,6 +22,12 @@ Dua kelompok section:
 
 Aturan "tidak ada injeksi ganda" ditegakkan di sini, secara struktural:
 hanya PROMPT_SECTIONS yang bisa masuk ke extra_context().
+
+FIX (Sprint 2.7.1 P0): section baru `attachment` ditambahkan supaya file
+yang di-upload user (core/attachments) benar-benar sampai ke system prompt
+LLM - sebelumnya core/attachments/context.py sudah membentuk payload yang
+tepat, tapi tidak ada slot di kontrak ini untuk menampungnya, jadi ia tidak
+pernah disisipkan (root cause flow "upload file -> AIRA dapat context").
 """
 
 from __future__ import annotations
@@ -31,7 +37,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-CONTEXT_SCHEMA_VERSION = "1.0"
+CONTEXT_SCHEMA_VERSION = "1.1"
 
 SECTION_IDENTITY = "identity"
 SECTION_PERSONA = "persona"
@@ -39,6 +45,7 @@ SECTION_MEMORY = "memory"
 SECTION_RUNTIME_STATE = "runtime_state"
 SECTION_LOCATION = "location"
 SECTION_TOOL_CONTEXT = "tool_context"
+SECTION_ATTACHMENT = "attachment"
 
 # Urutan kanonik (dipakai to_dict / present()).
 ALL_SECTIONS = (
@@ -47,15 +54,17 @@ ALL_SECTIONS = (
     SECTION_MEMORY,
     SECTION_RUNTIME_STATE,
     SECTION_LOCATION,
+    SECTION_ATTACHMENT,
     SECTION_TOOL_CONTEXT,
 )
 
 # Section yang teksnya boleh masuk system prompt, sesuai urutan yang selama ini
-# terbentuk di prompt: waktu -> memori jangka panjang -> lokasi.
+# terbentuk di prompt: waktu -> memori jangka panjang -> lokasi -> attachment.
 PROMPT_SECTIONS = (
     SECTION_RUNTIME_STATE,
     SECTION_MEMORY,
     SECTION_LOCATION,
+    SECTION_ATTACHMENT,
 )
 
 
@@ -122,6 +131,7 @@ class AIRAContext:
     runtime_state: Optional[ContextSection] = None
     location: Optional[ContextSection] = None
     tool_context: Optional[ContextSection] = None
+    attachment: Optional[ContextSection] = None
 
     # Hasil klasifikasi (TaskClassification.to_dict()) kalau sudah ada.
     task: Optional[dict[str, Any]] = None

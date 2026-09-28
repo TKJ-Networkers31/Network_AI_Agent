@@ -90,6 +90,48 @@ export const api = {
     },
   },
 
+  // === SPRINT 2.7.1 P0 FIX ===
+  // Ketiga blok di bawah ini sebelumnya TIDAK ADA di api.js sama sekali,
+  // padahal endpoint backend-nya (api/routers/selection.py,
+  // api/routers/attachments.py, api/routers/artifacts.py) sudah ada/baru
+  // dibuat - jadi UI tidak pernah punya cara memanggilnya (root cause flow
+  // A/C/D di audit Sprint 2.5-2.8).
+  selection: {
+    create: (payload) =>
+      request("/selection", { method: "POST", body: JSON.stringify(payload) }),
+    action: (selectionId, action, userQuestion = "") =>
+      request(`/selection/${encodeURIComponent(selectionId)}/actions`, {
+        method: "POST",
+        body: JSON.stringify({ action, user_question: userQuestion }),
+      }),
+  },
+
+  attachments: {
+    upload: (sessionId, file, messageId = null) => {
+      const form = new FormData();
+      form.append("session_id", sessionId);
+      if (messageId) form.append("message_id", messageId);
+      form.append("file", file);
+      return fetch(`${BASE}/attachments`, { method: "POST", body: form }).then(async (res) => {
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          throw new Error(detail.detail || `Upload gagal (${res.status})`);
+        }
+        return res.json();
+      });
+    },
+    list: (sessionId) => request(`/attachments?session_id=${encodeURIComponent(sessionId)}`),
+    remove: (id) => request(`/attachments/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  },
+
+  artifacts: {
+    create: (payload) =>
+      request("/artifacts", { method: "POST", body: JSON.stringify(payload) }),
+    list: (sessionId) => request(`/artifacts?session_id=${encodeURIComponent(sessionId)}`),
+    downloadUrl: (id) => `${BASE}/artifacts/${encodeURIComponent(id)}/download`,
+  },
+  // === akhir blok SPRINT 2.7.1 P0 FIX ===
+
   sessions: {
     list: () => request("/sessions"),
     create: () => request("/sessions", { method: "POST" }),

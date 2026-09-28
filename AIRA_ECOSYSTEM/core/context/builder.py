@@ -20,6 +20,10 @@ Builder ini HANYA MENGGABUNGKAN konteks yang sudah disediakan modul lain:
                          per sesi). Gagal/kosong di salah satu sumber tidak
                          menghilangkan sumber lainnya.
     location          -> build_location_context(sid)    (core/location)
+    attachment        -> attachments_context_section(...) (core/attachments) -
+                         (SPRINT 2.7.1 P0 FIX) file/gambar yang di-upload ke
+                         sesi ini, disisipkan sebagai teks ringkas supaya LLM
+                         tahu ada lampiran, tanpa pernah membawa bytes.
     tool_context      -> ringkasan tool dari pemanggil  (Brain)
     task              -> hasil klasifikasi dari pemanggil (Brain)
     system_prompt     -> PersonaEngine.build(extra_context)
@@ -53,6 +57,13 @@ Semantic Memory: hanya kalau ada session_id (isolasi sesi) dan input tidak koson
 Top-K default 3, tiap item maksimal 240 karakter, tanpa id/embedding/skor di
 teks. Hasilnya digabung DI BELAKANG memory long-term (legacy) dalam SATU
 ContextSection - keduanya dipertahankan.
+
+Attachment (Sprint 2.7.1 P0 fix): hanya kalau ada session_id. Sumbernya
+core.attachments.get_attachment_engine().list(session_id=...) (via
+attachments_for_session, default lazy) lalu diringkas oleh
+core.attachments.context.attachments_context_section(..., include_text=True)
+yang SUDAH ADA sejak Sprint 2.7 - modul ini hanya baru memanggilnya. Tidak
+pernah membawa bytes file (lihat batas di core/attachments/context.py).
 """
 
 from __future__ import annotations
@@ -70,6 +81,7 @@ from core.context.models import (
     SECTION_PERSONA,
     SECTION_RUNTIME_STATE,
     SECTION_TOOL_CONTEXT,
+    SECTION_ATTACHMENT,
     _json_dict,
 )
 
@@ -80,6 +92,7 @@ _IDENTITY_KEYS = ("assistant_name", "user_name", "language", "timezone")
 DEFAULT_SEMANTIC_TOP_K = 3
 MAX_MEMORY_ITEM_CHARS = 240
 SEMANTIC_MEMORY_HEADER = "=== RELEVANT MEMORIES ==="
+DEFAULT_ATTACHMENT_LIMIT = 10
 
 
 # ============================================================
@@ -121,6 +134,14 @@ def _default_semantic_memory():
     """Singleton SemanticMemory (dibuat lazy). Tidak membuat DB baru per request."""
     from core.semantic_memory import get_semantic_memory
     return get_semantic_memory()
+
+
+def _default_attachments_for_session(session_id: str) -> list:
+    """(SPRINT 2.7.1 P0 FIX) Lazy import - hanya dipakai kalau tidak di-inject.
+    Mengambil attachment MILIK SESI INI lewat AttachmentEngine yang sudah
+    ada (bukan query database baru)."""
+    from core.attachments import get_attachment_engine
+    return get_attachment_engine().list(session_id=session_id)
 
 
 # ============================================================
@@ -215,6 +236,11 @@ class ContextBuilder:
     (mis. SemanticMemory). None = singleton lazy get_semantic_memory().
     semantic_top_k: batas jumlah memori semantik per giliran (default 3;
     nilai tidak valid -> default; 0 -> retrieval semantik dimatikan).
+
+    attachments_for_session (SPRINT 2.7.1 P0 FIX): Callable[[str], list] yang
+    mengembalikan daftar Attachment milik satu sesi. None = default lazy
+    (get_attachment_engine().list(session_id=...)). attachment_limit: batas
+    jumlah attachment yang diringkas ke prompt (default 10).
     """
 
     def __init__(
@@ -229,6 +255,8 @@ class ContextBuilder:
         runtime_state: Optional[Callable[[], Optional[dict]]] = None,
         semantic_memory: Optional[Any] = None,
         semantic_top_k: int = DEFAULT_SEMANTIC_TOP_K,
+        attachments_for_session: Optional[Callable[[str], list]] = None,
+        attachment_limit: int = DEFAULT_ATTACHMENT_LIMIT,
     ):
         self._persona_state = persona_state or _default_persona_state
         self._prompt_composer = prompt_composer or _default_prompt_composer
@@ -243,6 +271,13 @@ class ContextBuilder:
             if isinstance(semantic_top_k, int) and not isinstance(semantic_top_k, bool)
             and semantic_top_k >= 0
             else DEFAULT_SEMANTIC_TOP_K
+        )
+        self._attachments_for_session = attachments_for_session or _default_attachments_for_session
+        self._attachment_limit = (
+            attachment_limit
+            if isinstance(attachment_limit, int) and not isinstance(attachment_limit, bool)
+            and attachment_limit >= 0
+            else DEFAULT_ATTACHMENT_LIMIT
         )
 
     # ------------------------------------------------------------ public
@@ -287,13 +322,17 @@ class ContextBuilder:
             context.user_input, context.session_id, warnings,
         )
 
-        # Lokasi hanya relevan kalau ada sesi (klien PWA). Mode terminal tidak
-        # punya session_id dan tidak pernah menerima blok lokasi.
+        # Lokasi & attachment hanya relevan kalau ada sesi (klien PWA). Mode
+        # terminal tidak punya session_id dan tidak pernah menerima blok ini.
         if context.session_id:
             context.location = self._text_section(
                 SECTION_LOCATION, "location", self._location_text, warnings,
                 context.session_id,
             )
+
+            # === SPRINT 2.7.1 P0 FIX — attachment section ===
+            context.attachment = self._attachment_section(context.session_id, warnings)
+            # === akhir fix ===
 
         context.tool_context = self._tool_section(warnings)
 
@@ -428,6 +467,44 @@ class ContextBuilder:
         )
 
         return format_semantic_memories(results, limit=self._semantic_top_k)
+
+    # -------------------------------------------- attachment (SPRINT 2.7.1)
+
+    def _attachment_section(
+        self, session_id: str, warnings: list[str],
+    ) -> Optional[ContextSection]:
+        """
+        (SPRINT 2.7.1 P0 FIX) Reuse penuh core.attachments.context - tidak ada
+        logic ringkasan baru di sini, hanya pemanggilan yang sebelumnya hilang.
+        include_text=True supaya ringkasannya benar-benar masuk system prompt
+        (attachments_context_section() sendiri default include_text=False).
+        """
+        items = self._call("attachment", self._attachments_for_session, warnings, session_id)
+
+        if not items:
+            return None
+
+        from core.attachments.context import attachments_context_section
+
+        try:
+            payload = attachments_context_section(items, include_text=True, limit=self._attachment_limit)
+        except Exception as exc:
+            logger.warning(
+                "CONTEXT | attachment: gagal membentuk section (%s) - dilewati.",
+                type(exc).__name__, exc_info=True,
+            )
+            warnings.append(f"attachment: unavailable ({type(exc).__name__})")
+            return None
+
+        if not payload:
+            return None
+
+        return ContextSection(
+            SECTION_ATTACHMENT,
+            text=str(payload.get("text") or ""),
+            data=dict(payload.get("data") or {}),
+            source="attachments",
+        )
 
     # ------------------------------------------------------ runtime / tool
 

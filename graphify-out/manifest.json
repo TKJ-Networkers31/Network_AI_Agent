@@ -1,0 +1,2672 @@
+{
+  ".claude/settings.json": {
+    "mtime": 1790503785.4272623,
+    "seen": 1790503863.6720154,
+    "ast_hash": "8ec1c26239d38df707937459511ff198",
+    "semantic_hash": "8ec1c26239d38df707937459511ff198"
+  },
+  "AIRA_ECOSYSTEM/agents/__init__.py": {
+    "mtime": 1788950764.650073,
+    "seen": 1790503863.6720214,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/agents/akane/__init__.py": {
+    "mtime": 1788950764.6742256,
+    "seen": 1790503863.6720243,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/agents/akane/connection_manager.py": {
+    "mtime": 1789720461.8319833,
+    "seen": 1790503863.6720262,
+    "ast_hash": "d39a2f86887e2ba65f3c09672b92cf33",
+    "semantic_hash": "d39a2f86887e2ba65f3c09672b92cf33"
+  },
+  "AIRA_ECOSYSTEM/agents/akane/network_tools.py": {
+    "mtime": 1789710667.7971244,
+    "seen": 1790503863.6720276,
+    "ast_hash": "2e5bf84c5f5a4ab1ae4983620af7c0c0",
+    "semantic_hash": "2e5bf84c5f5a4ab1ae4983620af7c0c0"
+  },
+  "AIRA_ECOSYSTEM/agents/akane/registry.py": {
+    "mtime": 1789710667.7971244,
+    "seen": 1790503863.6720293,
+    "ast_hash": "83444dfbfa2293b5ea89a993a89b39f8",
+    "semantic_hash": "83444dfbfa2293b5ea89a993a89b39f8"
+  },
+  "AIRA_ECOSYSTEM/agents/akane/session_state.py": {
+    "mtime": 1789314846.6238778,
+    "seen": 1790503863.672031,
+    "ast_hash": "db6062d9e46bcfa4b842c9b9ff588021",
+    "semantic_hash": "db6062d9e46bcfa4b842c9b9ff588021"
+  },
+  "AIRA_ECOSYSTEM/agents/hikari/__init__.py": {
+    "mtime": 1788950764.6520731,
+    "seen": 1790503863.6720326,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/agents/hikari/fusion.py": {
+    "mtime": 1789265518.387224,
+    "seen": 1790503863.6720338,
+    "ast_hash": "0400e2012aa7bdc29bc74e9ef5ccf52a",
+    "semantic_hash": "0400e2012aa7bdc29bc74e9ef5ccf52a"
+  },
+  "AIRA_ECOSYSTEM/agents/hikari/registry.py": {
+    "mtime": 1788954421.201637,
+    "seen": 1790503863.6720352,
+    "ast_hash": "e7f1b6558372bd824320f5a32594c325",
+    "semantic_hash": "e7f1b6558372bd824320f5a32594c325"
+  },
+  "AIRA_ECOSYSTEM/agents/hikari/vision.py": {
+    "mtime": 1788954372.3209255,
+    "seen": 1790503863.672037,
+    "ast_hash": "5f2bc71ef3adb1b87d14f12842f22892",
+    "semantic_hash": "5f2bc71ef3adb1b87d14f12842f22892"
+  },
+  "AIRA_ECOSYSTEM/agents/rei/__init__.py": {
+    "mtime": 1788950764.6642756,
+    "seen": 1790503863.6720383,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/agents/rei/auto_extract.py": {
+    "mtime": 1789025261.1498008,
+    "seen": 1790503863.67204,
+    "ast_hash": "1801545bddee07cd7f22bf7fceb00303",
+    "semantic_hash": "1801545bddee07cd7f22bf7fceb00303"
+  },
+  "AIRA_ECOSYSTEM/agents/rei/conversation_tools.py": {
+    "mtime": 1789946680.010181,
+    "seen": 1790503863.6720414,
+    "ast_hash": "e7c2c7eb49d0e2a8ee8cb77f476ed40e",
+    "semantic_hash": "e7c2c7eb49d0e2a8ee8cb77f476ed40e"
+  },
+  "AIRA_ECOSYSTEM/agents/rei/dio_tools.py": {
+    "mtime": 1789838000.6956842,
+    "seen": 1790503863.672043,
+    "ast_hash": "cecfd635568740f2d1122dff41ab72e0",
+    "semantic_hash": "cecfd635568740f2d1122dff41ab72e0"
+  },
+  "AIRA_ECOSYSTEM/agents/rei/fs_tools.py": {
+    "mtime": 1789395820.0389497,
+    "seen": 1790503863.6720445,
+    "ast_hash": "478a6c4f1b5cae489294d41f8a37b4ae",
+    "semantic_hash": "478a6c4f1b5cae489294d41f8a37b4ae"
+  },
+  "AIRA_ECOSYSTEM/agents/rei/planner.py": {
+    "mtime": 1789944693.0637882,
+    "seen": 1790503863.6720457,
+    "ast_hash": "1af1c5ac2fadc4630ba9f09a7b4f5c52",
+    "semantic_hash": "1af1c5ac2fadc4630ba9f09a7b4f5c52"
+  },
+  "AIRA_ECOSYSTEM/agents/rei/provider_client.py": {
+    "mtime": 1789944681.970378,
+    "seen": 1790503863.6720474,
+    "ast_hash": "f12559f65b82db40523459f929e2f371",
+    "semantic_hash": "f12559f65b82db40523459f929e2f371"
+  },
+  "AIRA_ECOSYSTEM/agents/rei/registry.py": {
+    "mtime": 1789962028.8824637,
+    "seen": 1790503863.6720486,
+    "ast_hash": "50bbee173b7dd868c081fbcc6b9c541d",
+    "semantic_hash": "50bbee173b7dd868c081fbcc6b9c541d"
+  },
+  "AIRA_ECOSYSTEM/agents/rei/research_tools.py": {
+    "mtime": 1789813229.1009433,
+    "seen": 1790503863.6720502,
+    "ast_hash": "73819c3fe0993d9c662dc50304323ca6",
+    "semantic_hash": "73819c3fe0993d9c662dc50304323ca6"
+  },
+  "AIRA_ECOSYSTEM/agents/rei/settings_tools.py": {
+    "mtime": 1789922028.8516855,
+    "seen": 1790503863.6720514,
+    "ast_hash": "0ba92ac3881d937a0d7c075ea5994b8b",
+    "semantic_hash": "0ba92ac3881d937a0d7c075ea5994b8b"
+  },
+  "AIRA_ECOSYSTEM/agents/yuki/__init__.py": {
+    "mtime": 1788950764.6586025,
+    "seen": 1790503863.672053,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/agents/yuki/stt.py": {
+    "mtime": 1788954449.3963168,
+    "seen": 1790503863.672055,
+    "ast_hash": "e3648b47fb959eb61ee367428f2cccbb",
+    "semantic_hash": "e3648b47fb959eb61ee367428f2cccbb"
+  },
+  "AIRA_ECOSYSTEM/agents/yuki/stt_engine.py": {
+    "mtime": 1789267474.5304122,
+    "seen": 1790503863.672057,
+    "ast_hash": "8d5883b6ab88259135704b4ca4d54a3f",
+    "semantic_hash": "8d5883b6ab88259135704b4ca4d54a3f"
+  },
+  "AIRA_ECOSYSTEM/agents/yuki/tts.py": {
+    "mtime": 1789267446.0709093,
+    "seen": 1790503863.672058,
+    "ast_hash": "230365f2fd066d8431481df6253a1808",
+    "semantic_hash": "230365f2fd066d8431481df6253a1808"
+  },
+  "AIRA_ECOSYSTEM/agents/yuki/tts_engine.py": {
+    "mtime": 1789266103.4790268,
+    "seen": 1790503863.6720595,
+    "ast_hash": "6bc42cea6577701d56fb514fef3f0962",
+    "semantic_hash": "6bc42cea6577701d56fb514fef3f0962"
+  },
+  "AIRA_ECOSYSTEM/agents/yuki/voice_io.py": {
+    "mtime": 1788954499.5395982,
+    "seen": 1790503863.672061,
+    "ast_hash": "bec49fea2a8d5896b69a7e97ca3e93be",
+    "semantic_hash": "bec49fea2a8d5896b69a7e97ca3e93be"
+  },
+  "AIRA_ECOSYSTEM/api/__init__.py": {
+    "mtime": 1788950764.6870058,
+    "seen": 1790503863.6720622,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/api/main.py": {
+    "mtime": 1790397217.2022133,
+    "seen": 1790503863.6720636,
+    "ast_hash": "ddc430313f68d9b20541955da1d7db32",
+    "semantic_hash": "ddc430313f68d9b20541955da1d7db32"
+  },
+  "AIRA_ECOSYSTEM/api/routers/__init__.py": {
+    "mtime": 1788950764.6900027,
+    "seen": 1790503863.6720648,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/api/routers/artifacts.py": {
+    "mtime": 1790397312.4035008,
+    "seen": 1790503863.672066,
+    "ast_hash": "630f591c769c752047dc2e10d6f61901",
+    "semantic_hash": "630f591c769c752047dc2e10d6f61901"
+  },
+  "AIRA_ECOSYSTEM/api/routers/attachments.py": {
+    "mtime": 1790250235.0053818,
+    "seen": 1790503863.6720674,
+    "ast_hash": "f0c19ef589b701e043c4d8a083e562f5",
+    "semantic_hash": "f0c19ef589b701e043c4d8a083e562f5"
+  },
+  "AIRA_ECOSYSTEM/api/routers/capabilities.py": {
+    "mtime": 1790378532.9148822,
+    "seen": 1790503863.6720688,
+    "ast_hash": "5427a89a9f9481517197100eacf68afb",
+    "semantic_hash": "5427a89a9f9481517197100eacf68afb"
+  },
+  "AIRA_ECOSYSTEM/api/routers/capabilities_logic.py": {
+    "mtime": 1790378541.9308183,
+    "seen": 1790503863.67207,
+    "ast_hash": "e46bcb7ac8f72f5647c1ab2701e9b22a",
+    "semantic_hash": "e46bcb7ac8f72f5647c1ab2701e9b22a"
+  },
+  "AIRA_ECOSYSTEM/api/routers/chat.py": {
+    "mtime": 1789838089.6611347,
+    "seen": 1790503863.6720717,
+    "ast_hash": "73f741aa5d3e0f250b673a2570555f3b",
+    "semantic_hash": "73f741aa5d3e0f250b673a2570555f3b"
+  },
+  "AIRA_ECOSYSTEM/api/routers/connections.py": {
+    "mtime": 1789314966.54731,
+    "seen": 1790503863.6720726,
+    "ast_hash": "38f752b8a307bcdac189fb385778a5f2",
+    "semantic_hash": "38f752b8a307bcdac189fb385778a5f2"
+  },
+  "AIRA_ECOSYSTEM/api/routers/devices.py": {
+    "mtime": 1788954779.882139,
+    "seen": 1790503863.6720743,
+    "ast_hash": "2cfa26d53048956c84e2410aa1638b1d",
+    "semantic_hash": "2cfa26d53048956c84e2410aa1638b1d"
+  },
+  "AIRA_ECOSYSTEM/api/routers/files.py": {
+    "mtime": 1789317525.6170027,
+    "seen": 1790503863.6720755,
+    "ast_hash": "f34462e39e0fe95aa90c37cc30f17d22",
+    "semantic_hash": "f34462e39e0fe95aa90c37cc30f17d22"
+  },
+  "AIRA_ECOSYSTEM/api/routers/location.py": {
+    "mtime": 1789809194.1855109,
+    "seen": 1790503863.6720767,
+    "ast_hash": "78f0cd3f35d02691f129029e27945041",
+    "semantic_hash": "78f0cd3f35d02691f129029e27945041"
+  },
+  "AIRA_ECOSYSTEM/api/routers/logs.py": {
+    "mtime": 1789174597.1337633,
+    "seen": 1790503863.6720781,
+    "ast_hash": "d81eb64dbb06d94c70d7c06ded7f5376",
+    "semantic_hash": "d81eb64dbb06d94c70d7c06ded7f5376"
+  },
+  "AIRA_ECOSYSTEM/api/routers/memory.py": {
+    "mtime": 1788954760.8583229,
+    "seen": 1790503863.6720798,
+    "ast_hash": "8bc485c175c9a2af9ff670e213622c72",
+    "semantic_hash": "8bc485c175c9a2af9ff670e213622c72"
+  },
+  "AIRA_ECOSYSTEM/api/routers/models.py": {
+    "mtime": 1789776661.6848507,
+    "seen": 1790503863.6720815,
+    "ast_hash": "9a07781600aadb87be6a37b9b5d9ac0d",
+    "semantic_hash": "9a07781600aadb87be6a37b9b5d9ac0d"
+  },
+  "AIRA_ECOSYSTEM/api/routers/persona.py": {
+    "mtime": 1789288758.5983243,
+    "seen": 1790503863.6720827,
+    "ast_hash": "e1e5c284e4dafc85c418fab2c0778371",
+    "semantic_hash": "e1e5c284e4dafc85c418fab2c0778371"
+  },
+  "AIRA_ECOSYSTEM/api/routers/providers.py": {
+    "mtime": 1789273170.0595908,
+    "seen": 1790503863.6720846,
+    "ast_hash": "64bdad50989205584577429de38a83f9",
+    "semantic_hash": "64bdad50989205584577429de38a83f9"
+  },
+  "AIRA_ECOSYSTEM/api/routers/selection.py": {
+    "mtime": 1790094417.742453,
+    "seen": 1790503863.6720858,
+    "ast_hash": "8eea78d0e30e65d1a95d0a92c84efd27",
+    "semantic_hash": "8eea78d0e30e65d1a95d0a92c84efd27"
+  },
+  "AIRA_ECOSYSTEM/api/routers/sessions.py": {
+    "mtime": 1789290541.3086638,
+    "seen": 1790503863.6720872,
+    "ast_hash": "74975221d2e63e934e47a37bd4ad5ecc",
+    "semantic_hash": "74975221d2e63e934e47a37bd4ad5ecc"
+  },
+  "AIRA_ECOSYSTEM/api/routers/settings.py": {
+    "mtime": 1789922042.50075,
+    "seen": 1790503863.6720886,
+    "ast_hash": "5ebf9cbc9b3127b14ffd009464fd74da",
+    "semantic_hash": "5ebf9cbc9b3127b14ffd009464fd74da"
+  },
+  "AIRA_ECOSYSTEM/api/routers/tests/test_capabilities.py": {
+    "mtime": 1790378578.7549589,
+    "seen": 1790503863.6720898,
+    "ast_hash": "627762cdfe35fa9b51c941b79c7ae579",
+    "semantic_hash": "627762cdfe35fa9b51c941b79c7ae579"
+  },
+  "AIRA_ECOSYSTEM/api/routers/tools.py": {
+    "mtime": 1788954816.7438083,
+    "seen": 1790503863.6720912,
+    "ast_hash": "48693a6dee61dcd7e39ed3ec73ce99a7",
+    "semantic_hash": "48693a6dee61dcd7e39ed3ec73ce99a7"
+  },
+  "AIRA_ECOSYSTEM/api/routers/vision.py": {
+    "mtime": 1790337373.0511744,
+    "seen": 1790503863.6720924,
+    "ast_hash": "b59f07e2023a591c3c3ca77aad29e4fb",
+    "semantic_hash": "b59f07e2023a591c3c3ca77aad29e4fb"
+  },
+  "AIRA_ECOSYSTEM/api/routers/workspace_links.py": {
+    "mtime": 1790339313.102456,
+    "seen": 1790503863.6720934,
+    "ast_hash": "c037338ea38718388bc5a6721a2b934a",
+    "semantic_hash": "c037338ea38718388bc5a6721a2b934a"
+  },
+  "AIRA_ECOSYSTEM/api/routers/ws.py": {
+    "mtime": 1789944744.124395,
+    "seen": 1790503863.6720948,
+    "ast_hash": "24d4ec087e62889f722776b501408f85",
+    "semantic_hash": "24d4ec087e62889f722776b501408f85"
+  },
+  "AIRA_ECOSYSTEM/api/schemas.py": {
+    "mtime": 1789720587.0526767,
+    "seen": 1790503863.672096,
+    "ast_hash": "e3099ceabafbee666d9f8a0673b96f7e",
+    "semantic_hash": "e3099ceabafbee666d9f8a0673b96f7e"
+  },
+  "AIRA_ECOSYSTEM/api/state.py": {
+    "mtime": 1789859821.3074598,
+    "seen": 1790503863.6720972,
+    "ast_hash": "e9b06f403e4ce9119e35df5e365470b3",
+    "semantic_hash": "e9b06f403e4ce9119e35df5e365470b3"
+  },
+  "AIRA_ECOSYSTEM/api/ws_bridge.py": {
+    "mtime": 1789944734.1275525,
+    "seen": 1790503863.6720986,
+    "ast_hash": "a5b2102b66fd5fe3c19555a35d8a1fab",
+    "semantic_hash": "a5b2102b66fd5fe3c19555a35d8a1fab"
+  },
+  "AIRA_ECOSYSTEM/api/ws_manager.py": {
+    "mtime": 1789198645.4103856,
+    "seen": 1790503863.6721,
+    "ast_hash": "1ac679f2c4d6c13c3a0fcae1c65c08c7",
+    "semantic_hash": "1ac679f2c4d6c13c3a0fcae1c65c08c7"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/jsconfig.json": {
+    "mtime": 1789274603.7002997,
+    "seen": 1790503863.6721017,
+    "ast_hash": "18072d5e0413ee58f8d82c5c99692b2e",
+    "semantic_hash": "18072d5e0413ee58f8d82c5c99692b2e"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/package.json": {
+    "mtime": 1789978867.1295583,
+    "seen": 1790503863.6721032,
+    "ast_hash": "565f31f3c9e4d3faf6c5daea8e5ace0e",
+    "semantic_hash": "565f31f3c9e4d3faf6c5daea8e5ace0e"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/postcss.config.js": {
+    "mtime": 1788865096.1955397,
+    "seen": 1790503863.6721044,
+    "ast_hash": "c735540bb63936a123bc867d950c9f69",
+    "semantic_hash": "c735540bb63936a123bc867d950c9f69"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/public/manifest.json": {
+    "mtime": 1789349586.1559663,
+    "seen": 1790503863.672106,
+    "ast_hash": "63bbe5d97a7e34ef7fc230a4e3e4ab3c",
+    "semantic_hash": "63bbe5d97a7e34ef7fc230a4e3e4ab3c"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/public/service-worker.js": {
+    "mtime": 1788917980.0759776,
+    "seen": 1790503863.672107,
+    "ast_hash": "515a6f33a9f936dd78b5b8d26974ddaf",
+    "semantic_hash": "515a6f33a9f936dd78b5b8d26974ddaf"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/App.jsx": {
+    "mtime": 1789809320.9267304,
+    "seen": 1790503863.6721082,
+    "ast_hash": "59ee6f36d26e4be6baa71e3aaead2b14",
+    "semantic_hash": "59ee6f36d26e4be6baa71e3aaead2b14"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/Hero.jsx": {
+    "mtime": 1789792587.3890867,
+    "seen": 1790503863.67211,
+    "ast_hash": "e362e94f7a397e49191e9ec648ec81b9",
+    "semantic_hash": "e362e94f7a397e49191e9ec648ec81b9"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/api.js": {
+    "mtime": 1790375677.6459022,
+    "seen": 1790503863.6721113,
+    "ast_hash": "0ce2634b00c2765650300b11d01b409d",
+    "semantic_hash": "0ce2634b00c2765650300b11d01b409d"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/capabilities/CapabilityHeroRow (1).jsx": {
+    "mtime": 1790376065.0669456,
+    "seen": 1790503863.672113,
+    "ast_hash": "26bc476b4b3d6dca55395e6a2be4a586",
+    "semantic_hash": "26bc476b4b3d6dca55395e6a2be4a586"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/BootScreen.jsx": {
+    "mtime": 1789290683.5411189,
+    "seen": 1790503863.672114,
+    "ast_hash": "acf62907be407d04bf8e1d01f13ee075",
+    "semantic_hash": "acf62907be407d04bf8e1d01f13ee075"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/BrandEmblem.jsx": {
+    "mtime": 1789792497.3402455,
+    "seen": 1790503863.672115,
+    "ast_hash": "384824f59b9096b2b843528d1b515566",
+    "semantic_hash": "384824f59b9096b2b843528d1b515566"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/ChatInput.jsx": {
+    "mtime": 1790375911.0516787,
+    "seen": 1790503863.6721165,
+    "ast_hash": "f16327bf4804750774b37aa72c2c1add",
+    "semantic_hash": "f16327bf4804750774b37aa72c2c1add"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/CopyButton.jsx": {
+    "mtime": 1789774046.6336308,
+    "seen": 1790503863.672118,
+    "ast_hash": "4b6fde1e4dda044758fe9e68c5079c46",
+    "semantic_hash": "4b6fde1e4dda044758fe9e68c5079c46"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/ErrorBoundary.jsx": {
+    "mtime": 1789339657.3281925,
+    "seen": 1790503863.6721194,
+    "ast_hash": "de76c7b8c4109851d13c6053e3bce96f",
+    "semantic_hash": "de76c7b8c4109851d13c6053e3bce96f"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/GraphBlock.jsx": {
+    "mtime": 1789867259.8743227,
+    "seen": 1790503863.6721206,
+    "ast_hash": "94fd61ac8f0e3cf899db2ea3091d3075",
+    "semantic_hash": "94fd61ac8f0e3cf899db2ea3091d3075"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/LiveSteps.jsx": {
+    "mtime": 1789181886.2825797,
+    "seen": 1790503863.6721218,
+    "ast_hash": "b8f244b537862a3c4c995dbfafea78a3",
+    "semantic_hash": "b8f244b537862a3c4c995dbfafea78a3"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/Markdown.jsx": {
+    "mtime": 1789887336.0279894,
+    "seen": 1790503863.672123,
+    "ast_hash": "e6c4adfaf32ef99b393abb7b49742e41",
+    "semantic_hash": "e6c4adfaf32ef99b393abb7b49742e41"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/MessageBubble.jsx": {
+    "mtime": 1790376123.0107985,
+    "seen": 1790503863.6721244,
+    "ast_hash": "da8ad2766155f3073b94da2193d476a3",
+    "semantic_hash": "da8ad2766155f3073b94da2193d476a3"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/MobileNav.jsx": {
+    "mtime": 1789791018.5422947,
+    "seen": 1790503863.6721256,
+    "ast_hash": "801024fd61bbf46ad36bbde546eedcf5",
+    "semantic_hash": "801024fd61bbf46ad36bbde546eedcf5"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/Sidebar.jsx": {
+    "mtime": 1789792055.540112,
+    "seen": 1790503863.672127,
+    "ast_hash": "67b98cf5dc2c6329413e93fceb51eaf5",
+    "semantic_hash": "67b98cf5dc2c6329413e93fceb51eaf5"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/SlashMenu.jsx": {
+    "mtime": 1788909986.2134986,
+    "seen": 1790503863.6721282,
+    "ast_hash": "68718dbac1bdadb982fb923e75fbed2e",
+    "semantic_hash": "68718dbac1bdadb982fb923e75fbed2e"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/ThinkingIndicator.jsx": {
+    "mtime": 1789130182.4964945,
+    "seen": 1790503863.6721299,
+    "ast_hash": "b47ba3fb5171e5d779856a2251ad32ff",
+    "semantic_hash": "b47ba3fb5171e5d779856a2251ad32ff"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/Toast.jsx": {
+    "mtime": 1789185335.2307737,
+    "seen": 1790503863.672131,
+    "ast_hash": "c5cf048d7d418ed143dd5c68a5abc449",
+    "semantic_hash": "c5cf048d7d418ed143dd5c68a5abc449"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/ToolStep.jsx": {
+    "mtime": 1788865096.6346712,
+    "seen": 1790503863.6721325,
+    "ast_hash": "bc5243cb689e8d5cee9ce197808f0017",
+    "semantic_hash": "bc5243cb689e8d5cee9ce197808f0017"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/TopBar.jsx": {
+    "mtime": 1789962615.500027,
+    "seen": 1790503863.6721342,
+    "ast_hash": "0c8e2a3253bb6cdf74e77f944960f60d",
+    "semantic_hash": "0c8e2a3253bb6cdf74e77f944960f60d"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/VoiceControls.jsx": {
+    "mtime": 1788948161.5775175,
+    "seen": 1790503863.6721356,
+    "ast_hash": "dbaed6ad43b3bbf6b9e1b2f440598361",
+    "semantic_hash": "dbaed6ad43b3bbf6b9e1b2f440598361"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/VoiceOverlay.jsx": {
+    "mtime": 1789266576.977322,
+    "seen": 1790503863.672137,
+    "ast_hash": "850b34ceb310b77d1fa7c18e32ab7e24",
+    "semantic_hash": "850b34ceb310b77d1fa7c18e32ab7e24"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/WsStatusBadge.jsx": {
+    "mtime": 1789198532.9717205,
+    "seen": 1790503863.6721382,
+    "ast_hash": "1a7fa085f8774c14719d0f24bd547f27",
+    "semantic_hash": "1a7fa085f8774c14719d0f24bd547f27"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/boot/BootGate.jsx": {
+    "mtime": 1789349439.6911383,
+    "seen": 1790503863.67214,
+    "ast_hash": "f6836c4471861983d9dd14344e877ad8",
+    "semantic_hash": "f6836c4471861983d9dd14344e877ad8"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/boot/BootScreen.jsx": {
+    "mtime": 1789349398.1830397,
+    "seen": 1790503863.672141,
+    "ast_hash": "428cb3990681ea0a209042a31aaab05a",
+    "semantic_hash": "428cb3990681ea0a209042a31aaab05a"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/boot/FirstBoot.jsx": {
+    "mtime": 1789349418.6153934,
+    "seen": 1790503863.672144,
+    "ast_hash": "d781b90d2c18d6c93702b247e28e2d37",
+    "semantic_hash": "d781b90d2c18d6c93702b247e28e2d37"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/boot/SplashScreen.jsx": {
+    "mtime": 1789349366.1413171,
+    "seen": 1790503863.6721451,
+    "ast_hash": "9e767a19f2e72dbdf5f299bd1903ef26",
+    "semantic_hash": "9e767a19f2e72dbdf5f299bd1903ef26"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/capabilities/CapabilityButton.jsx": {
+    "mtime": 1790376042.0426867,
+    "seen": 1790503863.6721463,
+    "ast_hash": "605d67e406ce487eb9ea1f933b6b8d11",
+    "semantic_hash": "605d67e406ce487eb9ea1f933b6b8d11"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/capabilities/CapabilityDock.jsx": {
+    "mtime": 1790376051.6711228,
+    "seen": 1790503863.6721478,
+    "ast_hash": "1a484e388102ad20e3e1dafa30db4678",
+    "semantic_hash": "1a484e388102ad20e3e1dafa30db4678"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/capabilities/CapabilityHeroRow.jsx": {
+    "mtime": 1790376058.535683,
+    "seen": 1790503863.672149,
+    "ast_hash": "26bc476b4b3d6dca55395e6a2be4a586",
+    "semantic_hash": "26bc476b4b3d6dca55395e6a2be4a586"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/capabilities/CapabilityIcon.jsx": {
+    "mtime": 1790376031.0741441,
+    "seen": 1790503863.6721504,
+    "ast_hash": "cc47063d84090d591d30100d534b4413",
+    "semantic_hash": "cc47063d84090d591d30100d534b4413"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/capabilities/CapabilityInputSlot.jsx": {
+    "mtime": 1790376075.9275496,
+    "seen": 1790503863.6721513,
+    "ast_hash": "a9fd97d2be9d026bae45c702c5bcbd2f",
+    "semantic_hash": "a9fd97d2be9d026bae45c702c5bcbd2f"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/capabilities/FileCapabilityActions.jsx": {
+    "mtime": 1790376098.0990446,
+    "seen": 1790503863.6721528,
+    "ast_hash": "8c8c422e3f095567d660d4d3a123c8d7",
+    "semantic_hash": "8c8c422e3f095567d660d4d3a123c8d7"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/capabilities/MessageCapabilityActions.jsx": {
+    "mtime": 1790376088.5219033,
+    "seen": 1790503863.672154,
+    "ast_hash": "0698dd392067a6ac7e043afc5b177f9f",
+    "semantic_hash": "0698dd392067a6ac7e043afc5b177f9f"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/ActivityChip.jsx": {
+    "mtime": 1789952996.2813628,
+    "seen": 1790503863.6721551,
+    "ast_hash": "e87b4026bc32ac97ea98fa920db23f13",
+    "semantic_hash": "e87b4026bc32ac97ea98fa920db23f13"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/ComposerCockpit.jsx": {
+    "mtime": 1790146618.3876803,
+    "seen": 1790503863.6721566,
+    "ast_hash": "77a84f8d99387c3f3766922b39024874",
+    "semantic_hash": "77a84f8d99387c3f3766922b39024874"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/ConnectionBadge.jsx": {
+    "mtime": 1789952996.3500185,
+    "seen": 1790503863.6721578,
+    "ast_hash": "cf301cedb1c3a7cad527e815eff391a3",
+    "semantic_hash": "cf301cedb1c3a7cad527e815eff391a3"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/ConnectionDock.jsx": {
+    "mtime": 1789952996.410366,
+    "seen": 1790503863.672159,
+    "ast_hash": "2af1716dee2ffa21c884b473754b23b8",
+    "semantic_hash": "2af1716dee2ffa21c884b473754b23b8"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/DynamicHero.jsx": {
+    "mtime": 1790075859.2865872,
+    "seen": 1790503863.6721606,
+    "ast_hash": "dc7cf08cb6d73e2a38b1a2e5c36c60ae",
+    "semantic_hash": "dc7cf08cb6d73e2a38b1a2e5c36c60ae"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/StatusDot.jsx": {
+    "mtime": 1789952996.522289,
+    "seen": 1790503863.6721618,
+    "ast_hash": "f6dc5601f9af0ecf842192ed785fab86",
+    "semantic_hash": "f6dc5601f9af0ecf842192ed785fab86"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/ToolButton.jsx": {
+    "mtime": 1789952996.5773544,
+    "seen": 1790503863.6721632,
+    "ast_hash": "50c35b2f910365ec39e66e17aa61bb66",
+    "semantic_hash": "50c35b2f910365ec39e66e17aa61bb66"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/ToolDock.jsx": {
+    "mtime": 1789952996.6365278,
+    "seen": 1790503863.6721644,
+    "ast_hash": "126fb3c229be851506ac18909fdea4a7",
+    "semantic_hash": "126fb3c229be851506ac18909fdea4a7"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/WorkspaceCockpit.jsx": {
+    "mtime": 1789962537.271001,
+    "seen": 1790503863.6721659,
+    "ast_hash": "7a5e7cc0a51336f9d4b17db9226ae1df",
+    "semantic_hash": "7a5e7cc0a51336f9d4b17db9226ae1df"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/WorkspaceStatus.jsx": {
+    "mtime": 1789952996.747379,
+    "seen": 1790503863.672167,
+    "ast_hash": "9eab3da2b9729d1c412eb9252698baca",
+    "semantic_hash": "9eab3da2b9729d1c412eb9252698baca"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/cockpitContracts.js": {
+    "mtime": 1789952996.8131104,
+    "seen": 1790503863.6721685,
+    "ast_hash": "62dddf211cd24592fc631f0587c474b8",
+    "semantic_hash": "62dddf211cd24592fc631f0587c474b8"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/cockpitContracts.test.js": {
+    "mtime": 1789952996.8754933,
+    "seen": 1790503863.6721697,
+    "ast_hash": "5b20117a3271c140323b4ede530ee680",
+    "semantic_hash": "5b20117a3271c140323b4ede530ee680"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/index.js": {
+    "mtime": 1789952996.930995,
+    "seen": 1790503863.672171,
+    "ast_hash": "a293e890d83ee5ee31447505754a18ab",
+    "semantic_hash": "a293e890d83ee5ee31447505754a18ab"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/mockData.js": {
+    "mtime": 1789952997.044886,
+    "seen": 1790503863.6721723,
+    "ast_hash": "6a46c8bf69dd92c44c24e2b5ea6d1825",
+    "semantic_hash": "6a46c8bf69dd92c44c24e2b5ea6d1825"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/cockpit/tokens.js": {
+    "mtime": 1789952997.130877,
+    "seen": 1790503863.6721735,
+    "ast_hash": "60e30c0ab5e332518efa3b614ef0b696",
+    "semantic_hash": "60e30c0ab5e332518efa3b614ef0b696"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/connection/ConnectionIndicator.jsx": {
+    "mtime": 1789315090.157301,
+    "seen": 1790503863.672175,
+    "ast_hash": "f6b7b9d1a084b9f603cb6ad5b5153139",
+    "semantic_hash": "f6b7b9d1a084b9f603cb6ad5b5153139"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/connection/ConnectionPanel.jsx": {
+    "mtime": 1789315066.1791742,
+    "seen": 1790503863.6721761,
+    "ast_hash": "f20341111d6d89ad5f67d0d405572fba",
+    "semantic_hash": "f20341111d6d89ad5f67d0d405572fba"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/ActionBar.jsx": {
+    "mtime": 1789486643.0828087,
+    "seen": 1790503863.6721773,
+    "ast_hash": "10cae75185219304812c9c7397ab10b2",
+    "semantic_hash": "10cae75185219304812c9c7397ab10b2"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/FieldRenderer.jsx": {
+    "mtime": 1790075859.2865872,
+    "seen": 1790503863.6721787,
+    "ast_hash": "0ff3740803208b0685eede6240aea1f5",
+    "semantic_hash": "0ff3740803208b0685eede6240aea1f5"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/ButtonField.jsx": {
+    "mtime": 1789486568.794412,
+    "seen": 1790503863.67218,
+    "ast_hash": "89abf78f852bae51afea686b2313f13c",
+    "semantic_hash": "89abf78f852bae51afea686b2313f13c"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/CheckBoxField.jsx": {
+    "mtime": 1789486381.130815,
+    "seen": 1790503863.6721811,
+    "ast_hash": "902438417362bbf0e229f9b930dacfeb",
+    "semantic_hash": "902438417362bbf0e229f9b930dacfeb"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/DateField.jsx": {
+    "mtime": 1789486432.5146353,
+    "seen": 1790503863.6721823,
+    "ast_hash": "e77dc870b2c58707597ded9dfd3f1ef0",
+    "semantic_hash": "e77dc870b2c58707597ded9dfd3f1ef0"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/DividerField.jsx": {
+    "mtime": 1789486549.5379274,
+    "seen": 1790503863.6721835,
+    "ast_hash": "df66b604d018d16049d3b99f5935876c",
+    "semantic_hash": "df66b604d018d16049d3b99f5935876c"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/FileField.jsx": {
+    "mtime": 1789486492.2436461,
+    "seen": 1790503863.6721852,
+    "ast_hash": "e64230013c3a4efd1ada4020646e56bc",
+    "semantic_hash": "e64230013c3a4efd1ada4020646e56bc"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/GalleryField.jsx": {
+    "mtime": 1789867374.414457,
+    "seen": 1790503863.6721864,
+    "ast_hash": "413e76979754d4e48616c2313903032c",
+    "semantic_hash": "413e76979754d4e48616c2313903032c"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/ImageField.jsx": {
+    "mtime": 1789867348.80468,
+    "seen": 1790503863.6721878,
+    "ast_hash": "6aa72be60f4010922cb6bd59ca24c6bd",
+    "semantic_hash": "6aa72be60f4010922cb6bd59ca24c6bd"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/InfoField.jsx": {
+    "mtime": 1789486532.1322436,
+    "seen": 1790503863.6721892,
+    "ast_hash": "064fab368ad7de749d32de775ec531b1",
+    "semantic_hash": "064fab368ad7de749d32de775ec531b1"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/LocationPermissionField.jsx": {
+    "mtime": 1789816626.43678,
+    "seen": 1790503863.6721904,
+    "ast_hash": "76d57ce160e4fd038f9a916d8743f922",
+    "semantic_hash": "76d57ce160e4fd038f9a916d8743f922"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/NumberField.jsx": {
+    "mtime": 1789486274.0068965,
+    "seen": 1790503863.6721919,
+    "ast_hash": "c652fb6e1610a1c41e03bebca0036d67",
+    "semantic_hash": "c652fb6e1610a1c41e03bebca0036d67"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/PasswordField.jsx": {
+    "mtime": 1789486300.1850934,
+    "seen": 1790503863.672193,
+    "ast_hash": "706f41bcc5378e0ced84689b929554e3",
+    "semantic_hash": "706f41bcc5378e0ced84689b929554e3"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/ProgressField.jsx": {
+    "mtime": 1789867396.8597527,
+    "seen": 1790503863.6721942,
+    "ast_hash": "63919f7497b529f3d59d10613385c9b2",
+    "semantic_hash": "63919f7497b529f3d59d10613385c9b2"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/RadioField.jsx": {
+    "mtime": 1789486343.9519458,
+    "seen": 1790503863.6721957,
+    "ast_hash": "fe14dface607834bcf8260fc44269b5a",
+    "semantic_hash": "fe14dface607834bcf8260fc44269b5a"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/SelectField.jsx": {
+    "mtime": 1789486324.5341566,
+    "seen": 1790503863.6721969,
+    "ast_hash": "279276a9e905123bf0a22e61aed53473",
+    "semantic_hash": "279276a9e905123bf0a22e61aed53473"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/SliderField.jsx": {
+    "mtime": 1789486417.8905447,
+    "seen": 1790503863.672198,
+    "ast_hash": "57be14656555d89582d79928f140994f",
+    "semantic_hash": "57be14656555d89582d79928f140994f"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/SvgField.jsx": {
+    "mtime": 1789867415.4835594,
+    "seen": 1790503863.6721995,
+    "ast_hash": "7a58c8b9ec9dfae18bdb107f5e6fda5c",
+    "semantic_hash": "7a58c8b9ec9dfae18bdb107f5e6fda5c"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/SwitchField.jsx": {
+    "mtime": 1789486399.0636468,
+    "seen": 1790503863.672201,
+    "ast_hash": "472c4d19cce77f2eaf51d0d2b63492e7",
+    "semantic_hash": "472c4d19cce77f2eaf51d0d2b63492e7"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/TableField.jsx": {
+    "mtime": 1789486510.6560364,
+    "seen": 1790503863.6722019,
+    "ast_hash": "6a584396367958dde0f81c52e2dff5ab",
+    "semantic_hash": "6a584396367958dde0f81c52e2dff5ab"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/TextField.jsx": {
+    "mtime": 1789486241.7679763,
+    "seen": 1790503863.6722033,
+    "ast_hash": "3ed150f876ffcb167549da51ef8158f9",
+    "semantic_hash": "3ed150f876ffcb167549da51ef8158f9"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Field/TimeField.jsx": {
+    "mtime": 1789486476.111827,
+    "seen": 1790503863.6722045,
+    "ast_hash": "2cfa1859e92321d666226f01cf17373f",
+    "semantic_hash": "2cfa1859e92321d666226f01cf17373f"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/Renderer.jsx": {
+    "mtime": 1789816563.938024,
+    "seen": 1790503863.672206,
+    "ast_hash": "c89c48baa667b64ada2579542c6fc412",
+    "semantic_hash": "c89c48baa667b64ada2579542c6fc412"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/dio/SectionRenderer.jsx": {
+    "mtime": 1789486625.3706563,
+    "seen": 1790503863.672207,
+    "ast_hash": "de6802dccf92bb4272a1ec312df3c649",
+    "semantic_hash": "de6802dccf92bb4272a1ec312df3c649"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/location/AccessLocationReporter.jsx": {
+    "mtime": 1789809272.98396,
+    "seen": 1790503863.6722083,
+    "ast_hash": "0a3a356c63b60b55693f43cf504a153f",
+    "semantic_hash": "0a3a356c63b60b55693f43cf504a153f"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/location/LocationPanel.jsx": {
+    "mtime": 1789809300.2414124,
+    "seen": 1790503863.6722097,
+    "ast_hash": "5dbcf3f9228b670f69300b4670f767fd",
+    "semantic_hash": "5dbcf3f9228b670f69300b4670f767fd"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/navConfig.js": {
+    "mtime": 1789790981.000795,
+    "seen": 1790503863.6722112,
+    "ast_hash": "c553aa70804cdf2498db8187c7dd7b89",
+    "semantic_hash": "c553aa70804cdf2498db8187c7dd7b89"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/persona/BehaviorSlider.jsx": {
+    "mtime": 1789288875.5686016,
+    "seen": 1790503863.6722124,
+    "ast_hash": "d007e6cbdbc754648381d703e8aa8f2d",
+    "semantic_hash": "d007e6cbdbc754648381d703e8aa8f2d"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/persona/PresetCard.jsx": {
+    "mtime": 1789288895.6884494,
+    "seen": 1790503863.672214,
+    "ast_hash": "0b6ac8ec50ed955939d3687ee96dc7df",
+    "semantic_hash": "0b6ac8ec50ed955939d3687ee96dc7df"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/selection/SelectionToolbar.jsx": {
+    "mtime": 1790094518.9481854,
+    "seen": 1790503863.6722152,
+    "ast_hash": "bb24dc3be75ecca4757a5994fdac7457",
+    "semantic_hash": "bb24dc3be75ecca4757a5994fdac7457"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/settings/GlobalSettingsPanel.jsx": {
+    "mtime": 1789978827.8638973,
+    "seen": 1790503863.6722171,
+    "ast_hash": "c6fae85b2a0c472e56a9744e530253b5",
+    "semantic_hash": "c6fae85b2a0c472e56a9744e530253b5"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/workspace/Breadcrumb.jsx": {
+    "mtime": 1789394188.797298,
+    "seen": 1790503863.6722183,
+    "ast_hash": "44dc300a6db18752c4eb27299657df05",
+    "semantic_hash": "44dc300a6db18752c4eb27299657df05"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/workspace/ContextMenu.jsx": {
+    "mtime": 1789394237.47009,
+    "seen": 1790503863.67222,
+    "ast_hash": "89580b01d371930f8afcc14bd32af61b",
+    "semantic_hash": "89580b01d371930f8afcc14bd32af61b"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/workspace/FileGrid.jsx": {
+    "mtime": 1789394287.498058,
+    "seen": 1790503863.6722212,
+    "ast_hash": "3a0229c5d92401f318ae0f735364de75",
+    "semantic_hash": "3a0229c5d92401f318ae0f735364de75"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/workspace/FileRow.jsx": {
+    "mtime": 1789394260.2295408,
+    "seen": 1790503863.6722226,
+    "ast_hash": "bdc250def8e10a6be0aecd498c990842",
+    "semantic_hash": "bdc250def8e10a6be0aecd498c990842"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/workspace/PropertyPanel.jsx": {
+    "mtime": 1789394336.0247464,
+    "seen": 1790503863.6722243,
+    "ast_hash": "924b2f6971c7cf263e202a29bda5e245",
+    "semantic_hash": "924b2f6971c7cf263e202a29bda5e245"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/workspace/WorkspacePage.jsx": {
+    "mtime": 1789394354.211399,
+    "seen": 1790503863.6722257,
+    "ast_hash": "6e69c194e962848c5926e900620681f8",
+    "semantic_hash": "6e69c194e962848c5926e900620681f8"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/workspace/WorkspaceSidebar.jsx": {
+    "mtime": 1789394214.015647,
+    "seen": 1790503863.6722271,
+    "ast_hash": "6026306449a08823d73a876e3660184d",
+    "semantic_hash": "6026306449a08823d73a876e3660184d"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/components/workspace/WorkspaceToolbar.jsx": {
+    "mtime": 1789394314.5331602,
+    "seen": 1790503863.6722283,
+    "ast_hash": "1b4fc96d91fcbb62410ce1fd7a92903f",
+    "semantic_hash": "1b4fc96d91fcbb62410ce1fd7a92903f"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/context/CapabilityContext.jsx": {
+    "mtime": 1790375967.0753877,
+    "seen": 1790503863.6722295,
+    "ast_hash": "68908871455b3da78c3cd4683c129aa6",
+    "semantic_hash": "68908871455b3da78c3cd4683c129aa6"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/context/ChatRuntimeContext.jsx": {
+    "mtime": 1789920246.9161105,
+    "seen": 1790503863.6722312,
+    "ast_hash": "3dcc6a69c0f076909cfcf3e1453d278f",
+    "semantic_hash": "3dcc6a69c0f076909cfcf3e1453d278f"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/context/SessionsContext.jsx": {
+    "mtime": 1789901569.5128555,
+    "seen": 1790503863.6722324,
+    "ast_hash": "da6f44111c3efce57e7042965129ba3e",
+    "semantic_hash": "da6f44111c3efce57e7042965129ba3e"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/hooks/useAiraSocket.js": {
+    "mtime": 1789266511.5116963,
+    "seen": 1790503863.6722338,
+    "ast_hash": "2da5dc44a976a4323f7edf2ad2a29701",
+    "semantic_hash": "2da5dc44a976a4323f7edf2ad2a29701"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/hooks/useAiraSocketPool.js": {
+    "mtime": 1789773409.6804848,
+    "seen": 1790503863.672235,
+    "ast_hash": "6dd2b0a0c3ac4a523eb8bfc18e298153",
+    "semantic_hash": "6dd2b0a0c3ac4a523eb8bfc18e298153"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/hooks/useCapabilities.js": {
+    "mtime": 1790375994.1057727,
+    "seen": 1790503863.6722362,
+    "ast_hash": "35d402373077fc5931daeebbacc0d156",
+    "semantic_hash": "35d402373077fc5931daeebbacc0d156"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/hooks/useCockpitData.js": {
+    "mtime": 1789962406.2315,
+    "seen": 1790503863.6722376,
+    "ast_hash": "1997c346cca3214fe9cf65299c5cf237",
+    "semantic_hash": "1997c346cca3214fe9cf65299c5cf237"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/hooks/useGlobalSettings.js": {
+    "mtime": 1789962283.4585614,
+    "seen": 1790503863.6722388,
+    "ast_hash": "019e24be774d7c8ca0df5fd5602855da",
+    "semantic_hash": "019e24be774d7c8ca0df5fd5602855da"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/hooks/useInteractionState.js": {
+    "mtime": 1789867687.7696352,
+    "seen": 1790503863.67224,
+    "ast_hash": "cfaa03f02ee9b4744869a1d5365becee",
+    "semantic_hash": "cfaa03f02ee9b4744869a1d5365becee"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/hooks/useSelectionContext.js": {
+    "mtime": 1790133410.7014234,
+    "seen": 1790503863.6722414,
+    "ast_hash": "b2285d038c8aee3585151353ddbaff86",
+    "semantic_hash": "b2285d038c8aee3585151353ddbaff86"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/hooks/useVoice.js": {
+    "mtime": 1789130097.3937504,
+    "seen": 1790503863.6722426,
+    "ast_hash": "8bb9c81f7a289954eaf6a80b00c7b0f8",
+    "semantic_hash": "8bb9c81f7a289954eaf6a80b00c7b0f8"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/hooks/useVoiceCall.js": {
+    "mtime": 1789266161.593083,
+    "seen": 1790503863.672244,
+    "ast_hash": "9eb366dace4787335aeb7b2f25b7d012",
+    "semantic_hash": "9eb366dace4787335aeb7b2f25b7d012"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/main.jsx": {
+    "mtime": 1789339678.2225504,
+    "seen": 1790503863.6722453,
+    "ast_hash": "21d2448341b15ff6a303f1ad8f25afb3",
+    "semantic_hash": "21d2448341b15ff6a303f1ad8f25afb3"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/modelRouterApi.js": {
+    "mtime": 1789776867.1880167,
+    "seen": 1790503863.6722465,
+    "ast_hash": "11a573afc1c96875ad829a41e4f6ff02",
+    "semantic_hash": "11a573afc1c96875ad829a41e4f6ff02"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/pages/AkaneWorkspace.jsx": {
+    "mtime": 1789978756.3277192,
+    "seen": 1790503863.672248,
+    "ast_hash": "d654320bd7b787decd032ce0f0c04138",
+    "semantic_hash": "d654320bd7b787decd032ce0f0c04138"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/pages/ChatPage.jsx": {
+    "mtime": 1790376139.8890004,
+    "seen": 1790503863.672249,
+    "ast_hash": "6b278eb48dcd8bdc5cd6b1c955d15aae",
+    "semantic_hash": "6b278eb48dcd8bdc5cd6b1c955d15aae"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/pages/DevicesPage.jsx": {
+    "mtime": 1788948161.702923,
+    "seen": 1790503863.6722505,
+    "ast_hash": "af7ede642be7255711aedfd29a915b7d",
+    "semantic_hash": "af7ede642be7255711aedfd29a915b7d"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/pages/LogsPage.jsx": {
+    "mtime": 1789198267.6276102,
+    "seen": 1790503863.672252,
+    "ast_hash": "2416d9f11dfdae5f90a7633b5e176218",
+    "semantic_hash": "2416d9f11dfdae5f90a7633b5e176218"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/pages/MemoryPage.jsx": {
+    "mtime": 1788948161.7341714,
+    "seen": 1790503863.6722531,
+    "ast_hash": "c27ea42493b19bdfe846491ceefc2bb9",
+    "semantic_hash": "c27ea42493b19bdfe846491ceefc2bb9"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/pages/ModelsPage.jsx": {
+    "mtime": 1789777068.7534385,
+    "seen": 1790503863.6722548,
+    "ast_hash": "a53c809ac4026fdc0a02ee8404ff8920",
+    "semantic_hash": "a53c809ac4026fdc0a02ee8404ff8920"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/pages/PersonaPage.jsx": {
+    "mtime": 1789288935.4282832,
+    "seen": 1790503863.672258,
+    "ast_hash": "2f49c71c3114cc2861b96a35445972c6",
+    "semantic_hash": "2f49c71c3114cc2861b96a35445972c6"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/pages/SettingsPage.jsx": {
+    "mtime": 1789922182.75664,
+    "seen": 1790503863.6722593,
+    "ast_hash": "47183a333c43abccc62219573759d3b7",
+    "semantic_hash": "47183a333c43abccc62219573759d3b7"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/pages/WorkspacePage.jsx": {
+    "mtime": 1789394677.354419,
+    "seen": 1790503863.6722605,
+    "ast_hash": "6e69c194e962848c5926e900620681f8",
+    "semantic_hash": "6e69c194e962848c5926e900620681f8"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/pages/dio/DioPreviewPage.jsx": {
+    "mtime": 1789867764.2981787,
+    "seen": 1790503863.672262,
+    "ast_hash": "1e43e090684f02b5230009200dec5543",
+    "semantic_hash": "1e43e090684f02b5230009200dec5543"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/service.js": {
+    "mtime": 1789742144.2490976,
+    "seen": 1790503863.6722634,
+    "ast_hash": "fd3815afd6e9e9257d366250f67ba5b9",
+    "semantic_hash": "fd3815afd6e9e9257d366250f67ba5b9"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/services/location.js": {
+    "mtime": 1789809625.5512087,
+    "seen": 1790503863.6722643,
+    "ast_hash": "99189466a8586db1908711fe6fcfef26",
+    "semantic_hash": "99189466a8586db1908711fe6fcfef26"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/services/settingsApi.js": {
+    "mtime": 1789922118.5978248,
+    "seen": 1790503863.672266,
+    "ast_hash": "35f8e62a3748dcb8b7ac9e79c9098d67",
+    "semantic_hash": "35f8e62a3748dcb8b7ac9e79c9098d67"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/shared/iconRegistry.js": {
+    "mtime": 1789952997.242268,
+    "seen": 1790503863.6722672,
+    "ast_hash": "10499645deee9f8028e3b67d40e84b0c",
+    "semantic_hash": "10499645deee9f8028e3b67d40e84b0c"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/store/bootStore.js": {
+    "mtime": 1789348936.343825,
+    "seen": 1790503863.6722684,
+    "ast_hash": "641614989f55ddff66739999866e508f",
+    "semantic_hash": "641614989f55ddff66739999866e508f"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/theme/colors.js": {
+    "mtime": 1789718702.0015612,
+    "seen": 1790503863.6722698,
+    "ast_hash": "5a280199a582b8285d96fdc194156383",
+    "semantic_hash": "5a280199a582b8285d96fdc194156383"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/theme/index.js": {
+    "mtime": 1789718738.4740953,
+    "seen": 1790503863.672271,
+    "ast_hash": "6fd87a018b689dde9a70a86808d85c2e",
+    "semantic_hash": "6fd87a018b689dde9a70a86808d85c2e"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/theme/radius.js": {
+    "mtime": 1789718707.17737,
+    "seen": 1790503863.6722724,
+    "ast_hash": "d5e75e5562f1d41c98abd95b1b22ef05",
+    "semantic_hash": "d5e75e5562f1d41c98abd95b1b22ef05"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/theme/shadow.js": {
+    "mtime": 1789718710.2115223,
+    "seen": 1790503863.6722736,
+    "ast_hash": "337ef1add00775521ac3bdf8592ab09f",
+    "semantic_hash": "337ef1add00775521ac3bdf8592ab09f"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/theme/spacing.js": {
+    "mtime": 1789718713.8182862,
+    "seen": 1790503863.6722748,
+    "ast_hash": "d22d3fa93a2ef50437f299e205119157",
+    "semantic_hash": "d22d3fa93a2ef50437f299e205119157"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/theme/typography.js": {
+    "mtime": 1789718717.5755446,
+    "seen": 1790503863.6722763,
+    "ast_hash": "5a1c7a31529ddaa43bdb446aae44c70d",
+    "semantic_hash": "5a1c7a31529ddaa43bdb446aae44c70d"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/types/modelRouter.d.ts": {
+    "mtime": 1789863359.8211555,
+    "seen": 1790503863.6722775,
+    "ast_hash": "1a55abb9f698760fec4c95f7e7110479",
+    "semantic_hash": "1a55abb9f698760fec4c95f7e7110479"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/capabilityInvoke.js": {
+    "mtime": 1790375997.1350217,
+    "seen": 1790503863.672279,
+    "ast_hash": "8e624ac3aedaf68fd323634e4d4c9e78",
+    "semantic_hash": "8e624ac3aedaf68fd323634e4d4c9e78"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/clipboard.js": {
+    "mtime": 1789773717.2836094,
+    "seen": 1790503863.67228,
+    "ast_hash": "dd5978a4fbb09f2fd97dfea7bbd14257",
+    "semantic_hash": "dd5978a4fbb09f2fd97dfea7bbd14257"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/cockpitAdapter.js": {
+    "mtime": 1789962086.8219695,
+    "seen": 1790503863.6722813,
+    "ast_hash": "6eca4b5de86fd8d9a94f0ee2f59afa42",
+    "semantic_hash": "6eca4b5de86fd8d9a94f0ee2f59afa42"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/cockpitAdapter.test.js": {
+    "mtime": 1790075859.2865872,
+    "seen": 1790503863.6722827,
+    "ast_hash": "2b26eb0c058d8d1e6d401d0cb692823e",
+    "semantic_hash": "2b26eb0c058d8d1e6d401d0cb692823e"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/deltaBatcher.js": {
+    "mtime": 1790092754.472846,
+    "seen": 1790503863.672284,
+    "ast_hash": "09985cee662efc40e9ef6b47dded20b5",
+    "semantic_hash": "09985cee662efc40e9ef6b47dded20b5"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/deltaBatcher.test.js": {
+    "mtime": 1790092804.3208933,
+    "seen": 1790503863.6722848,
+    "ast_hash": "9c6ab5053ed772f9ef5397849a776452",
+    "semantic_hash": "9c6ab5053ed772f9ef5397849a776452"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/greeting.js": {
+    "mtime": 1789722443.3614101,
+    "seen": 1790503863.6722863,
+    "ast_hash": "26f98ef230e901913c94ba4a4d77b4d3",
+    "semantic_hash": "26f98ef230e901913c94ba4a4d77b4d3"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/greetingContext.js": {
+    "mtime": 1789953524.174173,
+    "seen": 1790503863.6722875,
+    "ast_hash": "e0409c0c2ce4297bc5c50dc7850bd6d5",
+    "semantic_hash": "e0409c0c2ce4297bc5c50dc7850bd6d5"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/greetingContext.test.js": {
+    "mtime": 1789953548.6618848,
+    "seen": 1790503863.6722884,
+    "ast_hash": "a0ed368a77f5682baa2b7c8d914c2218",
+    "semantic_hash": "a0ed368a77f5682baa2b7c8d914c2218"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/greetingResolver.js": {
+    "mtime": 1789953530.108525,
+    "seen": 1790503863.6722898,
+    "ast_hash": "f8a3857ae1ec93281187b9cbc59c1398",
+    "semantic_hash": "f8a3857ae1ec93281187b9cbc59c1398"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/greetingResolver.test.js": {
+    "mtime": 1789953555.8042042,
+    "seen": 1790503863.672291,
+    "ast_hash": "55f0a2e1d21af1b22574c81957024b33",
+    "semantic_hash": "55f0a2e1d21af1b22574c81957024b33"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/runLifecycle.js": {
+    "mtime": 1790092771.581217,
+    "seen": 1790503863.6722925,
+    "ast_hash": "0191abf7fd97f05c7ca02d5ad363b022",
+    "semantic_hash": "0191abf7fd97f05c7ca02d5ad363b022"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/runLifecycle.stream.test.js": {
+    "mtime": 1790092809.6129293,
+    "seen": 1790503863.6722934,
+    "ast_hash": "441a2920f7a3227fb62b7403db88d608",
+    "semantic_hash": "441a2920f7a3227fb62b7403db88d608"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/runLifecycle.test.js": {
+    "mtime": 1789920227.7892764,
+    "seen": 1790503863.6722946,
+    "ast_hash": "18fbb14bc3b5897b2eac4187e1361607",
+    "semantic_hash": "18fbb14bc3b5897b2eac4187e1361607"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/singleFlight.js": {
+    "mtime": 1789901522.032045,
+    "seen": 1790503863.672296,
+    "ast_hash": "00cd64cd4f201b92d454fc2575637f60",
+    "semantic_hash": "00cd64cd4f201b92d454fc2575637f60"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/singleFlight.test.js": {
+    "mtime": 1789901550.0704615,
+    "seen": 1790503863.6722972,
+    "ast_hash": "d1586cfe52c3037f5fe316bace345c4a",
+    "semantic_hash": "d1586cfe52c3037f5fe316bace345c4a"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/streamParser.js": {
+    "mtime": 1790092741.6132936,
+    "seen": 1790503863.6722984,
+    "ast_hash": "82c844af632fd2b104edfabf843935fd",
+    "semantic_hash": "82c844af632fd2b104edfabf843935fd"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/src/utils/streamParser.test.js": {
+    "mtime": 1790092796.3767185,
+    "seen": 1790503863.6722999,
+    "ast_hash": "fb6dc241a8b19a726dadebe50c530d54",
+    "semantic_hash": "fb6dc241a8b19a726dadebe50c530d54"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/tailwind.config.js": {
+    "mtime": 1789718474.853547,
+    "seen": 1790503863.672301,
+    "ast_hash": "9fd10cfdbd3f0aea371c6ed1e9cfff16",
+    "semantic_hash": "9fd10cfdbd3f0aea371c6ed1e9cfff16"
+  },
+  "AIRA_ECOSYSTEM/app/frontend/vite.config.js": {
+    "mtime": 1789809361.5020483,
+    "seen": 1790503863.6723022,
+    "ast_hash": "4a22d8b7b0d71111f73ec103c335798a",
+    "semantic_hash": "4a22d8b7b0d71111f73ec103c335798a"
+  },
+  "AIRA_ECOSYSTEM/core/__init__.py": {
+    "mtime": 1788950764.6973264,
+    "seen": 1790503863.6723037,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/__init__.py": {
+    "mtime": 1790211785.3484306,
+    "seen": 1790503863.6723049,
+    "ast_hash": "dc17fd15760889780efaeb395ee97c6a",
+    "semantic_hash": "dc17fd15760889780efaeb395ee97c6a"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/engine.py": {
+    "mtime": 1790211975.3661928,
+    "seen": 1790503863.672306,
+    "ast_hash": "c39cfdfe50f2a2bfcaa058f761209dde",
+    "semantic_hash": "c39cfdfe50f2a2bfcaa058f761209dde"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/generators/__init__.py": {
+    "mtime": 1790212280.9942698,
+    "seen": 1790503863.6723075,
+    "ast_hash": "4464413c5ec408fa186cf5cd8745c179",
+    "semantic_hash": "4464413c5ec408fa186cf5cd8745c179"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/generators/base.py": {
+    "mtime": 1790212116.4040806,
+    "seen": 1790503863.6723087,
+    "ast_hash": "a105e345dbcfda513f99ce42b31141e6",
+    "semantic_hash": "a105e345dbcfda513f99ce42b31141e6"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/generators/csv_gen.py": {
+    "mtime": 1790212265.249422,
+    "seen": 1790503863.67231,
+    "ast_hash": "ebd00103cb77a042912b3ee52bae7d9a",
+    "semantic_hash": "ebd00103cb77a042912b3ee52bae7d9a"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/generators/document_text.py": {
+    "mtime": 1790212244.3113973,
+    "seen": 1790503863.6723113,
+    "ast_hash": "b0522bdfabbda266c5b965c2b33e11be",
+    "semantic_hash": "b0522bdfabbda266c5b965c2b33e11be"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/generators/docx_gen.py": {
+    "mtime": 1790212141.0597415,
+    "seen": 1790503863.6723125,
+    "ast_hash": "d38fdbbe039fe05ff0406beeff8fce86",
+    "semantic_hash": "d38fdbbe039fe05ff0406beeff8fce86"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/generators/pdf_gen.py": {
+    "mtime": 1790212159.8659348,
+    "seen": 1790503863.672314,
+    "ast_hash": "8ffb5e178aee0ebb9337bbfd730b25fe",
+    "semantic_hash": "8ffb5e178aee0ebb9337bbfd730b25fe"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/generators/pptx_gen.py": {
+    "mtime": 1790213925.5389025,
+    "seen": 1790503863.6723151,
+    "ast_hash": "b833d3cc4faaa3a2b0fd4376b419095f",
+    "semantic_hash": "b833d3cc4faaa3a2b0fd4376b419095f"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/generators/xlsx_gen.py": {
+    "mtime": 1790212185.219431,
+    "seen": 1790503863.6723163,
+    "ast_hash": "39a3e0fcfc41ca8f1dae7f0df49d22d4",
+    "semantic_hash": "39a3e0fcfc41ca8f1dae7f0df49d22d4"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/models.py": {
+    "mtime": 1790211808.0975783,
+    "seen": 1790503863.6723177,
+    "ast_hash": "b023e07b8b2f712730653c586477d947",
+    "semantic_hash": "b023e07b8b2f712730653c586477d947"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/specs.py": {
+    "mtime": 1790211838.791697,
+    "seen": 1790503863.672319,
+    "ast_hash": "4bbe5931f997bc6ddb822f8029528bdd",
+    "semantic_hash": "4bbe5931f997bc6ddb822f8029528bdd"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/store.py": {
+    "mtime": 1790397088.3977544,
+    "seen": 1790503863.6723204,
+    "ast_hash": "2e5b64e6a08b6d7373c7b99548a5a57c",
+    "semantic_hash": "2e5b64e6a08b6d7373c7b99548a5a57c"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/tests/test_engine.py": {
+    "mtime": 1790212373.6391354,
+    "seen": 1790503863.6723216,
+    "ast_hash": "8ee4fb71eb71766b1da233236fc76f54",
+    "semantic_hash": "8ee4fb71eb71766b1da233236fc76f54"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/tests/test_generator.py": {
+    "mtime": 1790212335.9666643,
+    "seen": 1790503863.672323,
+    "ast_hash": "0143d6e38407baa7828481a51e27aed5",
+    "semantic_hash": "0143d6e38407baa7828481a51e27aed5"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/tests/test_specs_and_validator.py": {
+    "mtime": 1790212312.2564857,
+    "seen": 1790503863.6723244,
+    "ast_hash": "16118ae37bd88922061a223fb8d0d5d6",
+    "semantic_hash": "16118ae37bd88922061a223fb8d0d5d6"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/tests/test_store.py": {
+    "mtime": 1790212356.0291934,
+    "seen": 1790503863.6723256,
+    "ast_hash": "1f699ab0f6cec1565c36ae9c8be01d1b",
+    "semantic_hash": "1f699ab0f6cec1565c36ae9c8be01d1b"
+  },
+  "AIRA_ECOSYSTEM/core/artifacts/validator.py": {
+    "mtime": 1790211868.17248,
+    "seen": 1790503863.672328,
+    "ast_hash": "f320cfef78a561c151bef8c4194b7554",
+    "semantic_hash": "f320cfef78a561c151bef8c4194b7554"
+  },
+  "AIRA_ECOSYSTEM/core/attachment/main.py": {
+    "mtime": 1790250235.2353232,
+    "seen": 1790503863.6723301,
+    "ast_hash": "05899fd7f3d49ff4be6b1f0fa37cbe98",
+    "semantic_hash": "05899fd7f3d49ff4be6b1f0fa37cbe98"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/__init__.py": {
+    "mtime": 1790250234.8774855,
+    "seen": 1790503863.6723323,
+    "ast_hash": "350a7bd9ea94db823dfef6d13f2280a8",
+    "semantic_hash": "350a7bd9ea94db823dfef6d13f2280a8"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/constants.py": {
+    "mtime": 1790250234.2529178,
+    "seen": 1790503863.6723344,
+    "ast_hash": "99dae769cc86920ae41083d4d1ee0b54",
+    "semantic_hash": "99dae769cc86920ae41083d4d1ee0b54"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/context.py": {
+    "mtime": 1790250234.7021008,
+    "seen": 1790503863.6723368,
+    "ast_hash": "840fba17a71e1f0c0391b973d2103561",
+    "semantic_hash": "840fba17a71e1f0c0391b973d2103561"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/engine.py": {
+    "mtime": 1790250234.5760453,
+    "seen": 1790503863.6723394,
+    "ast_hash": "f4733e8231f71cd36b8d1d8223826122",
+    "semantic_hash": "f4733e8231f71cd36b8d1d8223826122"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/mnt/user-data/outputs/AIRA_ECOSYSTEM/core/attachments/tests/__init__.py": {
+    "mtime": 1790250235.9996295,
+    "seen": 1790503863.672343,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/models.py": {
+    "mtime": 1790250234.0720513,
+    "seen": 1790503863.6723604,
+    "ast_hash": "47e8b39d631caefbea535e57dbd30d55",
+    "semantic_hash": "47e8b39d631caefbea535e57dbd30d55"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/store.py": {
+    "mtime": 1790397107.3273616,
+    "seen": 1790503863.6723635,
+    "ast_hash": "7f772dd7a146dd041c95126542563f81",
+    "semantic_hash": "7f772dd7a146dd041c95126542563f81"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/tests/test_context.py": {
+    "mtime": 1790250235.8303368,
+    "seen": 1790503863.672366,
+    "ast_hash": "9dea7f09b768689476da473bf3a97157",
+    "semantic_hash": "9dea7f09b768689476da473bf3a97157"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/tests/test_engine.py": {
+    "mtime": 1790250235.7306156,
+    "seen": 1790503863.672368,
+    "ast_hash": "467482b55088e3d90781e3036e1a0a39",
+    "semantic_hash": "467482b55088e3d90781e3036e1a0a39"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/tests/test_models.py": {
+    "mtime": 1790250235.3887594,
+    "seen": 1790503863.6723702,
+    "ast_hash": "864c6af2cd3480d39f4d41cc550271ae",
+    "semantic_hash": "864c6af2cd3480d39f4d41cc550271ae"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/tests/test_store.py": {
+    "mtime": 1790250235.618868,
+    "seen": 1790503863.6723719,
+    "ast_hash": "a459f5ef2093db1044bad8be3093efe5",
+    "semantic_hash": "a459f5ef2093db1044bad8be3093efe5"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/tests/test_validator.py": {
+    "mtime": 1790250235.50647,
+    "seen": 1790503863.672374,
+    "ast_hash": "7c2c944cf8021c22aaaa178c5d339ae5",
+    "semantic_hash": "7c2c944cf8021c22aaaa178c5d339ae5"
+  },
+  "AIRA_ECOSYSTEM/core/attachments/validator.py": {
+    "mtime": 1790250234.3558674,
+    "seen": 1790503863.672376,
+    "ast_hash": "715cb51e0fc8e9b30b3236914e019043",
+    "semantic_hash": "715cb51e0fc8e9b30b3236914e019043"
+  },
+  "AIRA_ECOSYSTEM/core/brain.py": {
+    "mtime": 1789944756.508381,
+    "seen": 1790503863.6723778,
+    "ast_hash": "5212a3127b39fc04977f35bb83c309cb",
+    "semantic_hash": "5212a3127b39fc04977f35bb83c309cb"
+  },
+  "AIRA_ECOSYSTEM/core/capability/__init__.py": {
+    "mtime": 1790149005.2190328,
+    "seen": 1790503863.6723797,
+    "ast_hash": "8b30049fcb5c07463d2a9562effaabdf",
+    "semantic_hash": "8b30049fcb5c07463d2a9562effaabdf"
+  },
+  "AIRA_ECOSYSTEM/core/capability/constants.py": {
+    "mtime": 1790149005.3639982,
+    "seen": 1790503863.6723816,
+    "ast_hash": "530dac04f6c739cc282c4261e5049696",
+    "semantic_hash": "530dac04f6c739cc282c4261e5049696"
+  },
+  "AIRA_ECOSYSTEM/core/capability/discovery.py": {
+    "mtime": 1790149005.4788382,
+    "seen": 1790503863.6723838,
+    "ast_hash": "76d241488899f3da72cfe9e8ff490d82",
+    "semantic_hash": "76d241488899f3da72cfe9e8ff490d82"
+  },
+  "AIRA_ECOSYSTEM/core/capability/frontend.py": {
+    "mtime": 1790149005.5898552,
+    "seen": 1790503863.6723866,
+    "ast_hash": "76b088937c6f24973cf30493b68d7ccf",
+    "semantic_hash": "76b088937c6f24973cf30493b68d7ccf"
+  },
+  "AIRA_ECOSYSTEM/core/capability/integration.py": {
+    "mtime": 1790149005.698283,
+    "seen": 1790503863.6723905,
+    "ast_hash": "cfd541609d847b90dd790c43e20af77e",
+    "semantic_hash": "cfd541609d847b90dd790c43e20af77e"
+  },
+  "AIRA_ECOSYSTEM/core/capability/models.py": {
+    "mtime": 1790149005.7563295,
+    "seen": 1790503863.672394,
+    "ast_hash": "1b5b0bf15ae93fab5b906faf6c564153",
+    "semantic_hash": "1b5b0bf15ae93fab5b906faf6c564153"
+  },
+  "AIRA_ECOSYSTEM/core/capability/registry.py": {
+    "mtime": 1790149005.8178818,
+    "seen": 1790503863.6723974,
+    "ast_hash": "f0b32f6d60ab1bcbb44358b68917ea06",
+    "semantic_hash": "f0b32f6d60ab1bcbb44358b68917ea06"
+  },
+  "AIRA_ECOSYSTEM/core/capability/tests/__init__.py": {
+    "mtime": 1790149005.908868,
+    "seen": 1790503863.6724014,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/core/capability/tests/test_discovery.py": {
+    "mtime": 1790149005.98741,
+    "seen": 1790503863.6724038,
+    "ast_hash": "a5c23016f940f60ae8ec30ff23804b2d",
+    "semantic_hash": "a5c23016f940f60ae8ec30ff23804b2d"
+  },
+  "AIRA_ECOSYSTEM/core/capability/tests/test_frontend_and_integration.py": {
+    "mtime": 1790149006.0668852,
+    "seen": 1790503863.6724055,
+    "ast_hash": "91d214df1891eac8accf7dbc271ada86",
+    "semantic_hash": "91d214df1891eac8accf7dbc271ada86"
+  },
+  "AIRA_ECOSYSTEM/core/capability/tests/test_models.py": {
+    "mtime": 1790149006.1539643,
+    "seen": 1790503863.6724074,
+    "ast_hash": "7c7f602783b70f61c9659fb6741a468a",
+    "semantic_hash": "7c7f602783b70f61c9659fb6741a468a"
+  },
+  "AIRA_ECOSYSTEM/core/capability/tests/test_registry.py": {
+    "mtime": 1790149006.2285087,
+    "seen": 1790503863.6724093,
+    "ast_hash": "88f20babfba28f19e01c8fd7b852c9b9",
+    "semantic_hash": "88f20babfba28f19e01c8fd7b852c9b9"
+  },
+  "AIRA_ECOSYSTEM/core/chat_sessions.py": {
+    "mtime": 1789773597.650907,
+    "seen": 1790503863.6724114,
+    "ast_hash": "eb04b00a9e5419368ee7d4f6b8f360be",
+    "semantic_hash": "eb04b00a9e5419368ee7d4f6b8f360be"
+  },
+  "AIRA_ECOSYSTEM/core/context/__init__.py": {
+    "mtime": 1790397159.365438,
+    "seen": 1790503863.6724133,
+    "ast_hash": "bfdccd4abc67c859b2666402009282c6",
+    "semantic_hash": "bfdccd4abc67c859b2666402009282c6"
+  },
+  "AIRA_ECOSYSTEM/core/context/builder.py": {
+    "mtime": 1790397194.653572,
+    "seen": 1790503863.6724153,
+    "ast_hash": "21613cfdb599ef1b2d0ede7de9cac618",
+    "semantic_hash": "21613cfdb599ef1b2d0ede7de9cac618"
+  },
+  "AIRA_ECOSYSTEM/core/context/models.py": {
+    "mtime": 1790397144.9373007,
+    "seen": 1790503863.6724179,
+    "ast_hash": "bd405836927bf60fd45d831eda2eea86",
+    "semantic_hash": "bd405836927bf60fd45d831eda2eea86"
+  },
+  "AIRA_ECOSYSTEM/core/conversation_context.py": {
+    "mtime": 1789946641.9219744,
+    "seen": 1790503863.67242,
+    "ast_hash": "863c9d4164254bc4aca4c66f93a46896",
+    "semantic_hash": "863c9d4164254bc4aca4c66f93a46896"
+  },
+  "AIRA_ECOSYSTEM/core/dio/__init__.py": {
+    "mtime": 1789486992.6758082,
+    "seen": 1790503863.672422,
+    "ast_hash": "2c13f1218c6c14a5bd65dd360dd90e9d",
+    "semantic_hash": "2c13f1218c6c14a5bd65dd360dd90e9d"
+  },
+  "AIRA_ECOSYSTEM/core/dio/analyzer.py": {
+    "mtime": 1789835818.133664,
+    "seen": 1790503863.6724238,
+    "ast_hash": "f17633de621d196ddb05e56620dfad67",
+    "semantic_hash": "f17633de621d196ddb05e56620dfad67"
+  },
+  "AIRA_ECOSYSTEM/core/dio/builder.py": {
+    "mtime": 1789835768.678969,
+    "seen": 1790503863.672426,
+    "ast_hash": "40f42431dc0f9e8dc911a315d35e312a",
+    "semantic_hash": "40f42431dc0f9e8dc911a315d35e312a"
+  },
+  "AIRA_ECOSYSTEM/core/dio/constants.py": {
+    "mtime": 1789837969.4133554,
+    "seen": 1790503863.672428,
+    "ast_hash": "53f65a5cc84a688cb6b0fa27885c4170",
+    "semantic_hash": "53f65a5cc84a688cb6b0fa27885c4170"
+  },
+  "AIRA_ECOSYSTEM/core/dio/interaction_memory.py": {
+    "mtime": 1789835802.3970983,
+    "seen": 1790503863.67243,
+    "ast_hash": "bda1eee780cca1b81416bcff8ac42277",
+    "semantic_hash": "bda1eee780cca1b81416bcff8ac42277"
+  },
+  "AIRA_ECOSYSTEM/core/dio/models.py": {
+    "mtime": 1789835739.638197,
+    "seen": 1790503863.6724324,
+    "ast_hash": "e17073704e98343a44788feba31b6d8d",
+    "semantic_hash": "e17073704e98343a44788feba31b6d8d"
+  },
+  "AIRA_ECOSYSTEM/core/dio/reasoning.py": {
+    "mtime": 1789835755.6539636,
+    "seen": 1790503863.6724339,
+    "ast_hash": "5f2ab3ed1bd91ddba0a19f6bc93d94ca",
+    "semantic_hash": "5f2ab3ed1bd91ddba0a19f6bc93d94ca"
+  },
+  "AIRA_ECOSYSTEM/core/dio/schema.py": {
+    "mtime": 1789835827.96432,
+    "seen": 1790503863.6724362,
+    "ast_hash": "81f0687ec07ad1f7fba892c4b37d29c5",
+    "semantic_hash": "81f0687ec07ad1f7fba892c4b37d29c5"
+  },
+  "AIRA_ECOSYSTEM/core/dio/tests/__init__.py": {
+    "mtime": 1789487100.0440714,
+    "seen": 1790503863.6724384,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/core/dio/tests/dio/__init__.py": {
+    "mtime": 1789487123.5088308,
+    "seen": 1790503863.6724398,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/core/dio/tests/dio/test_analyzer.py": {
+    "mtime": 1789487219.3602881,
+    "seen": 1790503863.6724422,
+    "ast_hash": "d6a363d0bcfed11440d6dcfd5e6d88b5",
+    "semantic_hash": "d6a363d0bcfed11440d6dcfd5e6d88b5"
+  },
+  "AIRA_ECOSYSTEM/core/dio/tests/dio/test_builder.py": {
+    "mtime": 1789487164.0338638,
+    "seen": 1790503863.6724446,
+    "ast_hash": "0bcbb60126cf73233c4a54a952e20df7",
+    "semantic_hash": "0bcbb60126cf73233c4a54a952e20df7"
+  },
+  "AIRA_ECOSYSTEM/core/dio/tests/dio/test_dio_tools_security.py": {
+    "mtime": 1789838213.462625,
+    "seen": 1790503863.6724467,
+    "ast_hash": "607ae729687697dc31278bf1e4964ed0",
+    "semantic_hash": "607ae729687697dc31278bf1e4964ed0"
+  },
+  "AIRA_ECOSYSTEM/core/dio/tests/dio/test_interaction_memory.py": {
+    "mtime": 1789487201.6278179,
+    "seen": 1790503863.672449,
+    "ast_hash": "c650b4983fcdddcd84c6c01b9267dc45",
+    "semantic_hash": "c650b4983fcdddcd84c6c01b9267dc45"
+  },
+  "AIRA_ECOSYSTEM/core/dio/tests/dio/test_location_flow.py": {
+    "mtime": 1789816719.0484648,
+    "seen": 1790503863.672451,
+    "ast_hash": "70adf33f98c07d0ac5af196bcf929f7a",
+    "semantic_hash": "70adf33f98c07d0ac5af196bcf929f7a"
+  },
+  "AIRA_ECOSYSTEM/core/dio/tests/dio/test_reasoning.py": {
+    "mtime": 1789487145.6148243,
+    "seen": 1790503863.6724534,
+    "ast_hash": "4bf674d56bff3020ef07b0e6eb6f5afe",
+    "semantic_hash": "4bf674d56bff3020ef07b0e6eb6f5afe"
+  },
+  "AIRA_ECOSYSTEM/core/dio/tests/dio/test_validator.py": {
+    "mtime": 1789487182.874727,
+    "seen": 1790503863.6724553,
+    "ast_hash": "9cf89b8e276dda605f07d95e91821d2e",
+    "semantic_hash": "9cf89b8e276dda605f07d95e91821d2e"
+  },
+  "AIRA_ECOSYSTEM/core/dio/validator.py": {
+    "mtime": 1789835782.2237003,
+    "seen": 1790503863.6724575,
+    "ast_hash": "09ee0edbac3568a8b5d3cc5b986ff1d1",
+    "semantic_hash": "09ee0edbac3568a8b5d3cc5b986ff1d1"
+  },
+  "AIRA_ECOSYSTEM/core/events.py": {
+    "mtime": 1789944804.6220036,
+    "seen": 1790503863.6724594,
+    "ast_hash": "297e0c42ce071fd6fa3b943787a9d1eb",
+    "semantic_hash": "297e0c42ce071fd6fa3b943787a9d1eb"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/__init__.py": {
+    "mtime": 1790243398.9576821,
+    "seen": 1790503863.6724608,
+    "ast_hash": "57b310d17c4524e3e51f512d544ab9e7",
+    "semantic_hash": "57b310d17c4524e3e51f512d544ab9e7"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/capability_bridge.py": {
+    "mtime": 1790243399.0310576,
+    "seen": 1790503863.6724632,
+    "ast_hash": "abb5029bd41fedf7014aa35aa930e541",
+    "semantic_hash": "abb5029bd41fedf7014aa35aa930e541"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/config.py": {
+    "mtime": 1790243398.8857493,
+    "seen": 1790503863.672465,
+    "ast_hash": "e03a35eae37de21bc898e63b9101b5a5",
+    "semantic_hash": "e03a35eae37de21bc898e63b9101b5a5"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/constants.py": {
+    "mtime": 1790243399.103864,
+    "seen": 1790503863.6724677,
+    "ast_hash": "604ec694e5a9d8a5bbb39d4cb28b9b66",
+    "semantic_hash": "604ec694e5a9d8a5bbb39d4cb28b9b66"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/factory.py": {
+    "mtime": 1790243398.6626537,
+    "seen": 1790503863.67247,
+    "ast_hash": "791142b741a77621af71555f2378591e",
+    "semantic_hash": "791142b741a77621af71555f2378591e"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/google_maps.py": {
+    "mtime": 1790243399.1724522,
+    "seen": 1790503863.6724718,
+    "ast_hash": "98f3e13d71b0fd2f58be90a0069c3b4a",
+    "semantic_hash": "98f3e13d71b0fd2f58be90a0069c3b4a"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/models.py": {
+    "mtime": 1790243399.2578795,
+    "seen": 1790503863.6724753,
+    "ast_hash": "7cb7a0aad559feff060b96f31ae8a169",
+    "semantic_hash": "7cb7a0aad559feff060b96f31ae8a169"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/provider.py": {
+    "mtime": 1790243398.806563,
+    "seen": 1790503863.6724782,
+    "ast_hash": "b1175b03e26fd35778be316e6e442a32",
+    "semantic_hash": "b1175b03e26fd35778be316e6e442a32"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/tests/__init__.py": {
+    "mtime": 1790243399.321638,
+    "seen": 1790503863.6724813,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/tests/test_capability_bridge.py": {
+    "mtime": 1790243399.6463945,
+    "seen": 1790503863.6724842,
+    "ast_hash": "dcac91869fee98aa4dde286b34152043",
+    "semantic_hash": "dcac91869fee98aa4dde286b34152043"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/tests/test_google_maps.py": {
+    "mtime": 1790243399.7213612,
+    "seen": 1790503863.6724858,
+    "ast_hash": "6d1ae5bea0da60fe1f5cd90fb11298ae",
+    "semantic_hash": "6d1ae5bea0da60fe1f5cd90fb11298ae"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/tests/test_models.py": {
+    "mtime": 1790243399.4464972,
+    "seen": 1790503863.6724877,
+    "ast_hash": "acfec6df0e59a69af6af0ed603001988",
+    "semantic_hash": "acfec6df0e59a69af6af0ed603001988"
+  },
+  "AIRA_ECOSYSTEM/core/external_context/tests/test_provider_contract.py": {
+    "mtime": 1790243399.5398598,
+    "seen": 1790503863.67249,
+    "ast_hash": "6a4f3dc8731315336887d057884dade2",
+    "semantic_hash": "6a4f3dc8731315336887d057884dade2"
+  },
+  "AIRA_ECOSYSTEM/core/filesystem/__init__.py": {
+    "mtime": 1789317502.7596657,
+    "seen": 1790503863.672492,
+    "ast_hash": "1e3a430c695def187d6082666b135404",
+    "semantic_hash": "1e3a430c695def187d6082666b135404"
+  },
+  "AIRA_ECOSYSTEM/core/filesystem/history.py": {
+    "mtime": 1789317417.599943,
+    "seen": 1790503863.6724942,
+    "ast_hash": "c9ccc3a25b60c70d014adc83b6884fd1",
+    "semantic_hash": "c9ccc3a25b60c70d014adc83b6884fd1"
+  },
+  "AIRA_ECOSYSTEM/core/filesystem/models.py": {
+    "mtime": 1789317381.4090717,
+    "seen": 1790503863.6724975,
+    "ast_hash": "25b0f0c38ac8b8b18118ba7600dd8808",
+    "semantic_hash": "25b0f0c38ac8b8b18118ba7600dd8808"
+  },
+  "AIRA_ECOSYSTEM/core/filesystem/operations.py": {
+    "mtime": 1789317482.5094192,
+    "seen": 1790503863.6725,
+    "ast_hash": "e47807a4133eccd61a09032ac276fced",
+    "semantic_hash": "e47807a4133eccd61a09032ac276fced"
+  },
+  "AIRA_ECOSYSTEM/core/filesystem/permissions.py": {
+    "mtime": 1789317399.2386546,
+    "seen": 1790503863.672502,
+    "ast_hash": "2949b7cdd803e93d3972fade363b7382",
+    "semantic_hash": "2949b7cdd803e93d3972fade363b7382"
+  },
+  "AIRA_ECOSYSTEM/core/filesystem/test_workspace_and_operations.py": {
+    "mtime": 1789317634.8344343,
+    "seen": 1790503863.6725044,
+    "ast_hash": "80b4f6e03021153b86787901561c1642",
+    "semantic_hash": "80b4f6e03021153b86787901561c1642"
+  },
+  "AIRA_ECOSYSTEM/core/filesystem/trash.py": {
+    "mtime": 1789317438.375311,
+    "seen": 1790503863.6725082,
+    "ast_hash": "71e4d7730ec6a4ab5f82dceb9952ecd7",
+    "semantic_hash": "71e4d7730ec6a4ab5f82dceb9952ecd7"
+  },
+  "AIRA_ECOSYSTEM/core/filesystem/workspace.py": {
+    "mtime": 1790335257.7141187,
+    "seen": 1790503863.6725135,
+    "ast_hash": "a555c4d23401640c2ab41aede161f82b",
+    "semantic_hash": "a555c4d23401640c2ab41aede161f82b"
+  },
+  "AIRA_ECOSYSTEM/core/global_settings.py": {
+    "mtime": 1789922011.4474804,
+    "seen": 1790503863.6725168,
+    "ast_hash": "768dd517ede87b56d86ec13c1860a26f",
+    "semantic_hash": "768dd517ede87b56d86ec13c1860a26f"
+  },
+  "AIRA_ECOSYSTEM/core/host/__init__.py": {
+    "mtime": 1789317346.777959,
+    "seen": 1790503863.6725194,
+    "ast_hash": "cff6f42b9355f2b2a9d79694dc3c02a5",
+    "semantic_hash": "cff6f42b9355f2b2a9d79694dc3c02a5"
+  },
+  "AIRA_ECOSYSTEM/core/host/detector.py": {
+    "mtime": 1789317327.3457808,
+    "seen": 1790503863.6725225,
+    "ast_hash": "955451f277e90b03eeae8fa405c65782",
+    "semantic_hash": "955451f277e90b03eeae8fa405c65782"
+  },
+  "AIRA_ECOSYSTEM/core/host/linux.py": {
+    "mtime": 1789317313.136206,
+    "seen": 1790503863.672526,
+    "ast_hash": "1944df78b08502f158bd5dd6b07f3a78",
+    "semantic_hash": "1944df78b08502f158bd5dd6b07f3a78"
+  },
+  "AIRA_ECOSYSTEM/core/host/models.py": {
+    "mtime": 1789317269.8790078,
+    "seen": 1790503863.672529,
+    "ast_hash": "3f209aa451259b7e6999a1afea0e0cdd",
+    "semantic_hash": "3f209aa451259b7e6999a1afea0e0cdd"
+  },
+  "AIRA_ECOSYSTEM/core/host/test_host_adapters.py": {
+    "mtime": 1789317611.0651174,
+    "seen": 1790503863.672532,
+    "ast_hash": "1cddf247cbd85abd1fc4d2234760c334",
+    "semantic_hash": "1cddf247cbd85abd1fc4d2234760c334"
+  },
+  "AIRA_ECOSYSTEM/core/host/windows.py": {
+    "mtime": 1789317294.6509252,
+    "seen": 1790503863.6725347,
+    "ast_hash": "95f930eadde50b800873aa9b697ef7f0",
+    "semantic_hash": "95f930eadde50b800873aa9b697ef7f0"
+  },
+  "AIRA_ECOSYSTEM/core/location/__init__.py": {
+    "mtime": 1789809086.3127117,
+    "seen": 1790503863.6725376,
+    "ast_hash": "4cf1f32adc04e9a11646af5a7f162f80",
+    "semantic_hash": "4cf1f32adc04e9a11646af5a7f162f80"
+  },
+  "AIRA_ECOSYSTEM/core/location/geo.py": {
+    "mtime": 1789809131.687346,
+    "seen": 1790503863.6725404,
+    "ast_hash": "a840c4629840ac73f6af82bf5fc9b429",
+    "semantic_hash": "a840c4629840ac73f6af82bf5fc9b429"
+  },
+  "AIRA_ECOSYSTEM/core/location/models.py": {
+    "mtime": 1789809099.9622889,
+    "seen": 1790503863.672543,
+    "ast_hash": "13f30dc1784caded6dbda1a270429d30",
+    "semantic_hash": "13f30dc1784caded6dbda1a270429d30"
+  },
+  "AIRA_ECOSYSTEM/core/location/service.py": {
+    "mtime": 1789809173.817379,
+    "seen": 1790503863.6725464,
+    "ast_hash": "a5a53df5238ba9c9f9bc3d1cc2801c7b",
+    "semantic_hash": "a5a53df5238ba9c9f9bc3d1cc2801c7b"
+  },
+  "AIRA_ECOSYSTEM/core/location/store.py": {
+    "mtime": 1789809158.27129,
+    "seen": 1790503863.6725502,
+    "ast_hash": "08d4ce8301973c813e5bc87d25e3b5e7",
+    "semantic_hash": "08d4ce8301973c813e5bc87d25e3b5e7"
+  },
+  "AIRA_ECOSYSTEM/core/log_store.py": {
+    "mtime": 1789838150.55389,
+    "seen": 1790503863.672554,
+    "ast_hash": "70104becf4975e8290f10cfe022be9ff",
+    "semantic_hash": "70104becf4975e8290f10cfe022be9ff"
+  },
+  "AIRA_ECOSYSTEM/core/logger.py": {
+    "mtime": 1789174547.2772677,
+    "seen": 1790503863.6725569,
+    "ast_hash": "a944b6f4d9530ee1e0004bc9bbb25c4c",
+    "semantic_hash": "a944b6f4d9530ee1e0004bc9bbb25c4c"
+  },
+  "AIRA_ECOSYSTEM/core/memory.py": {
+    "mtime": 1789175771.170012,
+    "seen": 1790503863.6725602,
+    "ast_hash": "7abe346c3fb8cd7d5ce2b11a0ed04d61",
+    "semantic_hash": "7abe346c3fb8cd7d5ce2b11a0ed04d61"
+  },
+  "AIRA_ECOSYSTEM/core/model_policy.py": {
+    "mtime": 1789776499.3160028,
+    "seen": 1790503863.672564,
+    "ast_hash": "2185f93fce8b537cb1ce426f274b0aa1",
+    "semantic_hash": "2185f93fce8b537cb1ce426f274b0aa1"
+  },
+  "AIRA_ECOSYSTEM/core/model_registry.py": {
+    "mtime": 1789264160.7339633,
+    "seen": 1790503863.6725676,
+    "ast_hash": "fcfd66232dc572f9c97797274ebff29c",
+    "semantic_hash": "fcfd66232dc572f9c97797274ebff29c"
+  },
+  "AIRA_ECOSYSTEM/core/model_router.py": {
+    "mtime": 1789776525.881716,
+    "seen": 1790503863.6725733,
+    "ast_hash": "98fcd9380a4dd45d4c59b475225f3cd4",
+    "semantic_hash": "98fcd9380a4dd45d4c59b475225f3cd4"
+  },
+  "AIRA_ECOSYSTEM/core/model_store.py": {
+    "mtime": 1789776470.4510214,
+    "seen": 1790503863.6725774,
+    "ast_hash": "e9e5623193c2288b891ad2cdd275548c",
+    "semantic_hash": "e9e5623193c2288b891ad2cdd275548c"
+  },
+  "AIRA_ECOSYSTEM/core/model_types.py": {
+    "mtime": 1789863208.0846362,
+    "seen": 1790503863.6725795,
+    "ast_hash": "f9bfd5114562869dec2279c48d518b23",
+    "semantic_hash": "f9bfd5114562869dec2279c48d518b23"
+  },
+  "AIRA_ECOSYSTEM/core/orchestrator.py": {
+    "mtime": 1789944790.6314585,
+    "seen": 1790503863.6725812,
+    "ast_hash": "a6844f5ba1b1d7f58d40dafb3ec7c262",
+    "semantic_hash": "a6844f5ba1b1d7f58d40dafb3ec7c262"
+  },
+  "AIRA_ECOSYSTEM/core/persona.py": {
+    "mtime": 1789273965.0217724,
+    "seen": 1790503863.6725824,
+    "ast_hash": "530da969f90eeed03d4014c98b0b630c",
+    "semantic_hash": "530da969f90eeed03d4014c98b0b630c"
+  },
+  "AIRA_ECOSYSTEM/core/persona/__init__.py": {
+    "mtime": 1789882566.2331347,
+    "seen": 1790503863.6725843,
+    "ast_hash": "c51d4d6f6d3acef62ea625ed2d599606",
+    "semantic_hash": "c51d4d6f6d3acef62ea625ed2d599606"
+  },
+  "AIRA_ECOSYSTEM/core/persona/context.py": {
+    "mtime": 1789882048.7155807,
+    "seen": 1790503863.6725857,
+    "ast_hash": "85569b46e24fd4a2bf0723dcecadc6e3",
+    "semantic_hash": "85569b46e24fd4a2bf0723dcecadc6e3"
+  },
+  "AIRA_ECOSYSTEM/core/persona/defaults.py": {
+    "mtime": 1789882072.8125882,
+    "seen": 1790503863.672587,
+    "ast_hash": "125056af963a51583e06b8660561e462",
+    "semantic_hash": "125056af963a51583e06b8660561e462"
+  },
+  "AIRA_ECOSYSTEM/core/persona/emotion.py": {
+    "mtime": 1789882056.6018634,
+    "seen": 1790503863.672589,
+    "ast_hash": "c7e7c499c5716d9a7bed324b9517b64c",
+    "semantic_hash": "c7e7c499c5716d9a7bed324b9517b64c"
+  },
+  "AIRA_ECOSYSTEM/core/persona/engine.py": {
+    "mtime": 1789288713.5184336,
+    "seen": 1790503863.6725917,
+    "ast_hash": "6709b4e40354296d104a4e87f34d0140",
+    "semantic_hash": "6709b4e40354296d104a4e87f34d0140"
+  },
+  "AIRA_ECOSYSTEM/core/persona/loader.py": {
+    "mtime": 1789882044.6859317,
+    "seen": 1790503863.672595,
+    "ast_hash": "4a0c7cc4bf88744afc04e6ac1f5e515f",
+    "semantic_hash": "4a0c7cc4bf88744afc04e6ac1f5e515f"
+  },
+  "AIRA_ECOSYSTEM/core/persona/presets.py": {
+    "mtime": 1789882030.3918867,
+    "seen": 1790503863.6725981,
+    "ast_hash": "21df3b684bd1e1e48c86ad912a82c41b",
+    "semantic_hash": "21df3b684bd1e1e48c86ad912a82c41b"
+  },
+  "AIRA_ECOSYSTEM/core/persona/prompt_builder.py": {
+    "mtime": 1789882020.7107108,
+    "seen": 1790503863.6726031,
+    "ast_hash": "202839c16223fcc3f28f4857fbfc53b1",
+    "semantic_hash": "202839c16223fcc3f28f4857fbfc53b1"
+  },
+  "AIRA_ECOSYSTEM/core/persona/scales.py": {
+    "mtime": 1789882065.953444,
+    "seen": 1790503863.6726062,
+    "ast_hash": "fd0eaa444175bb2883bf8af9d55cb2eb",
+    "semantic_hash": "fd0eaa444175bb2883bf8af9d55cb2eb"
+  },
+  "AIRA_ECOSYSTEM/core/persona/types.py": {
+    "mtime": 1789288625.1932998,
+    "seen": 1790503863.6726098,
+    "ast_hash": "f8254ab870dbf7cd7d8a7ae08b0552ca",
+    "semantic_hash": "f8254ab870dbf7cd7d8a7ae08b0552ca"
+  },
+  "AIRA_ECOSYSTEM/core/persona/validator.py": {
+    "mtime": 1789288664.1930926,
+    "seen": 1790503863.672614,
+    "ast_hash": "9614d6b8171ea4508ce9a7ab59d2155d",
+    "semantic_hash": "9614d6b8171ea4508ce9a7ab59d2155d"
+  },
+  "AIRA_ECOSYSTEM/core/plugins/__init__.py": {
+    "mtime": 1789944546.5417538,
+    "seen": 1790503863.672618,
+    "ast_hash": "f430dbc821fa12ef426352db7a4483f0",
+    "semantic_hash": "f430dbc821fa12ef426352db7a4483f0"
+  },
+  "AIRA_ECOSYSTEM/core/plugins/interface.py": {
+    "mtime": 1789944580.3606763,
+    "seen": 1790503863.6726236,
+    "ast_hash": "2a08eeaca1acc3498ea0c9d916ead330",
+    "semantic_hash": "2a08eeaca1acc3498ea0c9d916ead330"
+  },
+  "AIRA_ECOSYSTEM/core/plugins/loader.py": {
+    "mtime": 1789973246.891549,
+    "seen": 1790503863.672628,
+    "ast_hash": "701a93088c4195660da144fc4d62d129",
+    "semantic_hash": "701a93088c4195660da144fc4d62d129"
+  },
+  "AIRA_ECOSYSTEM/core/plugins/manifest.py": {
+    "mtime": 1789973193.0930717,
+    "seen": 1790503863.6726305,
+    "ast_hash": "898d3b4e252d251e15f300bcf0a972d2",
+    "semantic_hash": "898d3b4e252d251e15f300bcf0a972d2"
+  },
+  "AIRA_ECOSYSTEM/core/plugins/models.py": {
+    "mtime": 1789973086.609107,
+    "seen": 1790503863.672632,
+    "ast_hash": "dfd3b74336f12f70f69f3f8460b40cc5",
+    "semantic_hash": "dfd3b74336f12f70f69f3f8460b40cc5"
+  },
+  "AIRA_ECOSYSTEM/core/plugins/validator.py": {
+    "mtime": 1789973228.2504857,
+    "seen": 1790503863.6726336,
+    "ast_hash": "e26bb772081b1cfb84323dcf56827aaf",
+    "semantic_hash": "e26bb772081b1cfb84323dcf56827aaf"
+  },
+  "AIRA_ECOSYSTEM/core/runtime_state/__init__.py": {
+    "mtime": 1789880852.5743747,
+    "seen": 1790503863.6726348,
+    "ast_hash": "d166934b5168a109a5e67dc95ae034bd",
+    "semantic_hash": "d166934b5168a109a5e67dc95ae034bd"
+  },
+  "AIRA_ECOSYSTEM/core/runtime_state/engine.py": {
+    "mtime": 1789880825.1042957,
+    "seen": 1790503863.6726365,
+    "ast_hash": "93d0d7358804e22ad08ff12cb2944842",
+    "semantic_hash": "93d0d7358804e22ad08ff12cb2944842"
+  },
+  "AIRA_ECOSYSTEM/core/runtime_state/models.py": {
+    "mtime": 1789886583.721579,
+    "seen": 1790503863.6726377,
+    "ast_hash": "bddf9428139c517cf3e452c1f7c56da7",
+    "semantic_hash": "bddf9428139c517cf3e452c1f7c56da7"
+  },
+  "AIRA_ECOSYSTEM/core/scheduler.py": {
+    "mtime": 1788950764.7043386,
+    "seen": 1790503863.672639,
+    "ast_hash": "0de0d88ff1409fef3a760c8507a28034",
+    "semantic_hash": "0de0d88ff1409fef3a760c8507a28034"
+  },
+  "AIRA_ECOSYSTEM/core/selection/__init__.py": {
+    "mtime": 1790094390.470178,
+    "seen": 1790503863.6726406,
+    "ast_hash": "780b182ddc92e5c385b028048bb36f02",
+    "semantic_hash": "780b182ddc92e5c385b028048bb36f02"
+  },
+  "AIRA_ECOSYSTEM/core/selection/builder.py": {
+    "mtime": 1790094353.0065615,
+    "seen": 1790503863.6726482,
+    "ast_hash": "633b3cd61b44d26282c9f44c05a04cc3",
+    "semantic_hash": "633b3cd61b44d26282c9f44c05a04cc3"
+  },
+  "AIRA_ECOSYSTEM/core/selection/constants.py": {
+    "mtime": 1790094318.2085562,
+    "seen": 1790503863.6726496,
+    "ast_hash": "9707e08ab806604e4da7034b57f0d769",
+    "semantic_hash": "9707e08ab806604e4da7034b57f0d769"
+  },
+  "AIRA_ECOSYSTEM/core/selection/models.py": {
+    "mtime": 1790094334.4176993,
+    "seen": 1790503863.672651,
+    "ast_hash": "f9a7d0797d5da1d5ad86a21420dc035f",
+    "semantic_hash": "f9a7d0797d5da1d5ad86a21420dc035f"
+  },
+  "AIRA_ECOSYSTEM/core/selection/store.py": {
+    "mtime": 1790094369.4518588,
+    "seen": 1790503863.6726525,
+    "ast_hash": "996553aef397e32194955bc7a4909bcd",
+    "semantic_hash": "996553aef397e32194955bc7a4909bcd"
+  },
+  "AIRA_ECOSYSTEM/core/selection/tests/test_selection.py": {
+    "mtime": 1790094633.3329048,
+    "seen": 1790503863.672654,
+    "ast_hash": "825119849c0c534755fa6ff42ef2fa04",
+    "semantic_hash": "825119849c0c534755fa6ff42ef2fa04"
+  },
+  "AIRA_ECOSYSTEM/core/semantic_memory/__init__.py": {
+    "mtime": 1789883835.165689,
+    "seen": 1790503863.6726553,
+    "ast_hash": "8bc4f1463049e2074a7ba104694b280d",
+    "semantic_hash": "8bc4f1463049e2074a7ba104694b280d"
+  },
+  "AIRA_ECOSYSTEM/core/semantic_memory/defaults.py": {
+    "mtime": 1789883835.2506535,
+    "seen": 1790503863.672657,
+    "ast_hash": "48e1f57ea82f910e2e5817e6be2872ac",
+    "semantic_hash": "48e1f57ea82f910e2e5817e6be2872ac"
+  },
+  "AIRA_ECOSYSTEM/core/semantic_memory/embedder.py": {
+    "mtime": 1789883835.390484,
+    "seen": 1790503863.6726582,
+    "ast_hash": "c9cb21b75647b01a433930e31cd42287",
+    "semantic_hash": "c9cb21b75647b01a433930e31cd42287"
+  },
+  "AIRA_ECOSYSTEM/core/semantic_memory/models.py": {
+    "mtime": 1789883835.3207715,
+    "seen": 1790503863.6726596,
+    "ast_hash": "2a1d12096d4a311758dce26a7c04e7cd",
+    "semantic_hash": "2a1d12096d4a311758dce26a7c04e7cd"
+  },
+  "AIRA_ECOSYSTEM/core/semantic_memory/retriever.py": {
+    "mtime": 1789883835.7253757,
+    "seen": 1790503863.672661,
+    "ast_hash": "47c3130303b22f4b16b23ac5d5ab485e",
+    "semantic_hash": "47c3130303b22f4b16b23ac5d5ab485e"
+  },
+  "AIRA_ECOSYSTEM/core/semantic_memory/scorer.py": {
+    "mtime": 1789883835.4629292,
+    "seen": 1790503863.6726625,
+    "ast_hash": "4bb9d4936b6a41c74f2e536dbe7a5dfd",
+    "semantic_hash": "4bb9d4936b6a41c74f2e536dbe7a5dfd"
+  },
+  "AIRA_ECOSYSTEM/core/semantic_memory/store.py": {
+    "mtime": 1789883835.5847962,
+    "seen": 1790503863.672664,
+    "ast_hash": "a9372253e4ae8f76c4917a56658ba4b7",
+    "semantic_hash": "a9372253e4ae8f76c4917a56658ba4b7"
+  },
+  "AIRA_ECOSYSTEM/core/slash_commands.py": {
+    "mtime": 1789837653.5002055,
+    "seen": 1790503863.672665,
+    "ast_hash": "696f942e860ca09abbb73713774d4344",
+    "semantic_hash": "696f942e860ca09abbb73713774d4344"
+  },
+  "AIRA_ECOSYSTEM/core/task_classifier.py": {
+    "mtime": 1789776549.8305862,
+    "seen": 1790503863.6726663,
+    "ast_hash": "45ced6674fd50d03d1a493fa78ece560",
+    "semantic_hash": "45ced6674fd50d03d1a493fa78ece560"
+  },
+  "AIRA_ECOSYSTEM/core/time_utils.py": {
+    "mtime": 1788953786.7862058,
+    "seen": 1790503863.6726682,
+    "ast_hash": "2af76bfdf331cc82ea6f233859190d77",
+    "semantic_hash": "2af76bfdf331cc82ea6f233859190d77"
+  },
+  "AIRA_ECOSYSTEM/core/ui.py": {
+    "mtime": 1789175036.065302,
+    "seen": 1790503863.672671,
+    "ast_hash": "9b5e38ad1f708e15cdaaebff7a5d2177",
+    "semantic_hash": "9b5e38ad1f708e15cdaaebff7a5d2177"
+  },
+  "AIRA_ECOSYSTEM/core/unified_context/__init__.py": {
+    "mtime": 1790337215.7047012,
+    "seen": 1790503863.6726744,
+    "ast_hash": "146179844b9866b324306a55904cdc88",
+    "semantic_hash": "146179844b9866b324306a55904cdc88"
+  },
+  "AIRA_ECOSYSTEM/core/unified_context/builder.py": {
+    "mtime": 1790337078.237386,
+    "seen": 1790503863.672679,
+    "ast_hash": "5e5bfcd143bbe55a200f6bd9007b448a",
+    "semantic_hash": "5e5bfcd143bbe55a200f6bd9007b448a"
+  },
+  "AIRA_ECOSYSTEM/core/unified_context/models.py": {
+    "mtime": 1790337048.5024683,
+    "seen": 1790503863.6726842,
+    "ast_hash": "5de33ff8787b0934763deb802abb3cf4",
+    "semantic_hash": "5de33ff8787b0934763deb802abb3cf4"
+  },
+  "AIRA_ECOSYSTEM/core/unified_context/tests/__init__.py": {
+    "mtime": 1790337126.7294607,
+    "seen": 1790503863.6726882,
+    "ast_hash": "ad5fc02dd7c77389dbe449ef06b76189",
+    "semantic_hash": "ad5fc02dd7c77389dbe449ef06b76189"
+  },
+  "AIRA_ECOSYSTEM/core/vision/__init__.py": {
+    "mtime": 1790337234.3893895,
+    "seen": 1790503863.6726923,
+    "ast_hash": "7f6d3d14d469834917280f845c8ea34f",
+    "semantic_hash": "7f6d3d14d469834917280f845c8ea34f"
+  },
+  "AIRA_ECOSYSTEM/core/vision/context.py": {
+    "mtime": 1790337295.0560334,
+    "seen": 1790503863.6726978,
+    "ast_hash": "26bb2fdbf24ad17a677a32808d615fbf",
+    "semantic_hash": "26bb2fdbf24ad17a677a32808d615fbf"
+  },
+  "AIRA_ECOSYSTEM/core/vision/engine.py": {
+    "mtime": 1790337440.7115002,
+    "seen": 1790503863.672701,
+    "ast_hash": "9f3fa0bb3780f55b9b11955078974718",
+    "semantic_hash": "9f3fa0bb3780f55b9b11955078974718"
+  },
+  "AIRA_ECOSYSTEM/core/vision/metadata.py": {
+    "mtime": 1790337665.932733,
+    "seen": 1790503863.672703,
+    "ast_hash": "a749006129b511f80b96837eeaf2ce59",
+    "semantic_hash": "a749006129b511f80b96837eeaf2ce59"
+  },
+  "AIRA_ECOSYSTEM/core/vision/models.py": {
+    "mtime": 1790337249.8894773,
+    "seen": 1790503863.6727045,
+    "ast_hash": "ff1d979f1c8b414b82517756b4f3ba1e",
+    "semantic_hash": "ff1d979f1c8b414b82517756b4f3ba1e"
+  },
+  "AIRA_ECOSYSTEM/core/vision/provider.py": {
+    "mtime": 1790337281.8504536,
+    "seen": 1790503863.672706,
+    "ast_hash": "e382ad5f747182f6429944871adc3ece",
+    "semantic_hash": "e382ad5f747182f6429944871adc3ece"
+  },
+  "AIRA_ECOSYSTEM/core/vision/tests/__init___.py": {
+    "mtime": 1790337475.6856143,
+    "seen": 1790503863.6727076,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/core/vision/tests/test_context.py": {
+    "mtime": 1790337549.971287,
+    "seen": 1790503863.6727092,
+    "ast_hash": "239737aa51dc533ecfce5322bf224342",
+    "semantic_hash": "239737aa51dc533ecfce5322bf224342"
+  },
+  "AIRA_ECOSYSTEM/core/vision/tests/test_engine.py": {
+    "mtime": 1790337563.5306287,
+    "seen": 1790503863.6727104,
+    "ast_hash": "d6650b0a4c79811dee1313f891ba9c7d",
+    "semantic_hash": "d6650b0a4c79811dee1313f891ba9c7d"
+  },
+  "AIRA_ECOSYSTEM/core/vision/tests/test_metadata.py": {
+    "mtime": 1790337515.1927433,
+    "seen": 1790503863.6727118,
+    "ast_hash": "7c53a497e8c41fbc8f6335878abab4ec",
+    "semantic_hash": "7c53a497e8c41fbc8f6335878abab4ec"
+  },
+  "AIRA_ECOSYSTEM/core/vision/tests/test_provider.py": {
+    "mtime": 1790337530.6942878,
+    "seen": 1790503863.6727133,
+    "ast_hash": "b9bd6a70575533e24305fb3e9cb0e258",
+    "semantic_hash": "b9bd6a70575533e24305fb3e9cb0e258"
+  },
+  "AIRA_ECOSYSTEM/core/vision/vision_engine.py": {
+    "mtime": 1790337313.381081,
+    "seen": 1790503863.6727145,
+    "ast_hash": "9f3fa0bb3780f55b9b11955078974718",
+    "semantic_hash": "9f3fa0bb3780f55b9b11955078974718"
+  },
+  "AIRA_ECOSYSTEM/core/workspace_links/__init__.py": {
+    "mtime": 1790339287.6638954,
+    "seen": 1790503863.6727161,
+    "ast_hash": "60d7d680c43e620da05bb85ae2bca258",
+    "semantic_hash": "60d7d680c43e620da05bb85ae2bca258"
+  },
+  "AIRA_ECOSYSTEM/core/workspace_links/models.py": {
+    "mtime": 1790339223.7024946,
+    "seen": 1790503863.6727173,
+    "ast_hash": "55cddd30a955a9d48659dcccba0156e3",
+    "semantic_hash": "55cddd30a955a9d48659dcccba0156e3"
+  },
+  "AIRA_ECOSYSTEM/core/workspace_links/service.py": {
+    "mtime": 1790339260.2674468,
+    "seen": 1790503863.6727185,
+    "ast_hash": "0d7b089b500c4daf320f56fe755c5c23",
+    "semantic_hash": "0d7b089b500c4daf320f56fe755c5c23"
+  },
+  "AIRA_ECOSYSTEM/core/workspace_links/store.py": {
+    "mtime": 1790339239.6887887,
+    "seen": 1790503863.67272,
+    "ast_hash": "8e7f65bf70af591fbb4f64dc07796b72",
+    "semantic_hash": "8e7f65bf70af591fbb4f64dc07796b72"
+  },
+  "AIRA_ECOSYSTEM/core/workspace_links/tests/__init__.py": {
+    "mtime": 1790339430.3149061,
+    "seen": 1790503863.6727211,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/core/workspace_links/tests/test_service.py": {
+    "mtime": 1790339464.1673257,
+    "seen": 1790503863.6727223,
+    "ast_hash": "c40f97a7524cf5f82294cb9937485533",
+    "semantic_hash": "c40f97a7524cf5f82294cb9937485533"
+  },
+  "AIRA_ECOSYSTEM/core/workspace_links/tests/test_store.py": {
+    "mtime": 1790339443.4071023,
+    "seen": 1790503863.6727238,
+    "ast_hash": "b210f06bf8ebd029c3b4d9b89cefb2ef",
+    "semantic_hash": "b210f06bf8ebd029c3b4d9b89cefb2ef"
+  },
+  "AIRA_ECOSYSTEM/run_chat.py": {
+    "mtime": 1789175048.9639578,
+    "seen": 1790503863.6727254,
+    "ast_hash": "4d761894fb0be06bf6a2aa5ef6b76752",
+    "semantic_hash": "4d761894fb0be06bf6a2aa5ef6b76752"
+  },
+  "AIRA_ECOSYSTEM/scripts/download_kokoro_model.ps1": {
+    "mtime": 1789267530.85621,
+    "seen": 1790503863.672727,
+    "ast_hash": "ccd036fe2f4eaf55c5783746bc13c0e7",
+    "semantic_hash": "ccd036fe2f4eaf55c5783746bc13c0e7"
+  },
+  "AIRA_ECOSYSTEM/test_events_manual.py": {
+    "mtime": 1789199584.8687603,
+    "seen": 1790503863.6727283,
+    "ast_hash": "4a69014ffd9bfd3dc41a5fdf3fd51e5e",
+    "semantic_hash": "4a69014ffd9bfd3dc41a5fdf3fd51e5e"
+  },
+  "AIRA_ECOSYSTEM/tests/__init__.py": {
+    "mtime": 1789880961.079489,
+    "seen": 1790503863.6727295,
+    "ast_hash": "bf5fc4c862c16ec6c0957eebe4643cb3",
+    "semantic_hash": "bf5fc4c862c16ec6c0957eebe4643cb3"
+  },
+  "AIRA_ECOSYSTEM/tests/plugins/__init__.py": {
+    "mtime": 1789955226.9310982,
+    "seen": 1790503863.672731,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "AIRA_ECOSYSTEM/tests/plugins/test_manifest_loader.py": {
+    "mtime": 1789990977.7423446,
+    "seen": 1790503863.672732,
+    "ast_hash": "57f9f86a2071a4bd219406d482eac02d",
+    "semantic_hash": "57f9f86a2071a4bd219406d482eac02d"
+  },
+  "AIRA_ECOSYSTEM/tests/selection/test_selection.py": {
+    "mtime": 1790094572.0958045,
+    "seen": 1790503863.6727335,
+    "ast_hash": "825119849c0c534755fa6ff42ef2fa04",
+    "semantic_hash": "825119849c0c534755fa6ff42ef2fa04"
+  },
+  "AIRA_ECOSYSTEM/tests/test_chat_sessions.py": {
+    "mtime": 1789901656.7754653,
+    "seen": 1790503863.672735,
+    "ast_hash": "1113e03d34f70c3450c6d1de0a0715a7",
+    "semantic_hash": "1113e03d34f70c3450c6d1de0a0715a7"
+  },
+  "AIRA_ECOSYSTEM/tests/test_context_builder.py": {
+    "mtime": 1789890198.1248736,
+    "seen": 1790503863.6727364,
+    "ast_hash": "1155e1555612681866005dd61ab3b7c3",
+    "semantic_hash": "1155e1555612681866005dd61ab3b7c3"
+  },
+  "AIRA_ECOSYSTEM/tests/test_context_semantic_memory.py": {
+    "mtime": 1789890212.9589202,
+    "seen": 1790503863.6727378,
+    "ast_hash": "e5996643c96d21f2c7a1c8a3e482123e",
+    "semantic_hash": "e5996643c96d21f2c7a1c8a3e482123e"
+  },
+  "AIRA_ECOSYSTEM/tests/test_conversation_context.py": {
+    "mtime": 1789922528.8768425,
+    "seen": 1790503863.6727393,
+    "ast_hash": "68d4ddc2b617a932e802bc799b1158d9",
+    "semantic_hash": "68d4ddc2b617a932e802bc799b1158d9"
+  },
+  "AIRA_ECOSYSTEM/tests/test_events.py": {
+    "mtime": 1789835114.7486017,
+    "seen": 1790503863.672741,
+    "ast_hash": "50194cdf2fbbbf2aa847e9368b35af40",
+    "semantic_hash": "50194cdf2fbbbf2aa847e9368b35af40"
+  },
+  "AIRA_ECOSYSTEM/tests/test_global_settings.py": {
+    "mtime": 1789922406.2682743,
+    "seen": 1790503863.6727424,
+    "ast_hash": "5a9c09455eb025958298ddb8f1203f4f",
+    "semantic_hash": "5a9c09455eb025958298ddb8f1203f4f"
+  },
+  "AIRA_ECOSYSTEM/tests/test_model_router.py": {
+    "mtime": 1789776822.8349843,
+    "seen": 1790503863.6727438,
+    "ast_hash": "f5422249e6e20fcd1da0a0f2f2c2f6e3",
+    "semantic_hash": "f5422249e6e20fcd1da0a0f2f2c2f6e3"
+  },
+  "AIRA_ECOSYSTEM/tests/test_persona_engine.py": {
+    "mtime": 1789882120.9934192,
+    "seen": 1790503863.672745,
+    "ast_hash": "b6423d4f02b03d47ca9db46e4f502a3d",
+    "semantic_hash": "b6423d4f02b03d47ca9db46e4f502a3d"
+  },
+  "AIRA_ECOSYSTEM/tests/test_runtime_state.py": {
+    "mtime": 1789886806.981657,
+    "seen": 1790503863.6727462,
+    "ast_hash": "6cce188769d46bdf70b1ab49ecd56969",
+    "semantic_hash": "6cce188769d46bdf70b1ab49ecd56969"
+  },
+  "AIRA_ECOSYSTEM/tests/test_semantic_memory.py": {
+    "mtime": 1789883835.8542116,
+    "seen": 1790503863.6727479,
+    "ast_hash": "b75be3845435ccd327fdb2d87bd509c6",
+    "semantic_hash": "b75be3845435ccd327fdb2d87bd509c6"
+  },
+  "AIRA_ECOSYSTEM/tests/test_streaming.py": {
+    "mtime": 1789944828.7595987,
+    "seen": 1790503863.672749,
+    "ast_hash": "7b2c72d34f0224738085b1b5a8b1ce87",
+    "semantic_hash": "7b2c72d34f0224738085b1b5a8b1ce87"
+  },
+  "AIRA_ECOSYSTEM/tests/test_ws_bridge.py": {
+    "mtime": 1789835121.0804286,
+    "seen": 1790503863.672751,
+    "ast_hash": "24bc8a635e184ad4394dc5920cae467e",
+    "semantic_hash": "24bc8a635e184ad4394dc5920cae467e"
+  },
+  "AIRA_ECOSYSTEM/tools/inventory.py": {
+    "mtime": 1788703288.8620064,
+    "seen": 1790503863.6727533,
+    "ast_hash": "8d31804ec04666f2e1085898040c6c2b",
+    "semantic_hash": "8d31804ec04666f2e1085898040c6c2b"
+  },
+  "AIRA_ECOSYSTEM/tools/mikrotik/__init__.py": {
+    "mtime": 1788702535.751037,
+    "seen": 1790503863.6727567,
+    "ast_hash": "9cb84ef9bbd20c87dadb9b74e8ad3cc7",
+    "semantic_hash": "9cb84ef9bbd20c87dadb9b74e8ad3cc7"
+  },
+  "AIRA_ECOSYSTEM/tools/mikrotik/routeros.py": {
+    "mtime": 1788702419.1123784,
+    "seen": 1790503863.672762,
+    "ast_hash": "bbe661d0905ce7ce021d2c07c39f0e30",
+    "semantic_hash": "bbe661d0905ce7ce021d2c07c39f0e30"
+  },
+  "AIRA_ECOSYSTEM/tools/network/__init__.py": {
+    "mtime": 1788702510.6525085,
+    "seen": 1790503863.6727662,
+    "ast_hash": "377da65b21c4075d70d1bbd42306b10b",
+    "semantic_hash": "377da65b21c4075d70d1bbd42306b10b"
+  },
+  "AIRA_ECOSYSTEM/tools/network/diagnostics.py": {
+    "mtime": 1789175434.3043628,
+    "seen": 1790503863.6727703,
+    "ast_hash": "35a53b661be92ca2492e6fdd4c2c065a",
+    "semantic_hash": "35a53b661be92ca2492e6fdd4c2c065a"
+  },
+  "AIRA_ECOSYSTEM/tools/snmp/__init__.py": {
+    "mtime": 1788708546.2310114,
+    "seen": 1790503863.6727743,
+    "ast_hash": "faca7973d4897b2a510243a57f74ad01",
+    "semantic_hash": "faca7973d4897b2a510243a57f74ad01"
+  },
+  "AIRA_ECOSYSTEM/tools/snmp/client.py": {
+    "mtime": 1788747942.2512696,
+    "seen": 1790503863.67278,
+    "ast_hash": "e22aea6d502667a53dd9d67f05ccd388",
+    "semantic_hash": "e22aea6d502667a53dd9d67f05ccd388"
+  },
+  "AIRA_ECOSYSTEM/tools/snmp/monitor.py": {
+    "mtime": 1788747972.7983701,
+    "seen": 1790503863.6727836,
+    "ast_hash": "b70e2b7aa2e052cc94d2c3741788a849",
+    "semantic_hash": "b70e2b7aa2e052cc94d2c3741788a849"
+  },
+  "AIRA_ECOSYSTEM/tools/snmp/oids.py": {
+    "mtime": 1788747969.2397523,
+    "seen": 1790503863.6727855,
+    "ast_hash": "8b20d3717933dfbcf8571570917952ba",
+    "semantic_hash": "8b20d3717933dfbcf8571570917952ba"
+  },
+  "AIRA_ECOSYSTEM/tools/ssh/client.py": {
+    "mtime": 1789133442.2747543,
+    "seen": 1790503863.6727867,
+    "ast_hash": "9b2fbaf79ee408a28b087f4d337aa28c",
+    "semantic_hash": "9b2fbaf79ee408a28b087f4d337aa28c"
+  },
+  "AIRA_ECOSYSTEM/tools/ssh/shell.py": {
+    "mtime": 1789720440.2358606,
+    "seen": 1790503863.6727884,
+    "ast_hash": "77b2e6b2fa38f3b36f9c55a4e6ff2f0b",
+    "semantic_hash": "77b2e6b2fa38f3b36f9c55a4e6ff2f0b"
+  },
+  "AIRA_ECOSYSTEM/tools/vision/__init__.py": {
+    "mtime": 1788807136.6442666,
+    "seen": 1790503863.6727898,
+    "ast_hash": "69c310777bf208a6caef549cb3af7926",
+    "semantic_hash": "69c310777bf208a6caef549cb3af7926"
+  },
+  "AIRA_ECOSYSTEM/tools/vision/detector.py": {
+    "mtime": 1788956332.5105412,
+    "seen": 1790503863.672791,
+    "ast_hash": "22fedb5bedcab0a48e690bf7c55b60fe",
+    "semantic_hash": "22fedb5bedcab0a48e690bf7c55b60fe"
+  },
+  "AIRA_ECOSYSTEM/tools/web/__init__.py": {
+    "mtime": 1789813205.5941927,
+    "seen": 1790503863.6727924,
+    "ast_hash": "883ade22fcc3bae9ba7241fa8052865b",
+    "semantic_hash": "883ade22fcc3bae9ba7241fa8052865b"
+  },
+  "AIRA_ECOSYSTEM/tools/web/search.py": {
+    "mtime": 1789813189.6608133,
+    "seen": 1790503863.672794,
+    "ast_hash": "1eefd66ff893282b1add1065dc032d13",
+    "semantic_hash": "1eefd66ff893282b1add1065dc032d13"
+  },
+  "_legacy_backup_20260910_143345/agent/__init__.py": {
+    "mtime": 1788702610.178198,
+    "seen": 1790503863.6727953,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "_legacy_backup_20260910_143345/agent/core/__init__.py": {
+    "mtime": 1788806536.5275362,
+    "seen": 1790503863.6727967,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "_legacy_backup_20260910_143345/agent/core/engine.py": {
+    "mtime": 1788863950.8151402,
+    "seen": 1790503863.6727982,
+    "ast_hash": "bf972bf4f8a40d64615a7fc168bf80f8",
+    "semantic_hash": "bf972bf4f8a40d64615a7fc168bf80f8"
+  },
+  "_legacy_backup_20260910_143345/agent/core/engine_web.py": {
+    "mtime": 1788865095.0344992,
+    "seen": 1790503863.6727996,
+    "ast_hash": "ffaed06f1f2f2c25bd0a2b5d9f29a111",
+    "semantic_hash": "ffaed06f1f2f2c25bd0a2b5d9f29a111"
+  },
+  "_legacy_backup_20260910_143345/agent/core/logger.py": {
+    "mtime": 1788806791.3232584,
+    "seen": 1790503863.672801,
+    "ast_hash": "2a3b600c512a5cb438fd722b803551f3",
+    "semantic_hash": "2a3b600c512a5cb438fd722b803551f3"
+  },
+  "_legacy_backup_20260910_143345/agent/core/memory.py": {
+    "mtime": 1788806574.8203945,
+    "seen": 1790503863.6728024,
+    "ast_hash": "a37ebb871ada7ef71cc82479d7ecf5ba",
+    "semantic_hash": "a37ebb871ada7ef71cc82479d7ecf5ba"
+  },
+  "_legacy_backup_20260910_143345/agent/core/providers.py": {
+    "mtime": 1788863891.0652769,
+    "seen": 1790503863.6728039,
+    "ast_hash": "a8b54adcc8426690289e48e2392ce169",
+    "semantic_hash": "a8b54adcc8426690289e48e2392ce169"
+  },
+  "_legacy_backup_20260910_143345/agent/core/ui.py": {
+    "mtime": 1788805654.593251,
+    "seen": 1790503863.672805,
+    "ast_hash": "97d6a24c697b43ea37258de3c84ce215",
+    "semantic_hash": "97d6a24c697b43ea37258de3c84ce215"
+  },
+  "_legacy_backup_20260910_143345/agent/main.py": {
+    "mtime": 1788866016.5854752,
+    "seen": 1790503863.6728065,
+    "ast_hash": "b2bddc2af6cecf45256edbaf97bdf4bb",
+    "semantic_hash": "b2bddc2af6cecf45256edbaf97bdf4bb"
+  },
+  "_legacy_backup_20260910_143345/agent/memory_store/__init__.py": {
+    "mtime": 1788806536.5283206,
+    "seen": 1790503863.6728077,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "_legacy_backup_20260910_143345/agent/memory_store/auto_extract.py": {
+    "mtime": 1789025323.03313,
+    "seen": 1790503863.6728091,
+    "ast_hash": "970f484e3a02ac95f4d7a0b13ef702ee",
+    "semantic_hash": "970f484e3a02ac95f4d7a0b13ef702ee"
+  },
+  "_legacy_backup_20260910_143345/agent/memory_store/chat_sessions.py": {
+    "mtime": 1788909984.9270778,
+    "seen": 1790503863.6728106,
+    "ast_hash": "607e2785a62be92c00875f4c479aefa8",
+    "semantic_hash": "607e2785a62be92c00875f4c479aefa8"
+  },
+  "_legacy_backup_20260910_143345/agent/memory_store/long_term.py": {
+    "mtime": 1788806818.9702003,
+    "seen": 1790503863.6728117,
+    "ast_hash": "4a994c9432e1a8796f87d2897da0223a",
+    "semantic_hash": "4a994c9432e1a8796f87d2897da0223a"
+  },
+  "_legacy_backup_20260910_143345/agent/utils/__init__.py": {
+    "mtime": 1788806536.529962,
+    "seen": 1790503863.6728127,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "_legacy_backup_20260910_143345/agent/utils/time_utils.py": {
+    "mtime": 1788805558.8011117,
+    "seen": 1790503863.6728141,
+    "ast_hash": "1ebc0898f8b07a9172f67dea82f1a5ab",
+    "semantic_hash": "1ebc0898f8b07a9172f67dea82f1a5ab"
+  },
+  "_legacy_backup_20260910_143345/agent/utils/token_tracker.py": {
+    "mtime": 1788805585.5520425,
+    "seen": 1790503863.6728156,
+    "ast_hash": "06d0b11597b57cf14397a21cf3ca3958",
+    "semantic_hash": "06d0b11597b57cf14397a21cf3ca3958"
+  },
+  "_legacy_backup_20260910_143345/agent/voice/__init__.py": {
+    "mtime": 1788806536.5291114,
+    "seen": 1790503863.672817,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "_legacy_backup_20260910_143345/agent/voice_main.py": {
+    "mtime": 1788806574.9331422,
+    "seen": 1790503863.6728182,
+    "ast_hash": "d17918495bdd9c0800f739feb4294c5c",
+    "semantic_hash": "d17918495bdd9c0800f739feb4294c5c"
+  },
+  "_legacy_backup_20260910_143345/backend/__init__.py": {
+    "mtime": 1788865095.2223084,
+    "seen": 1790503863.6728194,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "_legacy_backup_20260910_143345/backend/main.py": {
+    "mtime": 1788909984.9900858,
+    "seen": 1790503863.6728206,
+    "ast_hash": "73ef3cc6476dbbaae90cc0539545089b",
+    "semantic_hash": "73ef3cc6476dbbaae90cc0539545089b"
+  },
+  "_legacy_backup_20260910_143345/scripts/check_memory.py": {
+    "mtime": 1788804238.236943,
+    "seen": 1790503863.672822,
+    "ast_hash": "74f4be78e2db2cf463ce0460eda92b40",
+    "semantic_hash": "74f4be78e2db2cf463ce0460eda92b40"
+  },
+  "_legacy_backup_20260910_143345/scripts/test_snmp.py": {
+    "mtime": 1788708642.4284062,
+    "seen": 1790503863.6728232,
+    "ast_hash": "30a64a164eaa9f8e2a3b03b8dde58a99",
+    "semantic_hash": "30a64a164eaa9f8e2a3b03b8dde58a99"
+  },
+  "_legacy_backup_20260910_143345/scripts/test_ssh.py": {
+    "mtime": 1788705580.5220883,
+    "seen": 1790503863.6728246,
+    "ast_hash": "db1c9d7838fdaf6af0d394f47790b85b",
+    "semantic_hash": "db1c9d7838fdaf6af0d394f47790b85b"
+  },
+  "_legacy_backup_20260910_143345/tools/__init__.py": {
+    "mtime": 1788702512.8289034,
+    "seen": 1790503863.6728258,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "_legacy_backup_20260910_143345/tools/memory/__init__.py": {
+    "mtime": 1788753231.026045,
+    "seen": 1790503863.6728275,
+    "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
+    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "_legacy_backup_20260910_143345/tools/memory/store.py": {
+    "mtime": 1788806574.9522889,
+    "seen": 1790503863.6728287,
+    "ast_hash": "5cbd9a71fc1d999bc7b1c6d1d2cfd5ad",
+    "semantic_hash": "5cbd9a71fc1d999bc7b1c6d1d2cfd5ad"
+  },
+  "_legacy_backup_20260910_143345/tools/registry.py": {
+    "mtime": 1788807181.9101515,
+    "seen": 1790503863.6728299,
+    "ast_hash": "11b8269f93f4ba9ccf32caef3da7960a",
+    "semantic_hash": "11b8269f93f4ba9ccf32caef3da7960a"
+  },
+  "consolidate_to_aira.ps1": {
+    "mtime": 1789025607.3451679,
+    "seen": 1790503863.6728313,
+    "ast_hash": "d33b489299b1f3e7dd04c133decff3c6",
+    "semantic_hash": "d33b489299b1f3e7dd04c133decff3c6"
+  },
+  "frontend/src/components/ChatInput.jsx": {
+    "mtime": 1789714212.0522594,
+    "seen": 1790503863.6728325,
+    "ast_hash": "2ef64f15d3832a462eb15e32ec288a70",
+    "semantic_hash": "2ef64f15d3832a462eb15e32ec288a70"
+  },
+  "tools/memory/__init__.py": {
+    "mtime": 1790075859.818155,
+    "seen": 1790503863.6728337,
+    "ast_hash": "c2c662a15e8a4a702d4da8b13b5d6b50",
+    "semantic_hash": "c2c662a15e8a4a702d4da8b13b5d6b50"
+  }
+}

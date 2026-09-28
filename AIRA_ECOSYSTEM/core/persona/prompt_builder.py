@@ -14,12 +14,13 @@ Pembagian tanggung jawab (Sprint 2 / Worker 2):
                             fakta, kemampuan tool, kapan memanggil DIO.
       ILLUSTRATION_RULES  - kontrak SVG/renderer + tool web_image_search.
       LOCATION_RULES      - kapan memakai/meminta lokasi.
-  Ketiganya menyangkut kemampuan/tool sehingga BUKAN wewenang persona.
+      MAPS_RULES          - kapan memakai tool Google Maps & cara menampilkannya.
+  Semuanya menyangkut kemampuan/tool sehingga BUKAN wewenang persona.
 
-Urutan section (sama seperti sebelumnya, ditambah 1 baris "EKSPRESI EMOSI"
-di akhir blok gaya):
+Urutan section:
     identitas -> CORE_RULES -> gaya (bicara, nuansa, mengajar, jawab, emosi)
-    -> format jawaban -> ILLUSTRATION_RULES -> LOCATION_RULES -> extra_context
+    -> format jawaban -> ILLUSTRATION_RULES -> LOCATION_RULES -> MAPS_RULES
+    -> extra_context
 """
 
 from typing import Optional
@@ -32,7 +33,8 @@ CORE_RULES = """
 - Pakai hasil observasi nyata dari tool sebagai fakta - jangan mengarang.
 - Kamu punya akses file di AIRA Workspace lewat tool list_workspace/read_file/write_file/dll - jangan pernah bilang tidak bisa.
 - Kamu bisa mencari foto di internet lewat tool web_image_search dan menggambar diagram sendiri lewat blok ```svg - jangan pernah bilang tidak bisa menampilkan gambar/ilustrasi.
-- Kalau info dari user kurang/ambigu untuk eksekusi suatu aksi, panggil tool 'request_structured_input' (jangan menebak). Setelah memanggilnya, jangan tulis jawaban panjang di giliran yang sama.
+- Kalau info dari user kurang/ambigu untuk eksekusi suatu aksi, JANGAN menebak: tulis 1-3 kalimat singkat dulu (kenapa butuh info itu / apa yang sudah kamu pahami), LALU panggil tool 'request_structured_input' (pilih bentuk yang pas: pilihan untuk opsi jelas, input teks untuk isian bebas). Setelah tool dipanggil, jangan menulis apa pun lagi - form tampil otomatis dan jawaban user datang di giliran berikutnya.
+- Tool perangkat jaringan (get_interfaces, get_resources, dll) butuh device_name. Kalau user tidak menyebut nama perangkat, isi device_name dengan string kosong - sistem akan menanyakannya ke user (atau memilih otomatis kalau hanya ada satu). Jangan mengarang nama perangkat.
 """
 
 ILLUSTRATION_RULES = """
@@ -48,6 +50,14 @@ LOCATION_RULES = """
 Kalau blok KONTEKS LOKASI di bawah menunjukkan lokasi akses bersumber dari GPS/browser, itu lokasi presisi user - pakai langsung.
 Kalau belum ada (sumbernya IP/perkiraan/belum diketahui) DAN user menanyakan lokasinya sendiri secara presisi, panggil tool request_location_permission - JANGAN menjawab lokasi dari IP sebagai jawaban final ke pertanyaan "aku di mana", karena itu cuma perkiraan kasar dan bisa meleset kota.
 Untuk kebutuhan yang tidak butuh presisi (cuaca umum, waktu setempat kasar), boleh pakai info lokasi yang sudah ada apa adanya tanpa minta izin baru.
+"""
+
+MAPS_RULES = """
+=== GOOGLE MAPS ===
+- Pertanyaan tempat/bisnis/alamat -> maps_search (near_me=true untuk 'terdekat/dekat sini/di sekitarku'). Pertanyaan rute/jarak/lama perjalanan -> maps_route. Detail satu tempat -> maps_place_details. Traceroute/ping jaringan BUKAN urusan tool ini.
+- Kalau hasil tool berupa form izin lokasi, jangan menulis apa pun lagi. Kalau user menolak izin, ulangi dengan allow_approximate=true atau tanyakan nama daerah.
+- Tampilkan hasil sebagai daftar Markdown dengan link [nama](maps_url) PERSIS dari hasil tool (jangan mengubah/mengarang URL), sebut jarak dan rating kalau ada. Untuk rute, ringkas jarak/durasi + langkah utama, lalu beri link [Buka di Google Maps](maps_url).
+- Kalau tool gagal (mis. API key belum diisi), sampaikan apa adanya - jangan mengarang tempat, alamat, atau rute.
 """
 
 
@@ -72,6 +82,7 @@ def build_prompt(
         ctx.formatting_text,
         ILLUSTRATION_RULES.strip(),
         LOCATION_RULES.strip(),
+        MAPS_RULES.strip(),
     ]
 
     if extra_context:

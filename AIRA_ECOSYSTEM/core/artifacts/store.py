@@ -119,6 +119,27 @@ class ArtifactStore:
             conn.commit()
             return cursor.rowcount > 0
 
+    def get_by_storage_reference(self, storage_reference: str) -> Optional[Artifact]:
+        """Reverse lookup: workspace path -> Artifact (workspace <-> conversation
+        integration, core/workspace_links). None if no artifact owns this path.
+
+        FIX (Sprint 2.7.1 P0): this method used to sit indented one level
+        too deep, nested INSIDE get_artifact_store() below (after its
+        `return`), making it dead, unreachable code and causing
+        AttributeError whenever core/workspace_links called it. Moved
+        here as a proper ArtifactStore method - no behavior invented,
+        only restored to where it was clearly meant to be."""
+        if not storage_reference:
+            return None
+
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM artifacts WHERE storage_reference = ? ORDER BY created_at DESC LIMIT 1",
+                (storage_reference,),
+            ).fetchone()
+
+        return self._row_to_artifact(row) if row else None
+
     @staticmethod
     def _row_to_artifact(row: sqlite3.Row) -> Artifact:
         data = dict(row)
@@ -140,17 +161,3 @@ def get_artifact_store() -> ArtifactStore:
             if _store_singleton is None:
                 _store_singleton = ArtifactStore()
     return _store_singleton
-
-    def get_by_storage_reference(self, storage_reference: str) -> Optional[Artifact]:
-        """Reverse lookup: workspace path -> Artifact (workspace <-> conversation
-        integration, core/workspace_links). None if no artifact owns this path."""
-        if not storage_reference:
-            return None
-
-        with closing(self._connect()) as conn:
-            row = conn.execute(
-                "SELECT * FROM artifacts WHERE storage_reference = ? ORDER BY created_at DESC LIMIT 1",
-                (storage_reference,),
-            ).fetchone()
-
-        return self._row_to_artifact(row) if row else None

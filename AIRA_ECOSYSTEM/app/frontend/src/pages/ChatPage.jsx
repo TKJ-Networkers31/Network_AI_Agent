@@ -48,6 +48,22 @@
 //   belum punya fitur lampirkan file.
 // - Streaming, phase, liveTools, dan seluruh alur kirim/edit/regenerate
 //   pesan TIDAK disentuh.
+//
+// SPRINT 2.7.1 (P0 Recovery):
+// - Flow A (upload file -> AIRA dapat context): handleAttachFile() baru -
+//   memastikan sesi ada (reuse ensureSession() yang sudah ada), upload
+//   lewat api.attachments.upload() (baru di api.js), lalu
+//   setHasAttachment(true) supaya Dynamic Capability UI juga bereaksi.
+//   Tidak perlu mengirim attachment_id per pesan - core/context/builder.py
+//   sekarang menarik attachment MILIK SESI ini otomatis tiap giliran.
+// - Flow C (select text -> action -> hasil nyata): handleSelectionAction()
+//   baru - sebelumnya `onSelectionAction` tidak pernah dioper ke
+//   <MessageBubble>, jadi SelectionToolbar tampil tapi klik tidak
+//   melakukan apa-apa. Sekarang instruksi hasil Selection Intelligence
+//   (backend, sudah ada) dikirim lewat handleSend() yang SUDAH ADA -
+//   reuse pipeline Brain yang sama seperti pesan biasa, bukan jalur baru.
+// - `sessionId={activeId}` dioper ke <MessageBubble> supaya konteks
+//   seleksi/attachment per pesan konsisten dengan sesi aktif.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
@@ -113,10 +129,13 @@ function ChatPageInner({ onOpenMenu }) {
 
   const [tools, setTools] = useState([]);
   const [voiceConnecting, setVoiceConnecting] = useState(false);
+  // SPRINT 2.7.1 P0 FIX: file terakhir yang berhasil dilampirkan ke sesi
+  // aktif (indikator kecil di atas ChatInput) - lihat handleAttachFile().
+  const [attachedFile, setAttachedFile] = useState(null);
   const bottomRef = useRef(null);
 
   const { notify } = useToast();
-  const { setHasArtifact, setHasLocation } = useCapabilityContext();
+  const { setHasArtifact, setHasLocation, setHasAttachment } = useCapabilityContext();
 
   // ---- Sprint 2.6: settings + cockpit + hero model -------------------------
   const settings = useGlobalSettings(); // null = belum dimuat, {} = gagal, {...} = snapshot
@@ -246,6 +265,56 @@ function ChatPageInner({ onOpenMenu }) {
       notify,
       onWorkspaceChange: () => {},
     });
+  }
+
+  // SPRINT 2.7.1 P0 FIX (flow A): upload file -> AttachmentEngine ->
+  // ContextBuilder (session-scoped, lihat core/context/builder.py) ->
+  // giliran BERIKUTNYA otomatis membawa ringkasan attachment ini ke system
+  // prompt. Tidak perlu mengirim attachment_id manual per pesan -
+  // ContextBuilder menariknya sendiri lewat session_id tiap giliran.
+  async function handleAttachFile(file) {
+    try {
+      const sid = await ensureSession({
+        onNewSession: (newId) => {
+          setActiveId(newId);
+          loadSessions?.();
+        },
+      });
+
+      const result = await api.attachments.upload(sid, file);
+      setAttachedFile({ name: result.attachment.name, id: result.attachment.id });
+      setHasAttachment(true);
+      notify({ type: "success", message: `Terlampir: ${result.attachment.name}` });
+    } catch (err) {
+      notify({ type: "error", message: `Gagal mengunggah file: ${err.message || err}` });
+    }
+  }
+
+  // SPRINT 2.7.1 P0 FIX (flow C): Selection Intelligence sebelumnya
+  // tampil di UI (SelectionToolbar, lihat MessageBubble.jsx) tapi klik
+  // aksinya tidak diteruskan ke manapun (onSelectionAction tidak pernah
+  // dioper ke <MessageBubble>). Backend build_action_request() menyusun
+  // instruksi siap-LLM (llm_instruction); kita kirim instruksi itu lewat
+  // pipeline chat yang SUDAH ADA (handleSend), bukan jalur eksekusi baru -
+  // hasilnya jawaban nyata dari Brain, bukan sekadar echo di layar.
+  async function handleSelectionAction(actionId, selection) {
+    if (!selection?.text) return;
+
+    try {
+      const created = await api.selection.create({
+        selected_text: selection.text,
+        source_type: "message",
+        session_id: activeId,
+        conversation_id: activeId,
+      });
+
+      const acted = await api.selection.action(created.id, actionId);
+      const instruction = acted.llm_instruction || selection.text;
+
+      await handleSend(instruction);
+    } catch (err) {
+      notify({ type: "error", message: `Aksi seleksi gagal: ${err.message || err}` });
+    }
   }
 
   function handleInteractionSubmit(index, actionId, values) {
@@ -379,7 +448,9 @@ function ChatPageInner({ onOpenMenu }) {
                 onEdit={m.role === "user" ? (text) => editMessage(i, text) : undefined}
                 messageId={m.id ?? i}
                 conversationId={activeId}
+                sessionId={activeId}
                 onCapabilityInvoke={handleCapabilityInvoke}
+                onSelectionAction={handleSelectionAction}
               />
             ))}
 
@@ -416,6 +487,8 @@ function ChatPageInner({ onOpenMenu }) {
         onStop={() => stopRun()}
         tools={tools}
         onCapabilityInvoke={handleCapabilityInvoke}
+        onAttachFile={handleAttachFile}
+        attachedFileName={attachedFile?.name}
         voiceControls={
           <VoiceControls
             supported={voiceCall.supported}

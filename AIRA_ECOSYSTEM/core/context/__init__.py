@@ -9,7 +9,7 @@ Public API:
     context.to_dict()          # serialisasi JSON-safe
 
 Builder hanya MENGGABUNGKAN konteks; persona, memory, lokasi, waktu, routing
-model, dan eksekusi tool tetap milik modul masing-masing.
+model, eksekusi tool, dan attachment tetap milik modul masing-masing.
 """
 
 from core.context.models import (
@@ -22,6 +22,7 @@ from core.context.models import (
     SECTION_PERSONA,
     SECTION_RUNTIME_STATE,
     SECTION_TOOL_CONTEXT,
+    SECTION_ATTACHMENT,
     AIRAContext,
     ContextSection,
 )
@@ -37,4 +38,5 @@ __all__ = [
     "ALL_SECTIONS", "PROMPT_SECTIONS", "CONTEXT_SCHEMA_VERSION",
     "SECTION_IDENTITY", "SECTION_PERSONA", "SECTION_MEMORY",
     "SECTION_RUNTIME_STATE", "SECTION_LOCATION", "SECTION_TOOL_CONTEXT",
+    "SECTION_ATTACHMENT",
 ]
