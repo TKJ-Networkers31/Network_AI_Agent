@@ -298,24 +298,23 @@ function ChatPageInner({ onOpenMenu }) {
   // pipeline chat yang SUDAH ADA (handleSend), bukan jalur eksekusi baru -
   // hasilnya jawaban nyata dari Brain, bukan sekadar echo di layar.
   async function handleSelectionAction(actionId, selection) {
-    if (!selection?.text) return;
-
-    try {
-      const created = await api.selection.create({
-        selected_text: selection.text,
-        source_type: "message",
-        session_id: activeId,
-        conversation_id: activeId,
-      });
-
-      const acted = await api.selection.action(created.id, actionId);
-      const instruction = acted.llm_instruction || selection.text;
-
-      await handleSend(instruction);
-    } catch (err) {
-      notify({ type: "error", message: `Aksi seleksi gagal: ${err.message || err}` });
-    }
+  if (!selection?.selected_text) return;
+  try {
+    const created = await api.selection.create({
+      selected_text: selection.selected_text,
+      source_type: "message",
+      session_id: activeId,
+      conversation_id: activeId,
+      message_id: selection.message_id != null ? String(selection.message_id) : undefined,
+      start_offset: selection.start_offset,
+      end_offset: selection.end_offset,
+    });
+    const acted = await api.selection.action(created.selection.selection_id, actionId);
+    await handleSend(acted.llm_instruction || selection.selected_text);
+  } catch (err) {
+    notify({ type: "error", message: `Aksi seleksi gagal: ${err.message || err}` });
   }
+}
 
   function handleInteractionSubmit(index, actionId, values) {
     const message = messages[index];
@@ -446,7 +445,7 @@ function ChatPageInner({ onOpenMenu }) {
                 onRegenerate={regenerate}
                 hasFollowing={i < lastNonLocalIdx}
                 onEdit={m.role === "user" ? (text) => editMessage(i, text) : undefined}
-                messageId={m.id ?? i}
+                messageId={m.turnId ?? null}
                 conversationId={activeId}
                 sessionId={activeId}
                 onCapabilityInvoke={handleCapabilityInvoke}

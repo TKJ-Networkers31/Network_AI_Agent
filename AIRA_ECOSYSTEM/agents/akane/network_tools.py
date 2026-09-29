@@ -120,3 +120,22 @@ def snmp_get_system_info(device_name: str) -> dict:
 
 def snmp_get_interface_traffic(device_name: str) -> dict:
     return _snmp_get_interface_traffic(device_name)
+
+def connect_device(device_name: str) -> dict:
+    result = get_connection_manager().open_connection_for_device(device_name)
+    return {**result, "tool": "connect_device", "category": "mikrotik", "device": device_name}
+
+
+def disconnect_device(device_name: str) -> dict:
+    manager = get_connection_manager()
+    for s in manager.list_sessions():
+        if str(s.get("device_name") or "").lower() == device_name.strip().lower():
+            return {**manager.close_connection(s["session_id"], reason="manual"),
+                    "tool": "disconnect_device"}
+    return {"success": False, "tool": "disconnect_device",
+            "error": f"Tidak ada koneksi aktif ke '{device_name}'."}
+
+
+def list_connections() -> dict:
+    sessions = get_connection_manager().list_sessions()
+    return {"success": True, "tool": "list_connections", "count": len(sessions), "connections": sessions}

@@ -37,6 +37,9 @@ AKANE_TOOLS: dict = {
     "get_arp": nt.get_arp,
     "snmp_get_system_info": nt.snmp_get_system_info,
     "snmp_get_interface_traffic": nt.snmp_get_interface_traffic,
+    "connect_device": nt.connect_device,
+    "disconnect_device": nt.disconnect_device,
+    "list_connections": nt.list_connections,
 }
 
 AKANE_DANGEROUS_TOOLS: set[str] = set()
@@ -60,6 +63,9 @@ AKANE_TOOL_CATEGORY: dict[str, str] = {
     "get_arp": "mikrotik",
     "snmp_get_system_info": "snmp",
     "snmp_get_interface_traffic": "snmp",
+    "connect_device": "mikrotik", 
+    "disconnect_device": "mikrotik", 
+    "list_connections": "mikrotik",
 }
 
 AKANE_TOOL_SCHEMAS = [
@@ -183,4 +189,16 @@ AKANE_TOOL_SCHEMAS = [
         "description": "Mengambil traffic tiap interface via SNMP: status up/down, bytes in/out.",
         "parameters": {"type": "object", "properties": {"device_name": {"type": "string"}}, "required": ["device_name"]},
     }},
+    {"type": "function", "function": {
+        "name": "connect_device",
+        "description": "MEMBUKA koneksi SSH persisten dari server AIRA ke satu perangkat di inventory (mis. 'R1'). Pakai saat user minta 'buka/sambung/konek ke router'. Setelah itu tool get_* memakai koneksi yang sama tanpa login ulang.",
+        "parameters": {"type": "object", "properties": {"device_name": {"type": "string"}}, "required": ["device_name"]}}},
+    {"type": "function", "function": {
+        "name": "disconnect_device",
+        "description": "Menutup koneksi SSH persisten ke satu perangkat.",
+        "parameters": {"type": "object", "properties": {"device_name": {"type": "string"}}, "required": ["device_name"]}}},
+    {"type": "function", "function": {
+        "name": "list_connections",
+        "description": "Melihat semua koneksi SSH yang sedang aktif (device, uptime, idle).",
+        "parameters": {"type": "object", "properties": {}, "required": []}}},
 ]

@@ -14,3 +14,8 @@ faster-whisper
 ultralytics
 opencv-python
 python-multipart
+pypdf 
+python-docx 
+openpyxl 
+python-pptx 
+reportlab

@@ -106,17 +106,16 @@ def resolve_area(discovered: DiscoveredCapability) -> str:
     return (ui.group or discovered.capability.category or "general").strip() or "general"
 
 
-def resolve_action(discovered: DiscoveredCapability) -> dict:
+def resolve_action(discovered):
     capability = discovered.capability
-    action: dict[str, Any] = {"capability_id": capability.id}
-
+    meta = capability.metadata.get("action")
+    if isinstance(meta, dict):
+        return {**meta, "capability_id": capability.id, "permission": capability.permission}
+    action = {"capability_id": capability.id, "permission": capability.permission}
     if not capability.tool_binding.is_empty:
-        action["type"] = "tool"
-        action["tool"] = capability.tool_binding.primary_tool
+        action.update(type="tool", tool=capability.tool_binding.primary_tool)
     else:
         action["type"] = "capability"
-
-    action["permission"] = capability.permission
     return action
 
 

@@ -35,6 +35,7 @@ from agents.rei.planner import Planner
 from agents.rei.registry import REI_TOOLS, REI_TOOL_CATEGORY, REI_TOOL_SCHEMAS
 from agents.rei import dio_tools as dio
 from agents.rei import maps_tools as mt
+from agents.rei import artifact_tools as art
 from agents.akane.registry import (
     AKANE_TOOLS, AKANE_DANGEROUS_TOOLS, AKANE_TOOL_CATEGORY, AKANE_TOOL_SCHEMAS,
 )
@@ -44,13 +45,18 @@ from agents.hikari.registry import (
 
 logger = logging.getLogger("aira.orchestrator")
 
-AGENT_TOOL_MAP: dict[str, Any] = {**AKANE_TOOLS, **HIKARI_TOOLS, **REI_TOOLS, **mt.MAPS_TOOLS}
-AGENT_TOOL_CATEGORY: dict[str, str] = {
-    **AKANE_TOOL_CATEGORY, **HIKARI_TOOL_CATEGORY, **REI_TOOL_CATEGORY, **mt.MAPS_TOOL_CATEGORY,
+AGENT_TOOL_MAP = {**AKANE_TOOLS, **HIKARI_TOOLS, **REI_TOOLS, **mt.MAPS_TOOLS, **art.ARTIFACT_TOOLS}
+
+AGENT_TOOL_CATEGORY = {
+    **AKANE_TOOL_CATEGORY, **HIKARI_TOOL_CATEGORY, **REI_TOOL_CATEGORY,
+    **mt.MAPS_TOOL_CATEGORY, **art.ARTIFACT_TOOL_CATEGORY,
 }
-AGENT_TOOL_SCHEMAS: list[dict] = [
-    *AKANE_TOOL_SCHEMAS, *HIKARI_TOOL_SCHEMAS, *REI_TOOL_SCHEMAS, *mt.MAPS_TOOL_SCHEMAS,
+
+AGENT_TOOL_SCHEMAS = [
+    *AKANE_TOOL_SCHEMAS, *HIKARI_TOOL_SCHEMAS, *REI_TOOL_SCHEMAS,
+    *mt.MAPS_TOOL_SCHEMAS, *art.ARTIFACT_TOOL_SCHEMAS,
 ]
+
 DANGEROUS_TOOLS: set[str] = set(AKANE_DANGEROUS_TOOLS) | set(HIKARI_DANGEROUS_TOOLS)
 
 

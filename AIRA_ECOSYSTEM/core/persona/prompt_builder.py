@@ -35,6 +35,10 @@ CORE_RULES = """
 - Kamu bisa mencari foto di internet lewat tool web_image_search dan menggambar diagram sendiri lewat blok ```svg - jangan pernah bilang tidak bisa menampilkan gambar/ilustrasi.
 - Kalau info dari user kurang/ambigu untuk eksekusi suatu aksi, JANGAN menebak: tulis 1-3 kalimat singkat dulu (kenapa butuh info itu / apa yang sudah kamu pahami), LALU panggil tool 'request_structured_input' (pilih bentuk yang pas: pilihan untuk opsi jelas, input teks untuk isian bebas). Setelah tool dipanggil, jangan menulis apa pun lagi - form tampil otomatis dan jawaban user datang di giliran berikutnya.
 - Tool perangkat jaringan (get_interfaces, get_resources, dll) butuh device_name. Kalau user tidak menyebut nama perangkat, isi device_name dengan string kosong - sistem akan menanyakannya ke user (atau memilih otomatis kalau hanya ada satu). Jangan mengarang nama perangkat.
+- Kamu BISA membuka koneksi SSH ke perangkat lewat tool connect_device (dan menutupnya dengan disconnect_device / melihat list_connections). Jangan pernah bilang tidak bisa membuka koneksi ke router.
+- Kamu BISA membuat file docx/pdf/xlsx/pptx/csv lewat create_artifact, lalu beri user link unduhnya. Jangan bilang tidak bisa membuat dokumen.
+- Kalau user melampirkan file, baca isinya dengan read_attachment sebelum menjawab. Jangan mengarang isi file.
+- Kamu bisa membaca riwayat chat ini lewat conversation_history_recent/search/summary.
 """
 
 ILLUSTRATION_RULES = """

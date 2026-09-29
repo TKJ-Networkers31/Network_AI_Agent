@@ -48,6 +48,7 @@ from api.ws_bridge import get_ws_bridge
 from agents.akane.connection_manager import get_connection_manager
 from core.dio import get_interaction_memory
 from core.location import location_service
+from core.capability import Capability, CapabilityUIMetadata, get_capability_registry
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -92,6 +93,7 @@ def _warm_host_location() -> None:
         pass
 
 
+
 @app.on_event("startup")
 def _startup_location():
     threading.Thread(target=_warm_host_location, daemon=True).start()
@@ -106,6 +108,25 @@ def _startup_purge_interaction_memory():
 
 
 @app.on_event("startup")
+def register_ui_capabilities():
+    reg = get_capability_registry()
+    defs = [
+        ("ui.health_check", "Health check router", "tool", "hero",
+         "Cek health check semua router: identity, resource (CPU/RAM/uptime), dan status interface. Buka koneksi dulu kalau perlu."),
+        ("ui.network_report", "Laporan jaringan", "folder", "capability_dock",
+         "Buatkan laporan status jaringan dalam file docx yang bisa saya unduh."),
+        ("ui.list_connections", "Koneksi aktif", "link", "capability_dock",
+         "Tampilkan semua koneksi SSH yang sedang aktif."),
+    ]
+    for cid, label, icon, group, prompt in defs:
+        try:
+            reg.register(Capability(
+                id=cid, name=label, ui=CapabilityUIMetadata(label=label, icon=icon, group=group),
+                metadata={"action": {"type": "prompt", "prompt": prompt}},
+            ), overwrite=True)
+        except Exception:
+            pass
+
 def _startup_capability_registry():
     """
     (SPRINT 2.7.1 P0.1) Populate the Capability Registry so GET
@@ -136,6 +157,10 @@ def _startup_capability_registry():
         logger.info("CAPABILITY | provider bridge: %d registered.", len(result["registered"]))
     except Exception:
         logger.exception("Gagal registrasi provider capabilities saat startup.")
+    try:
+        register_ui_capabilities()
+    except Exception:
+        logger.exception("Gagal registrasi UI capabilities.")
 
 
 @app.on_event("startup")

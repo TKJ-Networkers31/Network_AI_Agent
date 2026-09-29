@@ -70,7 +70,8 @@ MAX_REPEATED_IDENTICAL_CALLS = 2
 DIO_SCHEMA_TOOLS = {"request_structured_input", "request_location_permission"}
 
 # Tool yang butuh session_id (diisi planner, BUKAN diminta dari LLM).
-SESSION_AWARE_TOOLS = {"request_location_permission", "maps_search", "maps_route"}
+SESSION_AWARE_TOOLS = {"request_location_permission", "maps_search", "maps_route",
+                       "create_artifact", "list_attachments", "read_attachment"}
 
 DEFAULT_INTERACTION_TEXT = "Aku butuh info tambahan dulu ya."
 
