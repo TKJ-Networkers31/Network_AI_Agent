@@ -53,7 +53,7 @@ def attachments_context_summary_text(attachments: Iterable[Attachment], limit: i
     for attachment in list(attachments)[:limit]:
         if attachment.is_deleted:
             continue
-        lines.append(f"- {attachment.name} ({attachment.mime_type}, {attachment.status})")
+        lines.append(f"- {attachment.name} (id={attachment.id}, {attachment.mime_type}, {attachment.status})")
 
     return "\n".join(lines)
 

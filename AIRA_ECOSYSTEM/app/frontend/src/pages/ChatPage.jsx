@@ -89,6 +89,7 @@ import { navigateForTool } from "../utils/cockpitAdapter.js";
 import { resolveGreetingModel } from "../utils/greetingResolver.js";
 import { shouldShowLiveSteps } from "../utils/runLifecycle.js";
 import { invokeCapability } from "../utils/capabilityInvoke.js";
+import { formatQuotedMessage } from "../utils/quotedMessage.js";
 import Hero from "../Hero.jsx";
 
 export default function ChatPage({ onOpenMenu }) {
@@ -132,6 +133,8 @@ function ChatPageInner({ onOpenMenu }) {
   // SPRINT 2.7.1 P0 FIX: file terakhir yang berhasil dilampirkan ke sesi
   // aktif (indikator kecil di atas ChatInput) - lihat handleAttachFile().
   const [attachedFile, setAttachedFile] = useState(null);
+    // Kutipan seleksi untuk "Tanya AIRA" (ditampilkan di composer, BUKAN auto-send).
+  const [quote, setQuote] = useState(null);
   const bottomRef = useRef(null);
 
   const { notify } = useToast();
@@ -237,6 +240,11 @@ function ChatPageInner({ onOpenMenu }) {
       .catch(() => {});
   }, []);
 
+    // Pindah sesi -> kutipan lama tidak relevan lagi.
+  useEffect(() => {
+    setQuote(null);
+  }, [activeId]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
   }, [messages, loading, streaming]);
@@ -297,24 +305,77 @@ function ChatPageInner({ onOpenMenu }) {
   // instruksi siap-LLM (llm_instruction); kita kirim instruksi itu lewat
   // pipeline chat yang SUDAH ADA (handleSend), bukan jalur eksekusi baru -
   // hasilnya jawaban nyata dari Brain, bukan sekadar echo di layar.
-  async function handleSelectionAction(actionId, selection) {
-  if (!selection?.selected_text) return;
-  try {
-    const created = await api.selection.create({
-      selected_text: selection.selected_text,
-      source_type: "message",
-      session_id: activeId,
-      conversation_id: activeId,
-      message_id: selection.message_id != null ? String(selection.message_id) : undefined,
-      start_offset: selection.start_offset,
-      end_offset: selection.end_offset,
-    });
-    const acted = await api.selection.action(created.selection.selection_id, actionId);
-    await handleSend(acted.llm_instruction || selection.selected_text);
-  } catch (err) {
-    notify({ type: "error", message: `Aksi seleksi gagal: ${err.message || err}` });
+    async function handleSelectionAction(actionId, selection) {
+    if (!selection?.selected_text) return;
+
+    // "Tanya AIRA": JANGAN auto-send. Taruh sebagai kutipan di composer.
+    if (actionId === "ask") {
+      setQuote(selection);
+      return;
+    }
+
+    // Aksi lain (Jelaskan/Sederhanakan/dst.) tetap seperti sebelumnya.
+    try {
+      const created = await api.selection.create({
+        selected_text: selection.selected_text,
+        source_type: "message",
+        session_id: activeId,
+        conversation_id: activeId,
+        message_id: selection.message_id != null ? String(selection.message_id) : undefined,
+        start_offset: selection.start_offset,
+        end_offset: selection.end_offset,
+      });
+      const acted = await api.selection.action(created.selection.selection_id, actionId);
+      await handleSend(acted.llm_instruction || selection.selected_text);
+    } catch (err) {
+      notify({ type: "error", message: `Aksi seleksi gagal: ${err.message || err}` });
+    }
   }
-}
+
+  // Kirim dari composer. Tanpa kutipan = perilaku lama (handleSend).
+  // Dengan kutipan: bubble menampilkan "> kutipan\n\npertanyaan", sedangkan LLM
+  // menerima instruksi Selection Intelligence lengkap (kutipan + konteks sekitar
+  // + pertanyaan user) lewat field opsional `llm_message`.
+  async function handleComposerSend(text, quoteArg) {
+    const activeQuote = quoteArg || null;
+    setQuote(null);
+
+    if (!activeQuote?.selected_text) {
+      await handleSend(text);
+      return;
+    }
+
+    const question = (text || "").trim();
+    const display = formatQuotedMessage(activeQuote.selected_text, question);
+
+    let llmMessage = null;
+
+    try {
+      const created = await api.selection.create({
+        selected_text: activeQuote.selected_text,
+        source_type: "message",
+        session_id: activeId,
+        conversation_id: activeId,
+        message_id: activeQuote.message_id != null ? String(activeQuote.message_id) : undefined,
+        start_offset: activeQuote.start_offset,
+        end_offset: activeQuote.end_offset,
+      });
+      const acted = await api.selection.action(created.selection.selection_id, "ask", question);
+      llmMessage = acted.llm_instruction || null;
+    } catch {
+      // Selection API gagal: bubble tetap membawa kutipan (blockquote), jadi LLM
+      // tetap menerima teks terpilih. Tidak perlu menghentikan pengiriman.
+      llmMessage = null;
+    }
+
+    await sendMessage(display, {
+      onNewSession: (newId) => {
+        setActiveId(newId);
+        loadSessions?.();
+      },
+      extra: llmMessage ? { llm_message: llmMessage } : null,
+    });
+  }
 
   function handleInteractionSubmit(index, actionId, values) {
     const message = messages[index];
@@ -435,6 +496,7 @@ function ChatPageInner({ onOpenMenu }) {
                 isNew={m.isNew}
                 local={m.local}
                 streaming={Boolean(m.streaming)}
+                streamed={Boolean(m.streamed)}
                 interactionSchema={m.interactionSchema}
                 interactionResolved={Boolean(m.interactionResolved)}
                 onSubmitInteraction={(actionId, values) =>
@@ -479,8 +541,10 @@ function ChatPageInner({ onOpenMenu }) {
       />
 
       {/* Input menempel ke bawah (full-bleed diatur di dalam ChatInput) */}
-      <ChatInput
-        onSend={handleSend}
+           <ChatInput
+        onSend={handleComposerSend}
+        quote={quote}
+        onClearQuote={() => setQuote(null)}
         disabled={loading || switching}
         isRunning={loading}
         onStop={() => stopRun()}

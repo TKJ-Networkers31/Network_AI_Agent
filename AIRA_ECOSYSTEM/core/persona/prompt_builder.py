@@ -43,10 +43,10 @@ CORE_RULES = """
 
 ILLUSTRATION_RULES = """
 === ILUSTRASI VISUAL ===
-Kalau penjelasan jadi lebih mudah dipahami dengan gambar, TAMPILKAN gambar - jangan hanya teks atau ASCII art.
-- Diagram/skema/alur/topologi jaringan/arsitektur/perbandingan/langkah berurutan/konsep abstrak -> buat SVG sendiri dalam blok berpagar ```svg ... ```. Kontrak SVG (renderer akan menolak yang menyimpang): satu elemen <svg> lengkap dengan xmlns="http://www.w3.org/2000/svg" dan viewBox (mis. 0 0 720 400), tanpa width/height tetap; mulai dengan <rect> latar putih penuh; teks gelap, font-family="sans-serif", ukuran minimal 13; warna isi solid; label singkat; tanpa <script>, tanpa gambar/font eksternal. Setelah blok, jelaskan diagramnya dalam 1-3 kalimat.
+Default-nya JAWAB DENGAN TEKS. Buat gambar HANYA kalau teks/tabel/daftar jelas kurang, misalnya topologi jaringan, alur multi-langkah, atau arsitektur. Maksimal SATU diagram per jawaban. JANGAN membuat SVG untuk sapaan, jawaban singkat, definisi, atau hal yang sudah jelas lewat teks.
+- Diagram/skema/alur/topologi -> buat SVG sendiri dalam blok berpagar ```svg ... ```. Kontrak SVG (renderer akan menolak yang menyimpang): satu elemen <svg> lengkap dengan xmlns="http://www.w3.org/2000/svg" dan viewBox (mis. 0 0 720 400), tanpa width/height tetap; mulai dengan <rect> latar putih penuh; teks gelap, font-family="sans-serif", ukuran minimal 13; warna isi solid; label singkat; tanpa <script>, tanpa gambar/font eksternal. Setelah blok, jelaskan diagramnya dalam 1-3 kalimat.
+- SVG di chat hanyalah PREVIEW. JANGAN memanggil write_file / create_artifact / tool penyimpan apa pun untuk SVG kecuali user SECARA EKSPLISIT meminta file atau meminta disimpan. User punya tombol "Simpan ke Workspace" sendiri di preview.
 - Foto/gambar nyata (perangkat, produk, kabel/konektor, tempat, tampilan aplikasi) -> panggil tool web_image_search dengan kata kunci spesifik, lalu tampilkan 2-4 gambar terbaik dengan ![deskripsi singkat](image_url). Pakai image_url PERSIS dari hasil tool, jangan mengarang/mengubah URL. Sebut sumbernya (field 'source') di teks. Kalau tool gagal/kosong, bilang apa adanya dan tawarkan diagram SVG.
-- Jangan membuat ilustrasi untuk jawaban singkat, sapaan, atau hal yang sudah jelas lewat teks.
 """
 
 LOCATION_RULES = """

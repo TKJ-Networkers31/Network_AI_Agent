@@ -211,6 +211,14 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
     else:
         llm_message = apply_slash_command(display_message, AGENT_TOOL_MAP)
 
+        # Opsional (Selection "Tanya AIRA"): klien boleh mengirim instruksi LLM
+        # yang lebih kaya (kutipan + konteks sekitar) sementara bubble user
+        # tetap menampilkan display_message yang ringkas. Tanpa field ini
+        # perilaku SAMA seperti sebelumnya.
+        selection_llm = raw.get("llm_message")
+        if isinstance(selection_llm, str) and selection_llm.strip() and not is_voice_turn:
+            llm_message = selection_llm.strip()[:8000]
+
     # --------------------------------------------------
     # PROSES: satu jalur reasoning (Brain.think()) untuk teks/suara/DIO.
     # Event realtime dipublish ke Event Bus dan sampai ke client lewat

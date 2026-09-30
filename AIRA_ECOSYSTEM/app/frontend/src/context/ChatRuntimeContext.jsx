@@ -17,9 +17,12 @@ import {
   classifyRunEvent,
   createRun,
   deriveChatView,
+  isStreamEvent,
   reduceRunEvent,
+  reduceRunEvents,
   settleStreamingMessage,
 } from "../utils/runLifecycle.js";
+import { createStreamBatcher } from "../utils/deltaBatcher.js";
 
 const ChatRuntimeContext = createContext(null);
 
@@ -112,6 +115,8 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
   const loadedSessionsRef = useRef(new Set());
   const voiceHandlersRef = useRef(null);
   const createSessionRef = useRef(null); // single-flight pembuat sesi baru
+  const batcherRef = useRef(null);            // StreamBatcher (utils/deltaBatcher.js)
+  const commitRunEventsRef = useRef(null);    // diisi tiap render, dibaca batcher
 
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
@@ -178,6 +183,30 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
     [setRun, setMessagesForSession]
   );
 
+    // Versi batch: lipat beberapa event jadi SATU tulis state (utils/runLifecycle.js).
+  const commitRunEvents = useCallback(
+    (sessionId, events) => {
+      const before = {
+        run: runsRef.current[sessionId] || null,
+        messages: messagesRef.current[sessionId] || [],
+      };
+
+      const after = reduceRunEvents(before, events, { staleRunIds: staleRunIdsRef.current });
+
+      if (after.messages !== before.messages) setMessagesForSession(sessionId, after.messages);
+      if (after.run !== before.run) setRun(sessionId, after.run);
+    },
+    [setMessagesForSession, setRun]
+  );
+  commitRunEventsRef.current = commitRunEvents;
+
+  if (batcherRef.current === null) {
+    batcherRef.current = createStreamBatcher({
+      apply: (sessionId, events) => commitRunEventsRef.current?.(sessionId, events),
+    });
+  }
+
+  useEffect(() => () => batcherRef.current?.cancel(), []);
   // --------------------------------------------------------------
   // WEBSOCKET EVENT HANDLER — satu jalur untuk teks, suara, DAN
   // dio_submission (semuanya lewat api/routers/ws.py::chat_ws).
@@ -533,15 +562,12 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
     [failRun, sendTo, setMessagesForSession, setRun, waitUntilOpen]
   );
 
-  const sendMessage = useCallback(
-    async (text, { onNewSession } = {}) => {
+    const sendMessage = useCallback(
+    async (text, { onNewSession, extra = null } = {}) => {
       const existing = activeIdRef.current;
 
       if (existing && runsRef.current[existing]) return;
 
-      // New Chat: sesi dibuat dulu di server. Selama itu tampilkan
-      // "Mengirim..." + kunci input (lihat deriveChatView) - tanpa ini tidak
-      // ada umpan balik antara tombol kirim dan run pertama.
       if (!existing) setCreatingSession(true);
 
       let sid;
@@ -553,10 +579,7 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
         throw err;
       }
 
-      // runTurn menyetel run + bubble user SECARA SINKRON sebelum await
-      // pertamanya, jadi penanda creatingSession dilepas sesudahnya tanpa
-      // celah tampilan (Hero tidak sempat muncul sesaat).
-      const turn = runTurn({ sid, kind: "send", text });
+      const turn = runTurn({ sid, kind: "send", text, extra });
       setCreatingSession(false);
 
       await turn;
@@ -610,6 +633,7 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
 
       // 1. Buang semua event susulan dari proses ini.
       if (run.runId) staleRunIdsRef.current.add(run.runId);
+      batcherRef.current?.discard(sid, run.runId);
 
       // 2. Minta server berhenti (best effort: berlaku di titik aman berikutnya).
       sendTo(sid, { type: "cancel" });

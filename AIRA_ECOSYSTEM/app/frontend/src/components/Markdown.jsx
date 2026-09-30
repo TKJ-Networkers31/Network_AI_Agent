@@ -7,6 +7,7 @@ import DOMPurify from "dompurify";
 import CopyButton from "./CopyButton.jsx";
 import { copyText } from "../utils/clipboard.js";
 import { useToast } from "./Toast.jsx";
+import { api } from "../api.js";
 
 // PERUBAHAN (Chat Session: salin bagian penting output):
 // - Blok kode (```...```) sekarang punya header dengan tombol "Salin".
@@ -65,6 +66,7 @@ function buildSvg(code) {
   });
 
   const host = document.createElement("div");
+  host.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;";
   host.innerHTML = clean;
 
   const svg = host.querySelector("svg");
@@ -174,6 +176,19 @@ function SvgBlock({ code }) {
   const [showCode, setShowCode] = useState(false);
   const [zoom, setZoom] = useState(false);
   const [broken, setBroken] = useState(false);
+    const { notify } = useToast();
+
+  // SVG hanya preview. Masuk Workspace HANYA kalau user menekan tombol ini.
+  async function handleSaveToWorkspace() {
+    if (!built) return;
+    const path = `Images/aira-ilustrasi-${Date.now()}.svg`;
+    try {
+      await api.workspace.write(path, built.xml);
+      notify({ type: "success", message: `Disimpan ke Workspace: ${path}`, duration: 3500 });
+    } catch (err) {
+      notify({ type: "error", message: `Gagal menyimpan: ${err.message || err}` });
+    }
+  }
 
   if (!built || broken) {
     return (
@@ -195,6 +210,9 @@ function SvgBlock({ code }) {
           </button>
           <button type="button" onClick={() => downloadSvg(built.xml)} className={HEADER_BUTTON}>
             Unduh
+          </button>
+          <button type="button" onClick={handleSaveToWorkspace} className={HEADER_BUTTON}>
+            Simpan ke Workspace
           </button>
           <CopyButton text={code} label="Salin" title="Salin kode SVG" />
         </div>

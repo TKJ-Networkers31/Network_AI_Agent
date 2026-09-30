@@ -35,6 +35,8 @@ import CopyButton from "./CopyButton.jsx";
 import { useSelectionContext } from "../hooks/useSelectionContext.js";
 import SelectionToolbar from "./selection/SelectionToolbar.jsx";
 import MessageCapabilityActions from "./capabilities/MessageCapabilityActions.jsx";
+import StreamingMarkdown from "./StreamingMarkdown.jsx";
+import { parseQuotedMessage } from "../utils/quotedMessage.js";
 
 function ProcessSteps({ steps }) {
   const [open, setOpen] = useState(false);
@@ -220,6 +222,7 @@ export default function MessageBubble({
   isNew,
   local,
   streaming,
+  streamed,
   interactionSchema,
   interactionResolved,
   onSubmitInteraction,
@@ -233,8 +236,10 @@ export default function MessageBubble({
   sessionId = null,
   onSelectionAction,
   onCapabilityInvoke,
+
 }) {
   const isUser = role === "user";
+  const quoted = isUser ? parseQuotedMessage(content) : null;
   const hasInteraction = !isUser && Boolean(interactionSchema);
   const [editing, setEditing] = useState(false);
 
@@ -299,7 +304,22 @@ export default function MessageBubble({
                     : "bg-card border border-border text-white/90"
                 }`}
             >
-              {isUser ? content : <Markdown content={content} />}
+              {isUser ? (
+                quoted ? (
+                  <>
+                    <div className="mb-2 rounded-lg border-l-4 border-white/60 bg-black/20 px-2.5 py-1.5 text-xs text-white/80 line-clamp-4 whitespace-pre-wrap">
+                      {quoted.quote}
+                    </div>
+                    {quoted.body && <div>{quoted.body}</div>}
+                  </>
+                ) : (
+                  content
+                )
+              ) : streaming || streamed ? (
+                <StreamingMarkdown content={content} streaming={Boolean(streaming)} />
+              ) : (
+                <Markdown content={content} />
+              )}
             </div>
           )
         )}
