@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import GraphBlock from "./GraphBlock.jsx";
+import MapBlock from "./MapBlock.jsx";
 import remarkGfm from "remark-gfm";
 import DOMPurify from "dompurify";
 import CopyButton from "./CopyButton.jsx";
@@ -388,6 +389,11 @@ function CodeBlock({ className, children }) {
   }
 
   const raw = text.replace(/\n$/, "");
+
+    // Peta Leaflet: blok ```map berisi JSON dari tool maps_*.
+  if (lang === "map") {
+    return <MapBlock code={raw} />;
+  }
 
  // Diprioritaskan sebelum deteksi SVG: kalau payload sudah berbentuk
  // node/edge terstruktur, pakai layout engine, jangan render sebagai teks.

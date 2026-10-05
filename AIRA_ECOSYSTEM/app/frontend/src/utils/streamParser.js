@@ -138,6 +138,9 @@ export function detectFenceKind(lang, bodyLines) {
 
   if (lang === "svg") return BLOCK_KIND.SVG;
 
+  // Peta (```map): tahan sampai pagar penutup tiba, sama seperti graph.
+  if (lang === "map") return BLOCK_KIND.GRAPH;
+
   if ((lang === "" || lang === "xml" || lang === "html") && (SVG_START_RE.test(first) || isSvgStartPrefix(first))) {
     return BLOCK_KIND.SVG;
   }

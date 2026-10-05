@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { MapPin, RefreshCw, Server, Smartphone } from "lucide-react";
 import { useSessionsContext } from "../../context/SessionsContext.jsx";
 import { useToast } from "../Toast.jsx";
+import LocationPinPicker from "./LocationPinPicker.jsx";
 import {
   locationApi,
   canUseGps,
@@ -97,6 +98,7 @@ export default function LocationPanel() {
   const [snap, setSnap] = useState(null);
   const [busy, setBusy] = useState(null);
   const [editing, setEditing] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
   const [form, setForm] = useState({ query: "", latitude: "", longitude: "" });
   const [gpsOn, setGpsOn] = useState(getGpsEnabled);
 
@@ -142,8 +144,8 @@ export default function LocationPanel() {
       notify({
         type: "warning",
         message:
-          "GPS browser hanya jalan di https:// atau localhost. Sekarang lokasi akses diperkirakan dari jaringan/IP.",
-        duration: 6000,
+          "GPS browser hanya jalan di https:// atau localhost. Buka AIRA lewat http://localhost:5173, atau pakai 'Pilih di peta'.",
+        duration: 7000,
       });
       return;
     }
@@ -200,6 +202,7 @@ export default function LocationPanel() {
   const host = snap?.host || null;
   const access = snap?.access || null;
   const canCopyAccess = access?.source === "browser" && access.latitude != null;
+  const weakAccuracy = access?.accuracy != null && access.accuracy > 1500;
 
   return (
     <section className="space-y-3">
@@ -303,8 +306,15 @@ export default function LocationPanel() {
 
           {!gpsPossible && (
             <p className="text-[11px] text-white/40">
-              GPS browser butuh https:// atau localhost. Lewat http://IP-LAN, lokasi akses diperkirakan dari
-              jaringan/IP klien.
+              GPS browser butuh https:// atau localhost. Buka AIRA lewat http://localhost:5173 di laptop ini, atau
+              tentukan titikmu lewat "Pilih di peta".
+            </p>
+          )}
+
+          {weakAccuracy && (
+            <p className="text-[11px] text-amber-300/80">
+              Akurasi lokasi rendah (±{Math.round(access.accuracy)} m). Untuk hasil "terdekat" yang tepat, pakai
+              "Pilih di peta".
             </p>
           )}
 
@@ -325,7 +335,12 @@ export default function LocationPanel() {
             >
               <RefreshCw size={12} strokeWidth={2} /> Perbarui
             </button>
+            <button className={BTN} disabled={!activeId} onClick={() => setPinOpen((v) => !v)}>
+              {pinOpen ? "Tutup peta" : "Pilih di peta"}
+            </button>
           </div>
+
+          {pinOpen && <LocationPinPicker initial={access} onSaved={load} />}
         </LocationCard>
       </div>
     </section>
