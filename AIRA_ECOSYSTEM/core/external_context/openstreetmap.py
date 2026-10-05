@@ -3,17 +3,25 @@ core/external_context/openstreetmap.py — OpenStreetMap provider untuk External
 
 Sumber data (semua gratis, tanpa API key):
     Nominatim  -> search / lookup / reverse geocode
-    Overpass   -> tempat terdekat (rumah sakit, SPBU, ATM, dst)
+    Overpass   -> tempat terdekat (rumah sakit, SPBU, ATM, dst) + MIRROR cadangan
     OSRM       -> rute (driving / walking / bicycling)
 
-Kebijakan layanan publik: wajib User-Agent yang mengidentifikasi aplikasi,
-Nominatim maks 1 request/detik (dijaga di sini), hasil di-cache 10 menit.
+Kebijakan layanan publik: wajib User-Agent yang mengidentifikasi aplikasi
+(dibaca dari env OSM_USER_AGENT / OSM_CONTACT), Nominatim maks 1 request/detik
+(dijaga di sini), hasil di-cache 10 menit.
+
+FIX (HTTP 403): 
+  - User-Agent tidak lagi placeholder; dibangun dari env, dengan warning bila
+    kontak belum diisi.
+  - Overpass dicoba ke beberapa mirror bila 403/429/5xx/timeout.
+  - Error 403 diberi pesan yang jelas (bukan "sibuk").
 """
 
 from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 import threading
 import time
@@ -29,6 +37,7 @@ from core.external_context.constants import (
     CAPABILITY_SEARCH,
     DEFAULT_NEARBY_RADIUS_METERS,
     DEFAULT_ROUTE_MODE,
+    ERROR_AUTHENTICATION_ERROR,
     ERROR_INVALID_REQUEST,
     ERROR_NO_RESULTS,
     ERROR_PROVIDER_UNAVAILABLE,
@@ -51,21 +60,53 @@ logger = logging.getLogger("aira.external_context.osm")
 PROVIDER_NAME = "openstreetmap"
 
 NOMINATIM = "https://nominatim.openstreetmap.org"
-OVERPASS = "https://overpass-api.de/api/interpreter"
+
+# Dicoba berurutan. Semua endpoint Overpass publik yang kompatibel.
+OVERPASS_MIRRORS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+)
+OVERPASS = OVERPASS_MIRRORS[0]  # kompatibilitas nama lama
+
 ROUTERS = {
     "driving": "https://router.project-osrm.org/route/v1/driving",
     "walking": "https://routing.openstreetmap.de/routed-foot/route/v1/driving",
     "bicycling": "https://routing.openstreetmap.de/routed-bike/route/v1/driving",
 }
 
-# WAJIB diganti dengan kontak kamu - Nominatim memblokir User-Agent generik.
-USER_AGENT = "AIRA-OS/1.0 (personal assistant; contact: EMAILKAMU@example.com)"
-
 CACHE_TTL_SECONDS = 600
 CACHE_MAX_ENTRIES = 200
 
+_PLACEHOLDER_MARKERS = ("example.com", "emailkamu", "your@", "changeme")
+
 _LATLON_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 _OSM_ID_RE = re.compile(r"^[NWR]\d+$")
+
+
+def _build_user_agent() -> tuple[str, Optional[str]]:
+    """(user_agent, contact). Dibaca dari env tiap provider dibuat."""
+    explicit = (os.getenv("OSM_USER_AGENT") or "").strip()
+    contact = (os.getenv("OSM_CONTACT") or "").strip() or None
+
+    if explicit:
+        agent = explicit
+    elif contact:
+        agent = f"AIRA-OS/1.0 (personal network assistant; contact: {contact})"
+    else:
+        agent = "AIRA-OS/1.0 (personal network assistant)"
+
+    if not contact and not any(ch in explicit for ch in ("@", "http")):
+        logger.warning(
+            "OSM | OSM_CONTACT belum diisi di .env - Nominatim/Overpass bisa menolak "
+            "request (HTTP 403). Isi OSM_CONTACT dengan email/URL kontakmu."
+        )
+
+    if any(marker in agent.lower() for marker in _PLACEHOLDER_MARKERS):
+        logger.warning("OSM | User-Agent masih berisi placeholder (%s) - ganti di .env.", agent)
+
+    return agent, contact
+
 
 # kata kunci -> filter Overpass. Urutan penting: yang lebih spesifik di atas.
 TAG_MAP = [
@@ -131,12 +172,13 @@ class OpenStreetMapProvider(ExternalContextProvider):
         self._rate_lock = threading.Lock()
         self._last_nominatim = 0.0
         self._cache: dict = {}
+        self._user_agent, self._contact = _build_user_agent()
 
     # ------------------------------------------------------------ identity
 
     @property
     def identity(self) -> ProviderIdentity:
-        return ProviderIdentity(name=PROVIDER_NAME, display_name="OpenStreetMap", version="1.0")
+        return ProviderIdentity(name=PROVIDER_NAME, display_name="OpenStreetMap", version="1.1")
 
     @property
     def capabilities(self) -> ProviderCapabilities:
@@ -151,19 +193,28 @@ class OpenStreetMapProvider(ExternalContextProvider):
     # ---------------------------------------------------------------- HTTP
 
     def _default_fetch(self, url: str, params: Optional[dict] = None, post: Optional[dict] = None):
-        if url.startswith(NOMINATIM):  # kebijakan Nominatim: maks 1 request/detik
+        is_nominatim = url.startswith(NOMINATIM)
+
+        if is_nominatim:  # kebijakan Nominatim: maks 1 request/detik
             with self._rate_lock:
                 wait = 1.1 - (time.time() - self._last_nominatim)
                 if wait > 0:
                     time.sleep(wait)
                 self._last_nominatim = time.time()
 
-        headers = {"User-Agent": USER_AGENT, "Accept-Language": "id"}
+            if self._contact and params is not None and "email" not in params:
+                params = {**params, "email": self._contact}
+
+        headers = {
+            "User-Agent": self._user_agent,
+            "Accept": "application/json",
+            "Accept-Language": "id",
+        }
 
         if post is not None:
-            response = requests.post(url, data=post, headers=headers, timeout=25)
+            response = requests.post(url, data=post, headers=headers, timeout=30)
         else:
-            response = requests.get(url, params=params, headers=headers, timeout=10)
+            response = requests.get(url, params=params, headers=headers, timeout=12)
 
         response.raise_for_status()
         return response.json()
@@ -187,10 +238,28 @@ class OpenStreetMapProvider(ExternalContextProvider):
             )
         except requests.exceptions.HTTPError as exc:
             status = getattr(exc.response, "status_code", None)
+
+            if status == 403:
+                logger.error(
+                    "OSM | HTTP 403 dari %s - hampir pasti User-Agent diblokir. "
+                    "Set OSM_CONTACT / OSM_USER_AGENT di .env (UA sekarang: %s).",
+                    url, self._user_agent,
+                )
+                return None, ExternalContextError(
+                    code=ERROR_AUTHENTICATION_ERROR,
+                    message=(
+                        "OpenStreetMap menolak request (HTTP 403) - kemungkinan besar "
+                        "User-Agent server diblokir. Ini masalah konfigurasi server AIRA "
+                        "(OSM_CONTACT di .env), bukan GPS pengguna."
+                    ),
+                    provider=PROVIDER_NAME, retryable=False,
+                    details={"http_status": 403, "url": url},
+                )
+
             code = ERROR_RATE_LIMITED if status == 429 else ERROR_PROVIDER_UNAVAILABLE
             return None, ExternalContextError(
                 code=code, message=f"OpenStreetMap membalas HTTP {status}.",
-                provider=PROVIDER_NAME, retryable=True,
+                provider=PROVIDER_NAME, retryable=True, details={"http_status": status, "url": url},
             )
         except Exception as exc:
             return None, ExternalContextError(
@@ -205,6 +274,21 @@ class OpenStreetMapProvider(ExternalContextProvider):
         self._cache[key] = (time.time() + ttl, data)
 
         return data, None
+
+    def _call_overpass(self, query: str) -> "tuple[Any, Optional[ExternalContextError]]":
+        """Coba tiap mirror Overpass sampai ada yang berhasil."""
+        last_error: Optional[ExternalContextError] = None
+
+        for mirror in OVERPASS_MIRRORS:
+            data, error = self._call(mirror, post={"data": query})
+
+            if error is None:
+                return data, None
+
+            last_error = error
+            logger.warning("OSM | Overpass mirror gagal (%s): %s - coba mirror berikutnya.", mirror, error.message)
+
+        return None, last_error
 
     # ------------------------------------------------------------ helpers
 
@@ -324,7 +408,7 @@ class OpenStreetMapProvider(ExternalContextProvider):
             f"out center tags 60;"
         )
 
-        data, error = self._call(OVERPASS, post={"data": query})
+        data, error = self._call_overpass(query)
 
         if error:
             error.capability = CAPABILITY_NEARBY
