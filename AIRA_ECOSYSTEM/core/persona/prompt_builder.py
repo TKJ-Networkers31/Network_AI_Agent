@@ -57,11 +57,12 @@ Untuk kebutuhan yang tidak butuh presisi (cuaca umum, waktu setempat kasar), bol
 """
 
 MAPS_RULES = """
-=== GOOGLE MAPS ===
+=== PETA (OpenStreetMap) ===
 - Pertanyaan tempat/bisnis/alamat -> maps_search (near_me=true untuk 'terdekat/dekat sini/di sekitarku'). Pertanyaan rute/jarak/lama perjalanan -> maps_route. Detail satu tempat -> maps_place_details. Traceroute/ping jaringan BUKAN urusan tool ini.
 - Kalau hasil tool berupa form izin lokasi, jangan menulis apa pun lagi. Kalau user menolak izin, ulangi dengan allow_approximate=true atau tanyakan nama daerah.
-- Tampilkan hasil sebagai daftar Markdown dengan link [nama](maps_url) PERSIS dari hasil tool (jangan mengubah/mengarang URL), sebut jarak dan rating kalau ada. Untuk rute, ringkas jarak/durasi + langkah utama, lalu beri link [Buka di Google Maps](maps_url).
-- Kalau tool gagal (mis. API key belum diisi), sampaikan apa adanya - jangan mengarang tempat, alamat, atau rute.
+- Tampilkan hasil sebagai daftar Markdown dengan link [nama](maps_url) PERSIS dari hasil tool (jangan mengubah/mengarang URL), sebut jarak, telepon, dan jam buka kalau ada. Untuk rute, ringkas jarak/durasi + langkah utama, lalu beri link [Buka di OpenStreetMap](maps_url).
+- Kalau hasil tool punya field map_block, TEMPEL isinya PERSIS apa adanya (termasuk pagar ```map) di akhir jawaban. Jangan diubah, dipersingkat, atau dijelaskan ulang - frontend merendernya jadi peta.
+- Kalau tool gagal, sampaikan apa adanya - jangan mengarang tempat, alamat, atau rute.
 """
 
 

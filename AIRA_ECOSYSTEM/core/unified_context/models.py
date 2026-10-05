@@ -315,8 +315,9 @@ class UnifiedContext:
     def from_dict(cls, data: dict) -> "UnifiedContext":
         """Toleran: field hilang/rusak -> default, tidak pernah raise
         (same contract as core.context.models.AIRAContext.from_dict)."""
-        data = data if isinstance(data, dict) else {}
-        raw_sources = data.get("sources") or {}
+        codata = data if isinstance(data, dict) else {}
+        raw_sources = data.get("sources")
+        raw_sources = raw_sources if isinstance(raw_sources, dict) else {}
 
         sources = {
             name: UnifiedContextSource.from_dict(value)

@@ -51,6 +51,7 @@ from core.location import location_service
 from core.capability import Capability, CapabilityUIMetadata, get_capability_registry
 
 
+
 BASE_DIR = Path(__file__).resolve().parents[1]
 APP_DIST = BASE_DIR / "app" / "frontend" / "dist"
 
@@ -127,13 +128,12 @@ def register_ui_capabilities():
         except Exception:
             pass
 
+@app.on_event("startup")
 def _startup_capability_registry():
     """
-    (SPRINT 2.7.1 P0.1) Populate the Capability Registry so GET
-    /api/capabilities (and every frontend area reading from it - Hero,
-    Composer Cockpit dock, chat input slot, message actions) actually has
-    something to return. Both register_* functions already existed since
-    Sprint 2.7 but were never invoked anywhere in the app.
+    Populate Capability Registry (tool schemas + provider peta aktif) supaya
+    GET /api/capabilities punya isi. UI capabilities didaftarkan oleh
+    register_ui_capabilities() (startup hook terpisah di atas).
     """
     logger = logging.getLogger("aira.startup.capability")
 
@@ -150,18 +150,13 @@ def _startup_capability_registry():
         logger.exception("Gagal registrasi tool capabilities saat startup.")
 
     try:
-        from core.external_context.factory import get_google_maps_provider
+        from core.external_context.factory import get_maps_provider
         from core.external_context.capability_bridge import register_provider_capabilities
 
-        result = register_provider_capabilities(get_google_maps_provider())
+        result = register_provider_capabilities(get_maps_provider(), overwrite=True)
         logger.info("CAPABILITY | provider bridge: %d registered.", len(result["registered"]))
     except Exception:
         logger.exception("Gagal registrasi provider capabilities saat startup.")
-    try:
-        register_ui_capabilities()
-    except Exception:
-        logger.exception("Gagal registrasi UI capabilities.")
-
 
 @app.on_event("startup")
 async def _startup_event_bridge():

@@ -59,11 +59,16 @@ from core.external_context.models import (
 from core.external_context.provider import ExternalContextProvider
 from core.external_context.config import GoogleMapsConfig, load_google_maps_config
 from core.external_context.google_maps import GoogleMapsProvider
-from core.external_context.factory import get_google_maps_provider, reset_google_maps_provider
 from core.external_context.capability_bridge import (
     capability_id_for,
     register_provider_capabilities,
     unregister_provider_capabilities,
+)
+
+from core.external_context.openstreetmap import OpenStreetMapProvider
+from core.external_context.factory import (
+    get_google_maps_provider, reset_google_maps_provider,
+    get_maps_provider, get_openstreetmap_provider,
 )
 
 __all__ = [
@@ -84,4 +89,6 @@ __all__ = [
     "get_google_maps_provider", "reset_google_maps_provider",
     # W1 capability bridge
     "capability_id_for", "register_provider_capabilities", "unregister_provider_capabilities",
+    #openstreet
+    "OpenStreetMapProvider", "get_maps_provider", "get_openstreetmap_provider",
 ]
