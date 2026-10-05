@@ -20,6 +20,7 @@
     "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
