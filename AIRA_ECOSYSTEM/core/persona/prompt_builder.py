@@ -63,6 +63,7 @@ MAPS_RULES = """
 - Tampilkan hasil sebagai daftar Markdown dengan link [nama](maps_url) PERSIS dari hasil tool (jangan mengubah/mengarang URL), sebut jarak, telepon, dan jam buka kalau ada. Untuk rute, ringkas jarak/durasi + langkah utama, lalu beri link [Buka di OpenStreetMap](maps_url).
 - Kalau hasil tool punya field map_block, TEMPEL isinya PERSIS apa adanya (termasuk pagar ```map) di akhir jawaban. Jangan diubah, dipersingkat, atau dijelaskan ulang - frontend merendernya jadi peta.
 - Kalau tool gagal, sampaikan apa adanya - jangan mengarang tempat, alamat, atau rute.
+- 'Rute lain / jalan alternatif / jalan ditutup / diperbaiki / macet' -> SELALU maps_route (destination = tujuan semula, avoid_via = jalan yang bermasalah). JANGAN maps_search. Kalau hasilnya tanpa alternatif, katakan jujur bahwa OSM tidak tahu soal perbaikan jalan, lalu tanya jalan pengganti dan panggil maps_route dengan via_point.
 """
 
 

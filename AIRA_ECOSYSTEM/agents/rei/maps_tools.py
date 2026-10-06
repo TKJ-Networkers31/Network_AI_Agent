@@ -1,20 +1,13 @@
 """
 agents/rei/maps_tools.py — peta/lokasi sebagai kemampuan chat AIRA.
 
-Memakai provider peta AKTIF (default OpenStreetMap, gratis, tanpa API key)
-lewat core.external_context.get_maps_provider(). Tidak ada logic provider di
-sini - hanya:
-  1. memilih titik asal (lokasi akses user) untuk "terdekat"/"dari sini",
-  2. kalau lokasi belum presisi -> mengembalikan FORM IZIN LOKASI (DIO),
-  3. meringkas hasil (maks 5 tempat), membuat link OpenStreetMap, dan
-     map_block (blok ```map ringkas, dibuat core.external_context.map_block,
-     bukan diketik LLM) untuk peta Leaflet di frontend.
-
-Lokasi dianggap presisi kalau bersumber dari GPS/lokasi browser ATAU pin
-manual (SOURCE_MANUAL). session_id disisipkan planner (SESSION_AWARE_TOOLS).
+Provider peta AKTIF (default OpenStreetMap) lewat get_maps_provider().
+maps_route: rute + alternatif, plus avoid_via (hindari jalan yang ditutup/
+diperbaiki) dan via_point (paksa lewat titik tertentu).
 """
 
 import logging
+import re
 from typing import Any, Optional
 from urllib.parse import quote_plus
 
@@ -35,11 +28,12 @@ _HERE_WORDS = {
     "sini", "dari sini", "my location", "here",
 }
 
-OSM_DIRECTIONS_ENGINE = {
-    "driving": "fossgis_osrm_car",
-    "walking": "fossgis_osrm_foot",
-    "bicycling": "fossgis_osrm_bike",
-}
+# Pertanyaan tentang JALAN/RUTE salah kirim ke maps_search -> arahkan ke maps_route.
+_ROUTE_INTENT_RE = re.compile(
+    r"\b(rute|alternatif|ditutup|ditutup|diperbaiki|perbaikan|macet|banjir|lewat mana|bypass|memutar)\b",
+    re.IGNORECASE,
+)
+_STREET_QUERY_RE = re.compile(r"^\s*(jalan|jl\.?|jln\.?|ruas)\b", re.IGNORECASE)
 
 MAPS_NOTE = (
     "Tampilkan sebagai daftar Markdown dengan link [nama](maps_url) PERSIS dari hasil ini, lalu "
@@ -71,7 +65,6 @@ def _as_int(value: Any, default: int, low: int, high: int) -> int:
 
 
 def _current_location(session_id: Optional[str]):
-    """Lokasi akses sesi (GPS/pin > cache > IP). None kalau tidak diketahui."""
     try:
         access = location_service.get_access(session_id, resolve=False)
         if access is None and session_id:
@@ -87,16 +80,18 @@ def _current_location(session_id: Optional[str]):
 
 
 def _is_precise(access, session_id: Optional[str]) -> bool:
-    # Mode terminal (tanpa sesi) = user duduk di mesin hosting.
     return access is not None and (access.source in PRECISE_SOURCES or not session_id)
 
 
 def _locate(session_id, allow_approximate, request_text, reason):
-    """
-    Return (access, permission_result). Kalau permission_result tidak None,
-    kembalikan itu apa adanya dari tool -> planner menampilkan form izin.
-    """
+    """(access, permission_result). permission_result != None -> kembalikan apa adanya."""
     access = _current_location(session_id)
+
+    # Diagnostik "form izin muncul lagi": lihat sumber lokasi yang terbaca.
+    logger.info(
+        "MAPS | _locate session=%s source=%s has_coords=%s",
+        session_id, getattr(access, "source", None), bool(access and access.has_coordinates()),
+    )
 
     if _is_precise(access, session_id):
         return access, None
@@ -129,7 +124,6 @@ def _place_url(place) -> str:
             f"https://www.openstreetmap.org/?mlat={place.latitude}&mlon={place.longitude}"
             f"#map=18/{place.latitude}/{place.longitude}"
         )
-
     return f"https://www.openstreetmap.org/search?query={quote_plus(place.name or '')}"
 
 
@@ -162,7 +156,6 @@ def _place_dict(place, origin) -> dict:
 
 
 def _distance_key(place, origin) -> float:
-    """Kunci urut: jarak dari provider, atau hitung sendiri dari origin."""
     if place.distance_meters is not None:
         return place.distance_meters
 
@@ -190,6 +183,18 @@ def maps_search(
 
     if not query:
         return {"success": False, "tool": "maps_search", "error": "query wajib diisi."}
+
+    # Guard: "jalan dekat X sedang diperbaiki / rute lain" BUKAN pencarian tempat.
+    if _as_bool(near_me) and (_ROUTE_INTENT_RE.search(query) or _STREET_QUERY_RE.match(query)):
+        return {
+            "success": False, "tool": "maps_search", "error_code": "wrong_tool",
+            "error": (
+                "Ini pertanyaan tentang JALAN/RUTE, bukan pencarian tempat. Pakai maps_route dengan "
+                "destination = tujuan awal user (ingat dari percakapan). Kalau user menyebut jalan "
+                "yang ditutup/diperbaiki, isi avoid_via dengan nama jalannya; kalau namanya tidak "
+                "disebut, tanyakan nama jalannya ke user. JANGAN memanggil maps_search lagi."
+            ),
+        }
 
     limit = _as_int(max_results, MAX_PLACES, 1, MAX_PLACES)
     origin = None
@@ -219,7 +224,10 @@ def maps_search(
     if not result.success:
         return _fail("maps_search", result)
 
-    raw_places = sorted(result.places, key=lambda p: _distance_key(p, origin)) if origin is not None else list(result.places)
+    raw_places = (
+        sorted(result.places, key=lambda p: _distance_key(p, origin))
+        if origin is not None else list(result.places)
+    )
     shown_raw = raw_places[:limit]
     shown = [_place_dict(p, origin) for p in shown_raw]
 
@@ -235,9 +243,7 @@ def maps_search(
     origin_point = None
 
     if origin is not None:
-        origin_point = {
-            "lat": origin.latitude, "lon": origin.longitude, "accuracy": origin.accuracy,
-        }
+        origin_point = {"lat": origin.latitude, "lon": origin.longitude, "accuracy": origin.accuracy}
         payload["origin"] = {
             "label": origin.display_name(),
             "approximate": not _is_precise(origin, session_id),
@@ -264,10 +270,12 @@ def maps_route(
     mode: str = "driving",
     allow_approximate: Any = False,
     alternatives: Any = True,
+    avoid_via: Optional[str] = None,
+    via_point: Optional[str] = None,
     session_id: Optional[str] = None,
     **_ignored: Any,
 ) -> dict:
-    """Rute dari origin (default: lokasi user) ke destination, plus rute alternatif."""
+    """Rute origin -> destination (+ alternatif, avoid_via, via_point)."""
     destination = (destination or "").strip()
 
     if not destination:
@@ -298,10 +306,13 @@ def maps_route(
         approximate = not _is_precise(access, session_id)
 
     mode = (mode or "driving").strip().lower()
-    want_alternatives = _as_bool(alternatives)
+    avoid_text = (avoid_via or "").strip()
+    via_text = (via_point or "").strip()
+    want_alternatives = _as_bool(alternatives) or bool(avoid_text)
 
     result = get_maps_provider().route(
         origin_text, destination, mode=mode, alternatives=want_alternatives,
+        avoid_via=avoid_text or None, via_point=via_text or None,
     )
 
     if not result.success:
@@ -318,23 +329,46 @@ def maps_route(
         for s in route.segments[:MAX_ROUTE_STEPS]
     ]
 
+    raw_alts = meta.get("alternatives") or []
     alternatives_list = [
         {
             "via": alt.get("via"),
             "distance_km": round(alt["distance_m"] / 1000, 1) if alt.get("distance_m") is not None else None,
             "duration_minutes": round(alt["duration_s"] / 60) if alt.get("duration_s") is not None else None,
+            **({"melewati_jalan_yang_dihindari": True} if alt.get("uses_avoided") else {}),
         }
-        for alt in (meta.get("alternatives") or [])
+        for alt in raw_alts
     ]
 
-    if want_alternatives:
+    avoid_info = meta.get("avoid")
+
+    # ---- catatan untuk LLM
+    if via_text:
         alt_note = (
-            "Rute alternatif SUDAH termasuk di hasil ini (field 'alternatives'). Kalau user "
-            "bertanya 'rute lain/alternatif', jawab dari field itu - JANGAN memanggil maps_route "
-            "lagi dengan tujuan yang sama. "
+            f"Rute ini DIPAKSA lewat titik '{via_text}' sesuai permintaan user. "
+            "Jelaskan rute baru ini dan bandingkan singkat dengan rute sebelumnya kalau ada."
+        )
+    elif avoid_info:
+        if avoid_info.get("found_alternative"):
+            alt_note = (
+                f"Rute ini SUDAH menghindari '{avoid_info['street']}' (rute lain yang melewatinya "
+                "ditandai di 'alternatives'). Jelaskan rute baru dan beri tahu bahwa data OSM tidak "
+                "tahu status perbaikan jalan, jadi user perlu memastikan di lapangan."
+            )
+        else:
+            alt_note = (
+                f"SEMUA rute yang ditemukan OSRM melewati '{avoid_info['street']}'. Katakan jujur: "
+                "tidak ada rute alternatif otomatis. Tawarkan: user menyebut nama jalan pengganti, "
+                "lalu panggil maps_route lagi dengan via_point=<jalan pengganti>. "
+                "JANGAN mengarang rute."
+            )
+    elif want_alternatives:
+        alt_note = (
+            "Rute alternatif SUDAH termasuk di hasil ini (field 'alternatives'). "
             + ("Bandingkan via/jarak/durasi tiap alternatif secara singkat."
                if alternatives_list else
-               "Field 'alternatives' kosong: sampaikan bahwa tidak ada rute alternatif yang ditemukan.")
+               "Field 'alternatives' kosong: sampaikan bahwa tidak ada rute alternatif otomatis, lalu "
+               "tanyakan jalan mana yang ingin dihindari/dilewati (avoid_via / via_point).")
         )
     else:
         alt_note = "Rute alternatif tidak diminta pada panggilan ini."
@@ -350,25 +384,52 @@ def maps_route(
         "steps_truncated": len(route.segments) > MAX_ROUTE_STEPS,
         "alternatives": alternatives_list,
         "alternatives_available": bool(alternatives_list),
+        "avoid": avoid_info,
         "note": (
             "Ringkas jarak & durasi, tampilkan langkah utama sebagai daftar, beri link "
             "[Buka di OpenStreetMap](maps_url) PERSIS dari hasil ini, lalu TEMPEL map_block "
-            "PERSIS apa adanya di akhir jawaban. " + alt_note
+            "PERSIS apa adanya di akhir jawaban (peta interaktif: bisa pilih rute, lihat langkah, "
+            "klik peta untuk titik perantara). " + alt_note
         ),
     }
 
     start = meta.get("origin_resolved") or {}
     end = meta.get("destination_resolved") or {}
+    via_pt = meta.get("via_point_resolved") or {}
 
     payload["maps_url"] = meta.get("osm_url") or (
         f"https://www.openstreetmap.org/search?query={quote_plus(destination)}"
     )
 
     if start.get("latitude") is not None and end.get("latitude") is not None:
+        routes_for_map = [{
+            "via": meta.get("via"),
+            "km": (route.distance_meters or 0) / 1000,
+            "min": (route.duration_seconds or 0) / 60,
+            "pts": meta.get("geometry"),
+        }]
+        for alt in raw_alts:
+            routes_for_map.append({
+                "via": alt.get("via"),
+                "km": (alt.get("distance_m") or 0) / 1000,
+                "min": (alt.get("duration_s") or 0) / 60,
+                "pts": alt.get("geometry"),
+                "blocked": alt.get("uses_avoided"),
+            })
+
         block = build_map_block(
             origin={"lat": start["latitude"], "lon": start["longitude"]},
-            destination={"lat": end["latitude"], "lon": end["longitude"]},
-            route=meta.get("geometry"),
+            destination={"lat": end["latitude"], "lon": end["longitude"], "name": destination},
+            via=(
+                {"lat": via_pt["latitude"], "lon": via_pt["longitude"]}
+                if via_pt.get("latitude") is not None else None
+            ),
+            routes=routes_for_map,
+            steps=[{"t": s.instruction, "m": s.distance_meters} for s in route.segments],
+            avoid=(
+                {"street": avoid_info["street"], "ok": avoid_info.get("found_alternative")}
+                if avoid_info else None
+            ),
         )
         if block:
             payload["map_block"] = block
@@ -415,47 +476,45 @@ MAPS_TOOL_SCHEMAS: list[dict] = [
     {"type": "function", "function": {
         "name": "maps_search",
         "description": (
-            "Mencari tempat/bisnis/alamat di peta OpenStreetMap (rumah sakit, apotek, SPBU, ATM, "
-            "restoran, masjid, dsb), termasuk berdasarkan nama (mis. 'rumah sakit al ihsan'). "
-            "Set near_me=true untuk 'terdekat', 'dekat sini', 'di sekitarku' - hasil diurutkan dari "
-            "jarak ke lokasi user. Tulis query SEPERTI YANG DIUCAPKAN user (jangan diubah/diterjemahkan). "
-            "Kalau lokasi user belum presisi, tool otomatis menampilkan form izin lokasi (setelah itu "
-            "JANGAN menulis apa pun lagi). Kalau user menolak izin, panggil ulang dengan "
-            "allow_approximate=true. Untuk tempat di kota/daerah tertentu, sebut daerahnya di query "
-            "dan biarkan near_me=false."
+            "Mencari TEMPAT/bisnis/alamat di OpenStreetMap (rumah sakit, apotek, SPBU, ATM, restoran, "
+            "masjid, dsb), termasuk berdasarkan nama. near_me=true untuk 'terdekat/dekat sini/di "
+            "sekitarku'. JANGAN dipakai untuk pertanyaan rute atau jalan (rute lain, jalan ditutup/"
+            "diperbaiki, lewat mana) - itu urusan maps_route. Tulis query SEPERTI YANG DIUCAPKAN user. "
+            "Kalau lokasi user belum presisi, form izin lokasi tampil otomatis (setelah itu JANGAN "
+            "menulis apa pun lagi). Kalau user menolak, ulangi dengan allow_approximate=true."
         ),
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string", "description": "Apa yang dicari, mis. 'rumah sakit' atau 'SPBU Cimahi'."},
             "near_me": {"type": "boolean", "description": "True = cari di sekitar lokasi user.", "default": False},
-            "radius": {"type": "integer", "description": "Radius meter untuk near_me (default 3000; melebar otomatis kalau mencari nama)."},
+            "radius": {"type": "integer", "description": "Radius meter untuk near_me (default 3000)."},
             "max_results": {"type": "integer", "description": "Jumlah hasil, maks 5.", "default": 5},
-            "allow_approximate": {
-                "type": "boolean",
-                "description": "True = boleh pakai lokasi perkiraan (IP) kalau GPS tidak diberikan.",
-                "default": False,
-            },
+            "allow_approximate": {"type": "boolean", "default": False},
         }, "required": ["query"]},
     }},
     {"type": "function", "function": {
         "name": "maps_route",
         "description": (
-            "Menghitung rute di OpenStreetMap: jarak, durasi, langkah utama, DAN rute alternatif "
-            "(field 'alternatives'). Panggil SEKALI saja per tujuan; jangan mengulang dengan argumen "
-            "yang sama. Untuk pertanyaan 'ada rute lain?', jawab dari hasil sebelumnya. Kosongkan "
-            "origin untuk memakai lokasi user (form izin lokasi tampil otomatis kalau belum presisi). "
-            "Bukan untuk traceroute jaringan."
+            "Menghitung rute di OpenStreetMap: jarak, durasi, langkah, dan rute alternatif. Pakai tool "
+            "ini (BUKAN maps_search) untuk SEMUA pertanyaan rute: 'rute tercepat', 'rute lain', 'jalan "
+            "alternatif', 'jalan X ditutup/diperbaiki/macet, lewat mana?'. destination SELALU diisi "
+            "tujuan awal user (ingat dari percakapan sebelumnya). Kalau user melaporkan sebuah jalan "
+            "tidak bisa dilewati, panggil dengan avoid_via='<nama jalan>' - rute yang melewati jalan itu "
+            "dibuang. Kalau user menyebut jalan yang ingin dilewati, isi via_point='<nama jalan/tempat>'. "
+            "Kosongkan origin untuk memakai lokasi user (form izin lokasi tampil otomatis kalau belum "
+            "presisi). Bukan untuk traceroute jaringan."
         ),
         "parameters": {"type": "object", "properties": {
             "destination": {"type": "string", "description": "Tujuan (nama tempat atau alamat)."},
             "origin": {"type": "string", "description": "Titik asal. Kosongkan = lokasi user."},
-            "mode": {
-                "type": "string", "description": "driving | walking | bicycling",
-                "default": "driving",
+            "mode": {"type": "string", "description": "driving | walking | bicycling", "default": "driving"},
+            "alternatives": {"type": "boolean", "description": "Sertakan rute alternatif.", "default": True},
+            "avoid_via": {
+                "type": "string",
+                "description": "Nama jalan yang HARUS dihindari (ditutup/diperbaiki), mis. 'Jalan Adipati Agung'.",
             },
-            "alternatives": {
-                "type": "boolean",
-                "description": "Sertakan rute alternatif (default true).",
-                "default": True,
+            "via_point": {
+                "type": "string",
+                "description": "Jalan/tempat yang HARUS dilewati rute, mis. 'Jalan Raya Baleendah'.",
             },
             "allow_approximate": {"type": "boolean", "default": False},
         }, "required": ["destination"]},

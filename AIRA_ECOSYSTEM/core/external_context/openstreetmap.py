@@ -362,11 +362,40 @@ def _step_instruction(step: dict) -> str:
 
     return f"Lanjut{road}"
 
+def _norm_street(text: str) -> str:
+    """'Jl. Adipati Agung' / 'jalan adipati agung' -> 'adipati agung'."""
+    t = re.sub(r"^(jalan|jl\.?|jln\.?)\s+", "", (text or "").strip().lower())
+    return re.sub(r"[^\w\s]", "", t).strip()
+
+
+def _route_steps(route: dict) -> list:
+    steps: list = []
+    for leg in route.get("legs") or []:
+        steps.extend(leg.get("steps") or [])
+    return steps
+
+
+def _uses_street(route: dict, avoid: str) -> bool:
+    """True kalau salah satu langkah rute melewati jalan bernama `avoid` (sudah dinormalisasi)."""
+    if not avoid:
+        return False
+    return any(avoid in _norm_street(s.get("name") or "") for s in _route_steps(route))
+
+
+def _geometry(route: dict, limit: int) -> list:
+    coords = (route.get("geometry") or {}).get("coordinates") or []
+    points = [
+        [round(c[1], 5), round(c[0], 5)]
+        for c in coords
+        if isinstance(c, (list, tuple)) and len(c) >= 2
+        and _to_float(c[0]) is not None and _to_float(c[1]) is not None
+    ]
+    return _downsample(points, limit)
+
+
 def _via(route: dict) -> str:
-    """Ringkasan rute: dua nama jalan terpanjang pada rute itu."""
-    legs = route.get("legs") or []
-    steps = (legs[0].get("steps") if legs else None) or []
-    named = [s for s in steps if (s.get("name") or "").strip()]
+    """Ringkasan rute: dua nama jalan terpanjang."""
+    named = [s for s in _route_steps(route) if (s.get("name") or "").strip()]
     biggest = sorted(named, key=lambda s: s.get("distance") or 0, reverse=True)[:2]
 
     names: list[str] = []
@@ -376,7 +405,6 @@ def _via(route: dict) -> str:
             names.append(name)
 
     return ", ".join(names) or "rute tanpa nama"
-
 
 # ------------------------------------------------------------------ provider
 
@@ -434,11 +462,11 @@ class OpenStreetMapProvider(ExternalContextProvider):
 
             return item[1]
 
-        def _cache_set(self, key: Any, value: Any, ttl: float = CACHE_TTL_SECONDS) -> None:
-            with self._cache_lock:
-                if len(self._cache) >= CACHE_MAX_ENTRIES:
-                    self._cache.pop(next(iter(self._cache)))
-                self._cache[key] = (time.monotonic() + ttl, value)
+    def _cache_set(self, key: Any, value: Any, ttl: float = CACHE_TTL_SECONDS) -> None:
+        with self._cache_lock:
+            if len(self._cache) >= CACHE_MAX_ENTRIES:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[key] = (time.monotonic() + ttl, value)
 
     # ------------------------------------------------------------ transport
 
@@ -893,32 +921,35 @@ class OpenStreetMapProvider(ExternalContextProvider):
 
     def _route(
         self, origin: str, destination: str, mode: str = DEFAULT_ROUTE_MODE,
-        alternatives: bool = False, **kwargs,
+        alternatives: bool = False, via_point: Optional[str] = None,
+        avoid_via: Optional[str] = None, **kwargs,
     ) -> QueryResult:
         origin = (origin or "").strip()
         destination = (destination or "").strip()
         mode = (mode or DEFAULT_ROUTE_MODE).strip().lower()
-        want_alternatives = bool(alternatives)
+        via_text = (via_point or "").strip()
+        avoid = _norm_street(avoid_via or "")
+        # avoid_via butuh kandidat rute; via_point memakai 3 koordinat (OSRM tidak
+        # mendukung alternatives untuk >2 koordinat).
+        want_alternatives = (bool(alternatives) or bool(avoid)) and not via_text
+
+        def fail(code, message, **extra):
+            return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, ExternalContextError(
+                code=code, message=message, provider=PROVIDER_NAME,
+                capability=CAPABILITY_ROUTE, **extra,
+            ))
 
         if not origin or not destination:
-            return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, ExternalContextError(
-                code=ERROR_INVALID_REQUEST, message="origin dan destination wajib diisi.",
-                provider=PROVIDER_NAME, capability=CAPABILITY_ROUTE,
-            ))
+            return fail(ERROR_INVALID_REQUEST, "origin dan destination wajib diisi.")
 
         if mode not in VALID_ROUTE_MODES:
-            return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, ExternalContextError(
-                code=ERROR_INVALID_REQUEST,
-                message=f"mode '{mode}' tidak dikenal. Pilihan: {sorted(VALID_ROUTE_MODES)}.",
-                provider=PROVIDER_NAME, capability=CAPABILITY_ROUTE,
-            ))
+            return fail(ERROR_INVALID_REQUEST, f"mode '{mode}' tidak dikenal. Pilihan: {sorted(VALID_ROUTE_MODES)}.")
 
         if mode not in OSRM_SERVERS:
-            return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, ExternalContextError(
-                code=ERROR_INVALID_REQUEST,
-                message=f"OpenStreetMap/OSRM belum mendukung mode '{mode}'. Pilihan: {sorted(OSRM_SERVERS)}.",
-                provider=PROVIDER_NAME, capability=CAPABILITY_ROUTE,
-            ))
+            return fail(
+                ERROR_INVALID_REQUEST,
+                f"OpenStreetMap/OSRM belum mendukung mode '{mode}'. Pilihan: {sorted(OSRM_SERVERS)}.",
+            )
 
         start, error = self._resolve_point(origin, CAPABILITY_ROUTE)
         if error is not None:
@@ -928,8 +959,18 @@ class OpenStreetMapProvider(ExternalContextProvider):
         if error is not None:
             return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, error)
 
+        via = None
+        if via_text:
+            via, error = self._resolve_point(via_text, CAPABILITY_ROUTE)
+            if error is not None:
+                return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, error)
+
         base, profile = OSRM_SERVERS[mode]
-        url = f"{base}/route/v1/{profile}/{start[1]},{start[0]};{end[1]},{end[0]}"
+        coords = f"{start[1]},{start[0]}"
+        if via:
+            coords += f";{via[1]},{via[0]}"
+        coords += f";{end[1]},{end[0]}"
+        url = f"{base}/route/v1/{profile}/{coords}"
 
         cache_key = ("osrm", url, want_alternatives)
         data = self._cache_get(cache_key)
@@ -958,48 +999,48 @@ class OpenStreetMapProvider(ExternalContextProvider):
                 str(data.get("message") or f"OSRM: {code or 'respons tidak valid'}")
                 if isinstance(data, dict) else "Respons OSRM tidak valid."
             )
-            return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, ExternalContextError(
-                code=mapped, message=message, provider=PROVIDER_NAME, capability=CAPABILITY_ROUTE,
-                retryable=mapped == ERROR_PROVIDER_UNAVAILABLE, details={"osrm_code": code},
-            ))
+            return fail(mapped, message, retryable=mapped == ERROR_PROVIDER_UNAVAILABLE,
+                        details={"osrm_code": code})
 
-        routes = data.get("routes") or []
+        routes = [r for r in (data.get("routes") or []) if isinstance(r, dict)]
 
         if not routes:
-            return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, ExternalContextError(
-                code=ERROR_NO_RESULTS, message=f"Tidak ada rute dari '{origin}' ke '{destination}'.",
-                provider=PROVIDER_NAME, capability=CAPABILITY_ROUTE,
-            ))
+            return fail(ERROR_NO_RESULTS, f"Tidak ada rute dari '{origin}' ke '{destination}'.")
 
+        # ---- pilih rute utama (hindari jalan tertentu kalau diminta)
         best = routes[0]
-        legs = best.get("legs") or []
-        steps = (legs[0].get("steps") if legs else None) or []
+        avoid_info = None
+
+        if avoid:
+            clean = [r for r in routes if not _uses_street(r, avoid)]
+            avoid_info = {
+                "street": (avoid_via or "").strip(),
+                "found_alternative": bool(clean),
+                "routes_checked": len(routes),
+            }
+            if clean:
+                best = clean[0]
+
+        others = [r for r in routes if r is not best][:MAX_ALTERNATIVES]
 
         segments = [
             RouteSegment(
                 instruction=_step_instruction(step),
                 distance_meters=step.get("distance"), duration_seconds=step.get("duration"),
             )
-            for step in steps
+            for step in _route_steps(best)
         ]
-
-        coordinates = (best.get("geometry") or {}).get("coordinates") or []
-        geometry = [
-            [round(c[1], 5), round(c[0], 5)]
-            for c in coordinates
-            if isinstance(c, (list, tuple)) and len(c) >= 2
-            and _to_float(c[0]) is not None and _to_float(c[1]) is not None
-        ]
-        geometry = _downsample(geometry, ROUTE_MAX_POINTS)
 
         alternative_routes = [
             {
                 "via": _via(route),
                 "distance_m": route.get("distance"),
                 "duration_s": route.get("duration"),
+                "geometry": _geometry(route, 60),
+                "uses_avoided": _uses_street(route, avoid) if avoid else False,
             }
-            for route in routes[1:1 + MAX_ALTERNATIVES]
-        ] if want_alternatives else []
+            for route in others
+        ]
 
         directions_url = (
             "https://www.openstreetmap.org/directions"
@@ -1012,10 +1053,14 @@ class OpenStreetMapProvider(ExternalContextProvider):
             segments=segments,
             metadata={
                 "mode": mode, "engine": "osrm", "osm_url": directions_url,
-                "geometry": geometry,
+                "geometry": _geometry(best, 90),
                 "via": _via(best),
                 "alternatives": alternative_routes,
                 "alternatives_requested": want_alternatives,
+                "avoid": avoid_info,
+                "via_point_resolved": (
+                    {"latitude": via[0], "longitude": via[1], "label": via[2]} if via else None
+                ),
                 "origin_resolved": {"latitude": start[0], "longitude": start[1], "label": start[2]},
                 "destination_resolved": {"latitude": end[0], "longitude": end[1], "label": end[2]},
             },

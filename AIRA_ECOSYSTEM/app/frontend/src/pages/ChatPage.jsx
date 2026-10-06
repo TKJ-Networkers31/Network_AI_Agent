@@ -137,6 +137,8 @@ function ChatPageInner({ onOpenMenu }) {
   const [quote, setQuote] = useState(null);
   const bottomRef = useRef(null);
 
+  const askRef = useRef(null);
+
   const { notify } = useToast();
   const { setHasArtifact, setHasLocation, setHasAttachment } = useCapabilityContext();
 
@@ -249,6 +251,15 @@ function ChatPageInner({ onOpenMenu }) {
     bottomRef.current?.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
   }, [messages, loading, streaming]);
 
+  useEffect(() => {
+    function onAsk(e) {
+      const text = e.detail?.text;
+      if (text) askRef.current?.(text);
+    }
+    window.addEventListener("aira:ask", onAsk);
+    return () => window.removeEventListener("aira:ask", onAsk);
+  }, []);
+
   if (!sessionsReady || !personaReady) {
     return <BootScreen />;
   }
@@ -261,6 +272,8 @@ function ChatPageInner({ onOpenMenu }) {
       },
     });
   }
+
+  askRef.current = (text) => { if (!loading) handleSend(text); };
 
   // SPRINT 2.7 (W8): dispatcher generik untuk kapabilitas dinamis - dipakai
   // oleh ChatInput (chat_input), MessageBubble (message_actions), Hero
