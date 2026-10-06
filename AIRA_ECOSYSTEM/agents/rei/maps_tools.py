@@ -1,25 +1,26 @@
 """
 agents/rei/maps_tools.py — peta/lokasi sebagai kemampuan chat AIRA.
 
-Sekarang memakai provider peta AKTIF (default OpenStreetMap, gratis, tanpa API
-key) lewat core.external_context.get_maps_provider(). Tidak ada logic provider
-di sini - hanya:
+Memakai provider peta AKTIF (default OpenStreetMap, gratis, tanpa API key)
+lewat core.external_context.get_maps_provider(). Tidak ada logic provider di
+sini - hanya:
   1. memilih titik asal (lokasi akses user) untuk "terdekat"/"dari sini",
   2. kalau lokasi belum presisi -> mengembalikan FORM IZIN LOKASI (DIO),
   3. meringkas hasil (maks 5 tempat), membuat link OpenStreetMap, dan
-     map_block (JSON untuk peta Leaflet di frontend).
+     map_block (blok ```map ringkas, dibuat core.external_context.map_block,
+     bukan diketik LLM) untuk peta Leaflet di frontend.
 
 Lokasi dianggap presisi kalau bersumber dari GPS/lokasi browser ATAU pin
 manual (SOURCE_MANUAL). session_id disisipkan planner (SESSION_AWARE_TOOLS).
 """
 
-import json
 import logging
 from typing import Any, Optional
 from urllib.parse import quote_plus
 
 from agents.rei.dio_tools import request_location_permission
 from core.external_context import get_maps_provider
+from core.external_context.map_block import build_map_block
 from core.location import location_service
 from core.location.models import SOURCE_BROWSER, SOURCE_MANUAL
 
@@ -29,7 +30,10 @@ MAX_PLACES = 5
 DEFAULT_SEARCH_RADIUS_METERS = 3000
 MAX_ROUTE_STEPS = 8
 PRECISE_SOURCES = (SOURCE_BROWSER, SOURCE_MANUAL)
-_HERE_WORDS = {"", "lokasi saya", "lokasiku", "posisiku", "posisi saya", "sini", "dari sini", "my location", "here"}
+_HERE_WORDS = {
+    "", "lokasi saya", "lokasiku", "posisiku", "posisi saya",
+    "sini", "dari sini", "my location", "here",
+}
 
 OSM_DIRECTIONS_ENGINE = {
     "driving": "fossgis_osrm_car",
@@ -41,6 +45,12 @@ MAPS_NOTE = (
     "Tampilkan sebagai daftar Markdown dengan link [nama](maps_url) PERSIS dari hasil ini, lalu "
     "TEMPEL field map_block PERSIS apa adanya di akhir jawaban (peta dirender otomatis). "
     "Sebut jarak/telepon/jam buka kalau ada. Jangan mengarang tempat atau alamat."
+)
+
+FAR_RESULTS_NOTE = (
+    "PERINGATAN: tidak ada tempat yang cocok di sekitar user; hasil di bawah berada JAUH dari "
+    "lokasi user. Sampaikan itu dengan jelas (jangan menyebutnya 'terdekat') dan tawarkan "
+    "mencari dengan nama lain/lebih lengkap."
 )
 
 
@@ -141,7 +151,9 @@ def _place_dict(place, origin) -> dict:
         if meta.get(key) is not None:
             data[target] = meta[key]
 
-    if origin is not None and place.latitude is not None and place.longitude is not None:
+    if place.distance_meters is not None:
+        data["distance_km"] = round(place.distance_meters / 1000, 2)
+    elif origin is not None and place.latitude is not None and place.longitude is not None:
         data["distance_km"] = round(
             location_service._haversine(origin.latitude, origin.longitude, place.latitude, place.longitude), 2,
         )
@@ -149,26 +161,17 @@ def _place_dict(place, origin) -> dict:
     return data
 
 
-def _map_block(origin=None, places=None, route=None, destination=None) -> str:
-    """Blok berpagar ```map (JSON ringkas) yang dirender frontend jadi peta Leaflet."""
-    payload: dict[str, Any] = {}
+def _distance_key(place, origin) -> float:
+    """Kunci urut: jarak dari provider, atau hitung sendiri dari origin."""
+    if place.distance_meters is not None:
+        return place.distance_meters
 
-    if origin is not None:
-        payload["origin"] = origin
+    if origin is not None and place.latitude is not None and place.longitude is not None:
+        return location_service._haversine(
+            origin.latitude, origin.longitude, place.latitude, place.longitude,
+        ) * 1000
 
-    if places:
-        payload["places"] = [
-            {"name": p["name"], "lat": p["lat"], "lon": p["lon"], "km": p.get("distance_km"), "url": p["maps_url"]}
-            for p in places if p.get("lat") is not None and p.get("lon") is not None
-        ]
-
-    if destination is not None:
-        payload["destination"] = destination
-
-    if route:
-        payload["route"] = route
-
-    return "```map\n" + json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n```"
+    return float("inf")
 
 
 # ============================================================ tools
@@ -216,24 +219,24 @@ def maps_search(
     if not result.success:
         return _fail("maps_search", result)
 
-    places = [_place_dict(p, origin) for p in result.places]
-
-    if origin is not None:
-        places.sort(key=lambda p: p.get("distance_km", float("inf")))
-
-    shown = places[:limit]
+    raw_places = sorted(result.places, key=lambda p: _distance_key(p, origin)) if origin is not None else list(result.places)
+    shown_raw = raw_places[:limit]
+    shown = [_place_dict(p, origin) for p in shown_raw]
 
     payload: dict[str, Any] = {
         "success": True, "tool": "maps_search", "query": query,
         "count": len(shown), "places": shown, "note": MAPS_NOTE,
     }
 
+    if (result.metadata or {}).get("far_results"):
+        payload["far_results"] = True
+        payload["note"] = FAR_RESULTS_NOTE + " " + MAPS_NOTE
+
     origin_point = None
 
     if origin is not None:
         origin_point = {
-            "lat": round(origin.latitude, 5), "lon": round(origin.longitude, 5),
-            "accuracy": origin.accuracy,
+            "lat": origin.latitude, "lon": origin.longitude, "accuracy": origin.accuracy,
         }
         payload["origin"] = {
             "label": origin.display_name(),
@@ -241,8 +244,16 @@ def maps_search(
             "accuracy_m": origin.accuracy,
         }
 
-    if shown:
-        payload["map_block"] = _map_block(origin=origin_point, places=shown)
+    if shown_raw:
+        block = build_map_block(origin=origin_point, places=shown_raw)
+        if block:
+            payload["map_block"] = block
+
+    if not shown:
+        payload["note"] = (
+            f"Tidak ada hasil untuk '{query}'. Sampaikan apa adanya, lalu tawarkan mencoba nama "
+            "lain (mis. singkatan/nama lengkap) atau menyebut nama jalan/daerah. Jangan mengarang tempat."
+        )
 
     return payload
 
@@ -317,21 +328,21 @@ def maps_route(
         ),
     }
 
-    start, end = meta.get("origin_coords"), meta.get("destination_coords")
+    start = meta.get("origin_resolved") or {}
+    end = meta.get("destination_resolved") or {}
 
-    if start and end:
-        engine = OSM_DIRECTIONS_ENGINE.get(mode, "fossgis_osrm_car")
-        payload["maps_url"] = (
-            f"https://www.openstreetmap.org/directions?engine={engine}"
-            f"&route={start[0]}%2C{start[1]}%3B{end[0]}%2C{end[1]}"
-        )
-        payload["map_block"] = _map_block(
-            origin={"lat": start[0], "lon": start[1]},
-            destination={"lat": end[0], "lon": end[1]},
+    payload["maps_url"] = meta.get("osm_url") or (
+        f"https://www.openstreetmap.org/search?query={quote_plus(destination)}"
+    )
+
+    if start.get("latitude") is not None and end.get("latitude") is not None:
+        block = build_map_block(
+            origin={"lat": start["latitude"], "lon": start["longitude"]},
+            destination={"lat": end["latitude"], "lon": end["longitude"]},
             route=meta.get("geometry"),
         )
-    else:
-        payload["maps_url"] = f"https://www.openstreetmap.org/search?query={quote_plus(destination)}"
+        if block:
+            payload["map_block"] = block
 
     return payload
 
@@ -348,12 +359,17 @@ def maps_place_details(place_id: str, **_ignored: Any) -> dict:
     if not result.success:
         return _fail("maps_place_details", result)
 
-    place = _place_dict(result.places[0], None)
-
-    return {
-        "success": True, "tool": "maps_place_details", "place": place,
-        "map_block": _map_block(places=[place]), "note": MAPS_NOTE,
+    raw = result.places[0]
+    payload: dict[str, Any] = {
+        "success": True, "tool": "maps_place_details",
+        "place": _place_dict(raw, None), "note": MAPS_NOTE,
     }
+
+    block = build_map_block(places=[raw])
+    if block:
+        payload["map_block"] = block
+
+    return payload
 
 
 # ============================================================ registry-ready
@@ -371,16 +387,18 @@ MAPS_TOOL_SCHEMAS: list[dict] = [
         "name": "maps_search",
         "description": (
             "Mencari tempat/bisnis/alamat di peta OpenStreetMap (rumah sakit, apotek, SPBU, ATM, "
-            "restoran, masjid, dsb). Set near_me=true untuk 'terdekat', 'dekat sini', 'di sekitarku' - "
-            "hasil diurutkan dari jarak ke lokasi user. Kalau lokasi user belum presisi, tool otomatis "
-            "menampilkan form izin lokasi (setelah itu JANGAN menulis apa pun lagi). Kalau user "
-            "menolak izin, panggil ulang dengan allow_approximate=true. Untuk tempat di kota/"
-            "daerah tertentu, sebut daerahnya di query dan biarkan near_me=false."
+            "restoran, masjid, dsb), termasuk berdasarkan nama (mis. 'rumah sakit al ihsan'). "
+            "Set near_me=true untuk 'terdekat', 'dekat sini', 'di sekitarku' - hasil diurutkan dari "
+            "jarak ke lokasi user. Tulis query SEPERTI YANG DIUCAPKAN user (jangan diubah/diterjemahkan). "
+            "Kalau lokasi user belum presisi, tool otomatis menampilkan form izin lokasi (setelah itu "
+            "JANGAN menulis apa pun lagi). Kalau user menolak izin, panggil ulang dengan "
+            "allow_approximate=true. Untuk tempat di kota/daerah tertentu, sebut daerahnya di query "
+            "dan biarkan near_me=false."
         ),
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string", "description": "Apa yang dicari, mis. 'rumah sakit' atau 'SPBU Cimahi'."},
             "near_me": {"type": "boolean", "description": "True = cari di sekitar lokasi user.", "default": False},
-            "radius": {"type": "integer", "description": "Radius meter untuk near_me (default 3000)."},
+            "radius": {"type": "integer", "description": "Radius meter untuk near_me (default 3000; melebar otomatis kalau mencari nama)."},
             "max_results": {"type": "integer", "description": "Jumlah hasil, maks 5.", "default": 5},
             "allow_approximate": {
                 "type": "boolean",

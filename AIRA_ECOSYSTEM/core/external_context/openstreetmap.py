@@ -2,29 +2,21 @@
 core/external_context/openstreetmap.py — adapter OpenStreetMap untuk External
 Context Layer (Sprint 2.7 / W7).
 
-Satu-satunya modul yang tahu bentuk endpoint Nominatim, Overpass, dan OSRM.
-Modul lain hanya bicara lewat kontrak ExternalContextProvider.
+Nominatim (search/lookup/reverse), Overpass (nearby/kategori), OSRM (rute).
 
-Pemetaan capability -> layanan:
-    search()  -> Nominatim /search
-    lookup()  -> Nominatim /lookup
-    nearby()  -> Overpass (utama), Nominatim bounded-search (fallback)
-    route()   -> Nominatim (geocode titik) + OSRM
-    context() -> Nominatim /reverse + nearby() tanpa fallback
+PERBAIKAN:
+  1. Query dipecah jadi KATEGORI + NAMA INTI ("rumah sakit welas asih" ->
+     amenity=hospital + nama ~ "welas.?asih"), jadi "RSU Welas Asih",
+     "RS Al-Ihsan", dst tetap ketemu. Radius melebar bertahap.
+  2. Pencarian Nominatim berlokasi dibatasi bounding box (bounded=1). Kalau
+     kosong, hasil tanpa batas diurutkan menurut jarak dan yang terlalu jauh
+     (mis. Pekanbaru) dibuang.
+  3. Rute menyertakan geometry (titik polyline, di-downsample) untuk peta.
+  4. Cache hasil Overpass 5 menit; tempat tanpa nama dibuang.
+  5. Mirror Overpass: timeout pendek, anggaran waktu total, cooldown mirror gagal.
 
-PERBAIKAN (error Overpass 504 / timeout di log):
-  1. Timeout per mirror pendek (OVERPASS_CLIENT_TIMEOUT) dan ada batas total
-     waktu semua mirror (OVERPASS_TOTAL_BUDGET), jadi 4 mirror tidak lagi
-     bisa menggantung sampai 90+ detik.
-  2. Mirror yang baru gagal "diistirahatkan" sebentar (OVERPASS_MIRROR_COOLDOWN)
-     supaya request berikutnya tidak menabrak mirror yang sama lagi.
-  3. Query dikecilkan: [timeout:N] server pendek dan `out center tags 30`.
-  4. Kalau semua mirror gagal (atau hasilnya kosong), _nearby jatuh ke
-     pencarian teks Nominatim yang dibatasi bounding box.
-
-HTTP disuntik lewat `fetcher` (Dependency Injection, sama seperti
-google_maps.py) supaya test tidak pernah memanggil jaringan sungguhan.
-Signature fetcher:  fetcher(url, params=None, post=None) -> dict | list
+HTTP disuntik lewat `fetcher(url, params=None, post=None)` supaya test tidak
+menyentuh jaringan.
 """
 
 from __future__ import annotations
@@ -70,31 +62,29 @@ logger = logging.getLogger("aira.external_context.openstreetmap")
 PROVIDER_NAME = "openstreetmap"
 PROVIDER_DISPLAY_NAME = "OpenStreetMap"
 
-# ------------------------------------------------------------------ endpoint
-
 NOMINATIM = "https://nominatim.openstreetmap.org"
 
-# Mirror Overpass publik. Daftar ini sering berubah - cek dulu mana yang masih
-# hidup (mis. buka <mirror>/status di browser) sebelum dipakai di produksi.
 OVERPASS_MIRRORS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 )
-OVERPASS_CLIENT_TIMEOUT = 12     # detik per mirror (sisi client)
-OVERPASS_SERVER_TIMEOUT = 10     # [timeout:N] di dalam query (sisi server)
-OVERPASS_TOTAL_BUDGET = 30.0     # detik total untuk SEMUA mirror dalam satu panggilan
-OVERPASS_MIRROR_COOLDOWN = 60.0  # detik mirror yang baru gagal dilewati
+OVERPASS_CLIENT_TIMEOUT = 12
+OVERPASS_SERVER_TIMEOUT = 10
+OVERPASS_TOTAL_BUDGET = 30.0
+OVERPASS_MIRROR_COOLDOWN = 60.0
 OVERPASS_MAX_ELEMENTS = 30
 NEARBY_MAX_RESULTS = 20
 MAX_NEARBY_RADIUS_METERS = 15000
+SEARCH_WIDE_RADIUS_METERS = 15000   # radius kedua untuk pencarian berdasarkan nama
+FAR_RESULT_METERS = 50000           # di atas ini dianggap "jauh" (hasil tanpa batas)
+ROUTE_MAX_POINTS = 150
+CACHE_TTL_SECONDS = 300
+CACHE_MAX_ENTRIES = 64
 
 DEFAULT_HTTP_TIMEOUT = 20
 
-# Server routing OSRM per mode. CATATAN: server routing.openstreetmap.de
-# memakai segmen profil "driving" di URL untuk SEMUA mode (profilnya ditentukan
-# oleh prefix routed-foot / routed-bike). Verifikasi sebelum produksi.
 OSRM_SERVERS = {
     "driving": ("https://router.project-osrm.org", "driving"),
     "walking": ("https://routing.openstreetmap.de/routed-foot", "driving"),
@@ -110,11 +100,8 @@ DEFAULT_USER_AGENT = "AIRA-OS/1.0 (personal network assistant; external-context/
 
 ENV_ENABLED = "OSM_ENABLED"
 ENV_USER_AGENT = "OSM_USER_AGENT"
-
 _FALSE_VALUES = {"0", "false", "off", "no"}
 
-# mirror -> waktu monotonic sampai kapan dilewati. Race antar-thread tidak
-# berbahaya (paling buruk satu mirror dicoba sekali lagi).
 _MIRROR_DOWN_UNTIL: dict[str, float] = {}
 
 
@@ -122,9 +109,6 @@ _MIRROR_DOWN_UNTIL: dict[str, float] = {}
 
 @dataclass(frozen=True)
 class OpenStreetMapConfig:
-    """OSM tidak butuh API key; yang bisa diatur hanya kill switch dan
-    User-Agent (kebijakan Nominatim mewajibkan User-Agent yang jelas)."""
-
     enabled: bool = True
     user_agent: str = DEFAULT_USER_AGENT
 
@@ -137,7 +121,6 @@ class OpenStreetMapConfig:
 
 
 def load_openstreetmap_config(env: Optional[dict] = None) -> OpenStreetMapConfig:
-    """Tidak pernah raise. Env disuntik untuk test."""
     source = env if env is not None else os.environ
 
     enabled_raw = source.get(ENV_ENABLED)
@@ -152,8 +135,7 @@ def load_openstreetmap_config(env: Optional[dict] = None) -> OpenStreetMapConfig
 # ------------------------------------------------------------------ HTTP
 
 class OSMTimeout(Exception):
-    """Dilempar fetcher untuk timeout, supaya dipetakan ke ERROR_TIMEOUT
-    (bukan ERROR_PROVIDER_UNAVAILABLE generik)."""
+    """Timeout dari fetcher -> ERROR_TIMEOUT."""
 
 
 Fetcher = Callable[..., Any]
@@ -165,8 +147,6 @@ def _default_fetch(
     post: Optional[dict] = None,
     user_agent: str = DEFAULT_USER_AGENT,
 ) -> Any:
-    """Fetcher bawaan berbasis `requests` (diimpor lazy). Mirror Overpass
-    memakai timeout pendek; layanan lain memakai DEFAULT_HTTP_TIMEOUT."""
     import requests
 
     headers = {"User-Agent": user_agent, "Accept": "application/json"}
@@ -185,7 +165,6 @@ def _default_fetch(
 
 
 def _map_exception(exc: Exception) -> ExternalContextError:
-    """Exception transport -> ExternalContextError (tanpa capability)."""
     if isinstance(exc, OSMTimeout):
         return ExternalContextError(
             code=ERROR_TIMEOUT, message=f"Permintaan ke OpenStreetMap timeout: {exc}",
@@ -218,10 +197,10 @@ _FILLER_WORDS = {
     "nearest", "near", "nearby", "closest", "the", "a", "me", "around",
 }
 
-# alias keyword -> filter tag Overpass. Dicocokkan hanya kalau keyword (setelah
-# kata pengisi dibuang) SAMA dengan salah satu alias; selain itu dicari lewat nama.
+# alias kategori -> filter tag Overpass
 _TAG_FILTERS: tuple[tuple[frozenset, str], ...] = (
-    (frozenset({"rumah sakit", "rs", "rsud", "hospital"}), '["amenity"="hospital"]'),
+    (frozenset({"rumah sakit", "rumah sakit umum", "rs", "rsud", "rsu", "rsia", "hospital"}),
+     '["amenity"="hospital"]'),
     (frozenset({"klinik", "clinic", "dokter", "puskesmas"}), '["amenity"~"^(clinic|doctors)$"]'),
     (frozenset({"apotek", "apotik", "pharmacy"}), '["amenity"="pharmacy"]'),
     (frozenset({"spbu", "pom bensin", "pompa bensin", "bensin", "gas station", "fuel"}), '["amenity"="fuel"]'),
@@ -240,6 +219,8 @@ _TAG_FILTERS: tuple[tuple[frozenset, str], ...] = (
     (frozenset({"sekolah", "school"}), '["amenity"="school"]'),
     (frozenset({"toilet", "wc"}), '["amenity"="toilets"]'),
 )
+
+_NAME_KEYS = ("name", "alt_name", "official_name", "name:id")
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -260,24 +241,62 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _clean_keyword(keyword: Optional[str]) -> str:
-    """Huruf kecil, karakter aneh dibuang (aman untuk regex/string Overpass),
-    kata pengisi seperti 'terdekat' dibuang."""
     text = re.sub(r"[^\w\s\-]", " ", (keyword or "").lower())
     words = [w for w in text.split() if w not in _FILLER_WORDS]
     return " ".join(words)
 
 
-def _overpass_filter(keyword: Optional[str]) -> str:
-    cleaned = _clean_keyword(keyword)
+def _split_category(query: Optional[str]) -> tuple[Optional[str], str, str]:
+    """query -> (filter_tag | None, nama_inti, query_bersih).
+    'rumah sakit welas asih' -> (hospital, 'welas asih', ...)
+    'rumah sakit terdekat'   -> (hospital, '', 'rumah sakit')
+    'gedung sate'            -> (None, 'gedung sate', 'gedung sate')"""
+    cleaned = _clean_keyword(query)
 
     if not cleaned:
-        return '["amenity"]["name"]'
+        return None, "", ""
+
+    best: Optional[tuple[int, str, str]] = None
 
     for aliases, tag_filter in _TAG_FILTERS:
-        if cleaned in aliases:
-            return tag_filter
+        for alias in aliases:
+            if cleaned == alias:
+                candidate = (len(alias), tag_filter, "")
+            elif cleaned.startswith(alias + " "):
+                candidate = (len(alias), tag_filter, cleaned[len(alias) + 1:].strip())
+            else:
+                continue
 
-    return f'["name"~"{cleaned}",i]'
+            if best is None or candidate[0] > best[0]:
+                best = candidate
+
+    if best is not None:
+        return best[1], best[2], cleaned
+
+    return None, cleaned, cleaned
+
+
+def _name_regex(core: str) -> str:
+    """'al ihsan' / 'al-ihsan' -> 'al.?ihsan' (cocok 'Al Ihsan', 'Al-Ihsan', 'AlIhsan')."""
+    tokens = [t for t in re.split(r"[\s\-]+", core) if t]
+    return ".?".join(tokens)
+
+
+def _overpass_filters(keyword: Optional[str]) -> list[str]:
+    tag_filter, core, cleaned = _split_category(keyword)
+
+    if not cleaned:
+        return ['["amenity"]["name"]']
+
+    if tag_filter and not core:
+        return [tag_filter]
+
+    regex = _name_regex(core)
+
+    if tag_filter:
+        return [f'{tag_filter}["{key}"~"{regex}",i]' for key in _NAME_KEYS]
+
+    return [f'["{key}"~"{regex}",i]' for key in _NAME_KEYS[:3]]
 
 
 def _address_from_tags(tags: dict) -> Optional[str]:
@@ -297,6 +316,19 @@ def _osm_url(osm_type: Optional[str], osm_id: Any) -> Optional[str]:
     return None
 
 
+def _short_id(osm_type: Optional[str], osm_id: Any) -> str:
+    if osm_type and osm_id:
+        return f"{str(osm_type)[0].upper()}{osm_id}"
+    return ""
+
+
+def _downsample(points: list, limit: int) -> list:
+    if limit < 2 or len(points) <= limit:
+        return points
+    step = (len(points) - 1) / (limit - 1)
+    return [points[int(round(i * step))] for i in range(limit)]
+
+
 _MODIFIER_ID = {
     "left": "kiri", "right": "kanan",
     "slight left": "serong kiri", "slight right": "serong kanan",
@@ -306,7 +338,6 @@ _MODIFIER_ID = {
 
 
 def _step_instruction(step: dict) -> str:
-    """Satu langkah OSRM -> kalimat singkat (bukan turn-by-turn presisi)."""
     maneuver = step.get("maneuver") or {}
     kind = maneuver.get("type")
     modifier = maneuver.get("modifier")
@@ -333,11 +364,6 @@ def _step_instruction(step: dict) -> str:
 # ------------------------------------------------------------------ provider
 
 class OpenStreetMapProvider(ExternalContextProvider):
-    """
-    Konstruksi tidak pernah raise. `nominatim_min_interval` = jeda minimum
-    antar request Nominatim (kebijakan publik: maks ~1 request/detik); test
-    memberi 0 supaya tidak menunggu.
-    """
 
     def __init__(
         self,
@@ -353,11 +379,14 @@ class OpenStreetMapProvider(ExternalContextProvider):
         self._nominatim_lock = threading.Lock()
         self._nominatim_last = 0.0
 
+        self._cache: dict[Any, tuple[float, Any]] = {}
+        self._cache_lock = threading.Lock()
+
     # ------------------------------------------------------------ identity
 
     @property
     def identity(self) -> ProviderIdentity:
-        return ProviderIdentity(name=PROVIDER_NAME, display_name=PROVIDER_DISPLAY_NAME, version="1.0")
+        return ProviderIdentity(name=PROVIDER_NAME, display_name=PROVIDER_DISPLAY_NAME, version="1.1")
 
     @property
     def capabilities(self) -> ProviderCapabilities:
@@ -373,6 +402,27 @@ class OpenStreetMapProvider(ExternalContextProvider):
     def config(self) -> OpenStreetMapConfig:
         return self._config
 
+    # ------------------------------------------------------------ cache
+
+    def _cache_get(self, key: Any) -> Optional[Any]:
+        with self._cache_lock:
+            item = self._cache.get(key)
+
+            if item is None:
+                return None
+
+            if item[0] < time.monotonic():
+                self._cache.pop(key, None)
+                return None
+
+            return item[1]
+
+    def _cache_set(self, key: Any, value: Any) -> None:
+        with self._cache_lock:
+            if len(self._cache) >= CACHE_MAX_ENTRIES:
+                self._cache.pop(next(iter(self._cache)))
+            self._cache[key] = (time.monotonic() + CACHE_TTL_SECONDS, value)
+
     # ------------------------------------------------------------ transport
 
     def _throttle_nominatim(self) -> None:
@@ -386,7 +436,6 @@ class OpenStreetMapProvider(ExternalContextProvider):
             self._nominatim_last = time.monotonic()
 
     def _call(self, url: str, params: dict) -> tuple[Optional[Any], Optional[ExternalContextError]]:
-        """GET satu layanan (Nominatim / OSRM) -> (data, None) atau (None, error)."""
         if url.startswith(NOMINATIM):
             self._throttle_nominatim()
 
@@ -404,20 +453,15 @@ class OpenStreetMapProvider(ExternalContextProvider):
         return data, None
 
     def _call_overpass(self, query: str) -> tuple[Optional[dict], Optional[ExternalContextError]]:
-        """
-        POST query ke mirror Overpass satu per satu. Berhenti begitu satu
-        mirror menjawab. Mirror yang sedang "istirahat" dilewati, dan seluruh
-        loop dibatasi OVERPASS_TOTAL_BUDGET.
-        """
         started = time.monotonic()
         last_error: Optional[ExternalContextError] = None
 
         mirrors = [m for m in OVERPASS_MIRRORS if _MIRROR_DOWN_UNTIL.get(m, 0.0) <= started]
-        mirrors = mirrors or list(OVERPASS_MIRRORS)  # semua istirahat -> coba semua
+        mirrors = mirrors or list(OVERPASS_MIRRORS)
 
         for mirror in mirrors:
             if last_error is not None and time.monotonic() - started >= OVERPASS_TOTAL_BUDGET:
-                logger.warning("OVERPASS | anggaran waktu %.0fs habis, berhenti mencoba mirror.", OVERPASS_TOTAL_BUDGET)
+                logger.warning("OVERPASS | anggaran waktu %.0fs habis.", OVERPASS_TOTAL_BUDGET)
                 break
 
             try:
@@ -436,8 +480,6 @@ class OpenStreetMapProvider(ExternalContextProvider):
                 _MIRROR_DOWN_UNTIL[mirror] = time.monotonic() + OVERPASS_MIRROR_COOLDOWN
                 continue
 
-            # Overpass kadang membalas 200 dengan "remark" runtime error/timeout
-            # dan elements kosong - perlakukan sebagai kegagalan mirror itu.
             remark = str(data.get("remark") or "")
             if "error" in remark.lower() and not data.get("elements"):
                 last_error = ExternalContextError(
@@ -461,7 +503,7 @@ class OpenStreetMapProvider(ExternalContextProvider):
     def _place_from_nominatim(item: dict) -> NormalizedPlace:
         osm_type = item.get("osm_type")
         osm_id = item.get("osm_id")
-        place_id = f"{osm_type}/{osm_id}" if osm_type and osm_id else str(item.get("place_id") or "")
+        place_id = _short_id(osm_type, osm_id) or str(item.get("place_id") or "")
 
         address = item.get("display_name")
         name = item.get("name") or (address.split(",")[0].strip() if address else "") or "Tempat tanpa nama"
@@ -483,6 +525,15 @@ class OpenStreetMapProvider(ExternalContextProvider):
     @staticmethod
     def _place_from_overpass(element: dict, ref_lat: float, ref_lon: float) -> Optional[NormalizedPlace]:
         tags = element.get("tags") or {}
+
+        name = (
+            tags.get("name") or tags.get("name:id") or tags.get("official_name")
+            or tags.get("alt_name") or tags.get("brand") or tags.get("operator")
+        )
+
+        if not name:
+            return None  # tempat tanpa nama tidak berguna untuk user
+
         lat, lon = element.get("lat"), element.get("lon")
 
         if lat is None or lon is None:
@@ -496,7 +547,6 @@ class OpenStreetMapProvider(ExternalContextProvider):
 
         osm_type = element.get("type", "node")
         osm_id = element.get("id")
-        name = tags.get("name") or tags.get("name:id") or tags.get("brand") or tags.get("operator") or "Tempat tanpa nama"
 
         metadata = {
             k: v for k, v in {
@@ -509,11 +559,113 @@ class OpenStreetMapProvider(ExternalContextProvider):
         }
 
         return NormalizedPlace(
-            id=f"{osm_type}/{osm_id}", name=str(name), address=_address_from_tags(tags),
+            id=_short_id(osm_type, osm_id), name=str(name), address=_address_from_tags(tags),
             latitude=lat, longitude=lon,
             distance_meters=round(_haversine_m(ref_lat, ref_lon, lat, lon), 1),
             metadata=metadata,
         )
+
+    # ------------------------------------------------------------ Overpass inti
+
+    def _overpass_places(
+        self, lat: float, lon: float, radius_m: int, filters: list[str],
+    ) -> tuple[Optional[list[NormalizedPlace]], Optional[ExternalContextError]]:
+        parts = "".join(f"nwr{f}(around:{radius_m},{lat},{lon});" for f in filters)
+        query = f"[out:json][timeout:{OVERPASS_SERVER_TIMEOUT}];({parts});out center tags {OVERPASS_MAX_ELEMENTS};"
+
+        cached = self._cache_get(("overpass", query))
+        if cached is not None:
+            return list(cached), None
+
+        data, error = self._call_overpass(query)
+
+        if error is not None:
+            return None, error
+
+        seen: set[str] = set()
+        places: list[NormalizedPlace] = []
+
+        for element in data.get("elements") or []:
+            if not isinstance(element, dict):
+                continue
+
+            place = self._place_from_overpass(element, lat, lon)
+
+            if place is None or place.id in seen:
+                continue
+
+            seen.add(place.id)
+            places.append(place)
+
+        places.sort(key=lambda p: p.distance_meters if p.distance_meters is not None else float("inf"))
+        places = places[:NEARBY_MAX_RESULTS]
+
+        if places:
+            self._cache_set(("overpass", query), list(places))
+
+        return places, None
+
+    # ------------------------------------------------------------ Nominatim inti
+
+    def _nominatim_search(
+        self, query: str, lat: Optional[float] = None, lon: Optional[float] = None,
+        radius: Optional[float] = None,
+    ) -> tuple[Optional[list[NormalizedPlace]], Optional[ExternalContextError], dict]:
+        """Cari teks. Dengan lat/lon: dibatasi bounding box dulu; kalau kosong,
+        tanpa batas tapi diurutkan jarak dan yang jauh dibuang."""
+        params: dict[str, Any] = {
+            "q": query, "format": "jsonv2", "limit": 10,
+            "addressdetails": 1, "accept-language": "id",
+        }
+        meta: dict[str, Any] = {}
+        has_ref = lat is not None and lon is not None
+
+        if has_ref:
+            span = max(1000, int(radius or 5000))
+            dlat = span / 111320.0
+            dlon = span / (111320.0 * max(0.2, math.cos(math.radians(lat))))
+            params["viewbox"] = f"{lon - dlon},{lat + dlat},{lon + dlon},{lat - dlat}"
+            params["bounded"] = 1
+            meta["bounded"] = True
+
+        data, error = self._call(f"{NOMINATIM}/search", params)
+
+        if error is not None:
+            return None, error, meta
+
+        items = data if isinstance(data, list) else []
+
+        if not items and has_ref:
+            params.pop("bounded", None)
+            params["limit"] = 15
+            meta["bounded"] = False
+
+            data, error = self._call(f"{NOMINATIM}/search", params)
+
+            if error is not None:
+                return None, error, meta
+
+            items = data if isinstance(data, list) else []
+
+        places = [self._place_from_nominatim(i) for i in items if isinstance(i, dict)]
+
+        if has_ref:
+            for place in places:
+                if place.latitude is not None and place.longitude is not None:
+                    place.distance_meters = round(_haversine_m(lat, lon, place.latitude, place.longitude), 1)
+
+            places.sort(key=lambda p: p.distance_meters if p.distance_meters is not None else float("inf"))
+
+            if meta.get("bounded") is False:
+                near = [p for p in places if p.distance_meters is not None and p.distance_meters <= FAR_RESULT_METERS]
+
+                if near:
+                    places = near
+                else:
+                    places = places[:3]
+                    meta["far_results"] = True
+
+        return places, None, meta
 
     # ------------------------------------------------------------ search
 
@@ -526,34 +678,47 @@ class OpenStreetMapProvider(ExternalContextProvider):
                 provider=PROVIDER_NAME, capability=CAPABILITY_SEARCH,
             ))
 
-        params: dict[str, Any] = {
-            "q": query, "format": "jsonv2", "limit": 10,
-            "addressdetails": 1, "accept-language": "id",
-        }
-
         match = _COORD_RE.match(location or "")
+        lat = lon = None
+        base_radius = 5000
+
         if match:
             lat, lon = float(match.group(1)), float(match.group(2))
-            span = max(1000, int(radius or 5000))
-            dlat = span / 111320.0
-            dlon = span / (111320.0 * max(0.2, math.cos(math.radians(lat))))
-            params["viewbox"] = f"{lon - dlon},{lat + dlat},{lon + dlon},{lat - dlat}"
+            base_radius = max(500, min(int(_to_float(radius) or 5000), MAX_NEARBY_RADIUS_METERS))
 
-        data, error = self._call(f"{NOMINATIM}/search", params)
+        # Berlokasi + kategori dikenali -> Overpass dulu (akurat), radius melebar kalau cari nama.
+        if lat is not None:
+            tag_filter, core, _ = _split_category(query)
+
+            if tag_filter:
+                radii = [base_radius]
+                if core and SEARCH_WIDE_RADIUS_METERS > base_radius:
+                    radii.append(SEARCH_WIDE_RADIUS_METERS)
+
+                for rad in radii:
+                    result = self._nearby(lat, lon, radius=rad, keyword=query, allow_fallback=False)
+
+                    if result.success and result.places:
+                        return QueryResult.ok(
+                            PROVIDER_NAME, CAPABILITY_SEARCH, places=result.places,
+                            metadata={"query": query, "radius": rad, "source": "overpass"},
+                        )
+
+        places, error, meta = self._nominatim_search(query, lat, lon, base_radius)
 
         if error is not None:
             error.capability = CAPABILITY_SEARCH
             return QueryResult.fail(PROVIDER_NAME, CAPABILITY_SEARCH, error)
 
-        places = [self._place_from_nominatim(i) for i in (data if isinstance(data, list) else [])]
-
-        return QueryResult.ok(PROVIDER_NAME, CAPABILITY_SEARCH, places=places, metadata={"query": query})
+        return QueryResult.ok(
+            PROVIDER_NAME, CAPABILITY_SEARCH, places=places or [],
+            metadata={"query": query, "source": "nominatim", **meta},
+        )
 
     # ------------------------------------------------------------ lookup
 
     @staticmethod
     def _parse_osm_ref(place_id: str) -> Optional[str]:
-        """'node/123' | 'way/9' | 'relation/5' | 'N123' -> 'N123'."""
         text = (place_id or "").strip()
         match = re.match(r"^(node|way|relation)/(\d+)$", text, re.I)
 
@@ -571,7 +736,7 @@ class OpenStreetMapProvider(ExternalContextProvider):
         if ref is None:
             return QueryResult.fail(PROVIDER_NAME, CAPABILITY_LOOKUP, ExternalContextError(
                 code=ERROR_INVALID_REQUEST,
-                message="place_id harus berformat 'node/123', 'way/123', atau 'relation/123'.",
+                message="place_id harus berformat 'N123', 'W123', 'R123' (atau 'node/123').",
                 provider=PROVIDER_NAME, capability=CAPABILITY_LOOKUP,
             ))
 
@@ -607,97 +772,70 @@ class OpenStreetMapProvider(ExternalContextProvider):
             ))
 
         radius_m = max(100, min(int(_to_float(radius) or DEFAULT_NEARBY_RADIUS_METERS), MAX_NEARBY_RADIUS_METERS))
-        overpass_filter = _overpass_filter(keyword)
 
-        query = (
-            f"[out:json][timeout:{OVERPASS_SERVER_TIMEOUT}];"
-            f"nwr{overpass_filter}(around:{radius_m},{lat},{lon});"
-            f"out center tags {OVERPASS_MAX_ELEMENTS};"
-        )
+        places, error = self._overpass_places(lat, lon, radius_m, _overpass_filters(keyword))
 
-        data, error = self._call_overpass(query)
+        if error is None and places:
+            return QueryResult.ok(
+                PROVIDER_NAME, CAPABILITY_NEARBY, places=places,
+                metadata={"latitude": lat, "longitude": lon, "radius": radius_m, "source": "overpass"},
+            )
+
+        if allow_fallback:
+            fallback = self._nearby_via_nominatim(lat, lon, radius_m, keyword)
+
+            if fallback is not None:
+                logger.info("NEARBY | Overpass %s, memakai fallback Nominatim.", "gagal" if error else "kosong")
+                return fallback
 
         if error is not None:
-            if allow_fallback:
-                fallback = self._nearby_via_nominatim(lat, lon, radius_m, keyword)
-                if fallback is not None:
-                    logger.info("NEARBY | Overpass gagal (%s), memakai fallback Nominatim.", error.code)
-                    return fallback
-
             error.capability = CAPABILITY_NEARBY
             return QueryResult.fail(PROVIDER_NAME, CAPABILITY_NEARBY, error)
 
-        places = [
-            p for p in (
-                self._place_from_overpass(e, lat, lon)
-                for e in (data.get("elements") or []) if isinstance(e, dict)
-            ) if p is not None
-        ]
-        places.sort(key=lambda p: p.distance_meters if p.distance_meters is not None else float("inf"))
-        places = places[:NEARBY_MAX_RESULTS]
-
-        if not places and allow_fallback:
-            fallback = self._nearby_via_nominatim(lat, lon, radius_m, keyword)
-            if fallback is not None:
-                return fallback
-
         return QueryResult.ok(
-            PROVIDER_NAME, CAPABILITY_NEARBY, places=places,
+            PROVIDER_NAME, CAPABILITY_NEARBY, places=[],
             metadata={"latitude": lat, "longitude": lon, "radius": radius_m, "source": "overpass"},
         )
 
     def _nearby_via_nominatim(
         self, lat: float, lon: float, radius: float, keyword: Optional[str],
     ) -> Optional[QueryResult]:
-        """Cadangan saat Overpass down/kosong: pencarian teks Nominatim dibatasi
-        bounding box. Hasilnya kurang lengkap (tanpa telepon/jam buka) tapi cukup
-        untuk menentukan tujuan dan menghitung rute. None kalau tidak ada hasil."""
-        query = _clean_keyword(keyword)
+        _, core, cleaned = _split_category(keyword)
 
-        if not query:
+        if not cleaned:
             return None
 
-        dlat = radius / 111320.0
-        dlon = radius / (111320.0 * max(0.2, math.cos(math.radians(lat))))
+        variants = [cleaned]
+        if core and core != cleaned:
+            variants.append(core)
 
-        data, error = self._call(f"{NOMINATIM}/search", {
-            "q": query, "format": "jsonv2", "limit": 20, "bounded": 1,
-            "addressdetails": 1, "accept-language": "id",
-            "viewbox": f"{lon - dlon},{lat + dlat},{lon + dlon},{lat - dlat}",
-        })
+        for variant in variants:
+            data, error, _ = self._nominatim_search(variant, lat, lon, radius)
 
-        if error is not None or not isinstance(data, list) or not data:
-            return None
-
-        places = []
-        for item in data:
-            place = self._place_from_nominatim(item)
-            if place.latitude is None or place.longitude is None:
+            if error is not None or not data:
                 continue
-            place.distance_meters = round(_haversine_m(lat, lon, place.latitude, place.longitude), 1)
-            if place.distance_meters <= radius * 1.2:
-                places.append(place)
 
-        if not places:
-            return None
+            places = [
+                p for p in data
+                if p.distance_meters is not None and p.distance_meters <= radius * 1.2
+            ]
 
-        places.sort(key=lambda p: p.distance_meters)
+            if places:
+                return QueryResult.ok(
+                    PROVIDER_NAME, CAPABILITY_NEARBY, places=places[:NEARBY_MAX_RESULTS],
+                    metadata={
+                        "latitude": lat, "longitude": lon, "radius": radius,
+                        "source": "nominatim", "fallback": "nominatim",
+                    },
+                )
 
-        return QueryResult.ok(
-            PROVIDER_NAME, CAPABILITY_NEARBY, places=places[:NEARBY_MAX_RESULTS],
-            metadata={
-                "latitude": lat, "longitude": lon, "radius": radius,
-                "source": "nominatim", "fallback": "nominatim",
-            },
-        )
+        return None
 
     # ------------------------------------------------------------ route
 
     def _resolve_point(
         self, text: str, capability: str,
     ) -> tuple[Optional[tuple[float, float, str]], Optional[ExternalContextError]]:
-        """'lat,lon' dipakai langsung; selain itu di-geocode lewat Nominatim.
-        Return ((lat, lon, label), None) atau (None, error)."""
         match = _COORD_RE.match(text or "")
 
         if match:
@@ -763,7 +901,9 @@ class OpenStreetMapProvider(ExternalContextProvider):
         base, profile = OSRM_SERVERS[mode]
         url = f"{base}/route/v1/{profile}/{start[1]},{start[0]};{end[1]},{end[0]}"
 
-        data, error = self._call(url, {"overview": "false", "steps": "true", "alternatives": "false"})
+        data, error = self._call(url, {
+            "overview": "full", "geometries": "geojson", "steps": "true", "alternatives": "false",
+        })
 
         if error is not None:
             error.capability = CAPABILITY_ROUTE
@@ -775,10 +915,12 @@ class OpenStreetMapProvider(ExternalContextProvider):
             mapped = ERROR_NO_RESULTS if code == "NoRoute" else (
                 ERROR_INVALID_REQUEST if code in ("InvalidQuery", "InvalidUrl", "InvalidValue") else ERROR_PROVIDER_UNAVAILABLE
             )
+            message = (
+                str(data.get("message") or f"OSRM: {code or 'respons tidak valid'}")
+                if isinstance(data, dict) else "Respons OSRM tidak valid."
+            )
             return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, ExternalContextError(
-                code=mapped,
-                message=str(data.get("message") or f"OSRM: {code or 'respons tidak valid'}") if isinstance(data, dict) else "Respons OSRM tidak valid.",
-                provider=PROVIDER_NAME, capability=CAPABILITY_ROUTE,
+                code=mapped, message=message, provider=PROVIDER_NAME, capability=CAPABILITY_ROUTE,
                 retryable=mapped == ERROR_PROVIDER_UNAVAILABLE, details={"osrm_code": code},
             ))
 
@@ -802,6 +944,15 @@ class OpenStreetMapProvider(ExternalContextProvider):
             for step in steps
         ]
 
+        coordinates = (best.get("geometry") or {}).get("coordinates") or []
+        geometry = [
+            [round(c[1], 5), round(c[0], 5)]
+            for c in coordinates
+            if isinstance(c, (list, tuple)) and len(c) >= 2
+            and _to_float(c[0]) is not None and _to_float(c[1]) is not None
+        ]
+        geometry = _downsample(geometry, ROUTE_MAX_POINTS)
+
         directions_url = (
             "https://www.openstreetmap.org/directions"
             f"?engine={OSM_DIRECTIONS_ENGINE[mode]}&route={start[0]}%2C{start[1]}%3B{end[0]}%2C{end[1]}"
@@ -813,6 +964,7 @@ class OpenStreetMapProvider(ExternalContextProvider):
             segments=segments,
             metadata={
                 "mode": mode, "engine": "osrm", "osm_url": directions_url,
+                "geometry": geometry,
                 "origin_resolved": {"latitude": start[0], "longitude": start[1], "label": start[2]},
                 "destination_resolved": {"latitude": end[0], "longitude": end[1], "label": end[2]},
             },
@@ -823,8 +975,6 @@ class OpenStreetMapProvider(ExternalContextProvider):
     # ------------------------------------------------------------ context
 
     def _context(self, latitude: float, longitude: float, radius: int = 500, **kwargs) -> QueryResult:
-        """Ringkasan "ada apa di sekitar sini": reverse-geocode untuk label alamat,
-        lalu nearby() TANPA fallback (kegagalan nearby tidak menggagalkan context)."""
         lat, lon = _to_float(latitude), _to_float(longitude)
 
         if lat is None or lon is None:
