@@ -434,11 +434,11 @@ class OpenStreetMapProvider(ExternalContextProvider):
 
             return item[1]
 
-    def _cache_set(self, key: Any, value: Any) -> None:
-        with self._cache_lock:
-            if len(self._cache) >= CACHE_MAX_ENTRIES:
-                self._cache.pop(next(iter(self._cache)))
-            self._cache[key] = (time.monotonic() + CACHE_TTL_SECONDS, value)
+        def _cache_set(self, key: Any, value: Any, ttl: float = CACHE_TTL_SECONDS) -> None:
+            with self._cache_lock:
+                if len(self._cache) >= CACHE_MAX_ENTRIES:
+                    self._cache.pop(next(iter(self._cache)))
+                self._cache[key] = (time.monotonic() + ttl, value)
 
     # ------------------------------------------------------------ transport
 

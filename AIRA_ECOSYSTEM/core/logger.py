@@ -31,6 +31,7 @@ import logging.handlers
 import sys
 from pathlib import Path
 from typing import Optional
+import traceback
 
 from core import log_store
 
@@ -119,7 +120,7 @@ class SQLiteLogHandler(logging.Handler):
             message = record.getMessage()
 
             if record.exc_info:
-                message += "\n" + self.formatException(record.exc_info)
+                message += "\n" + "".join(traceback.format_exception(*record.exc_info))
 
             merged_context = dict(user_context) if isinstance(user_context, dict) else (
                 {"value": user_context} if user_context is not None else {}

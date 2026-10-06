@@ -521,7 +521,7 @@ def _consume_sse(response, on_delta, cancel_event) -> dict:
 
 
 def _chat_openai_stream(
-    provider, model_id, messages, tools, temperature, max_tokens, timeout, on_delta, cancel_event, think=None
+    provider, model_id, messages, tools, temperature, max_tokens, timeout, on_delta, cancel_event, think=None,
 ) -> dict:
     api_key = _resolve_api_key(provider)
 
@@ -538,7 +538,7 @@ def _chat_openai_stream(
         headers["HTTP-Referer"] = "http://localhost"
         headers["X-Title"] = "AIRA Ecosystem"
 
-        payload: dict = {
+    payload: dict = {
         "model": model_id, "messages": messages, "stream": True,
         "stream_options": {"include_usage": True},
     }
@@ -584,11 +584,9 @@ def _chat_openai_stream(
             return {"error": "Gagal membuka stream ke provider.", "error_type": "other"}
 
         with closing(response):
-
             content_type = (response.headers.get("Content-Type") or "").lower()
 
-            # Provider mengabaikan stream=true dan membalas JSON biasa:
-            # perlakukan sebagai non-streaming (jujur: streamed=False).
+            # Provider mengabaikan stream=true dan membalas JSON biasa.
             if "event-stream" not in content_type and "json" in content_type:
                 data = response.json()
                 choices = data.get("choices") or [{}]
@@ -605,7 +603,6 @@ def _chat_openai_stream(
         return _request_error(provider, url, exc)
     except ValueError as exc:
         return {"error": f"{url} membalas body bukan JSON valid: {exc}", "error_type": "other"}
-
 
 # ============================================================ public client
 
@@ -628,14 +625,12 @@ class ProviderClient:
         "timeout"|"connection"|"rate_limit"|"other"}. Tidak pernah raise.
         """
         provider = (provider or "").strip().lower()
+        think = _resolve_think(think)
 
         if provider == "ollama":
             return _chat_ollama(model, messages, tools, temperature, max_tokens, think, timeout or 300)
 
         if provider in PROVIDER_ENV_KEYS:
-            return _chat_openai_compatible(provider, model, messages, tools, temperature, max_tokens, timeout or 120)
-
-        if provider in PROVIDER_ENV_KEYS:      # di chat():
             return _chat_openai_compatible(
                 provider, model, messages, tools, temperature, max_tokens, timeout or 120, think,
             )
@@ -657,20 +652,11 @@ class ProviderClient:
         timeout: Optional[float] = None,
     ) -> dict:
         """
-        Streaming NYATA. on_delta(text) dipanggil untuk tiap potongan teks yang
-        BARU diterima dari provider. Return sama seperti chat() plus
-        "streamed": True (False bila provider membalas JSON biasa), atau
-        {"error", "error_type": ... | "stream_unsupported" | "cancelled"}.
+        Streaming NYATA. on_delta(text) dipanggil untuk tiap potongan teks baru.
         Tidak pernah raise.
         """
         provider = (provider or "").strip().lower()
-        think = _resolve_think(think)   
-
-        if provider in PROVIDER_ENV_KEYS:      # di chat_stream():
-            return _chat_openai_stream(
-                provider, model, messages, tools, temperature, max_tokens,
-                timeout or 120, on_delta, cancel_event, think,
-            )
+        think = _resolve_think(think)
 
         try:
             if provider == "ollama":
@@ -682,7 +668,7 @@ class ProviderClient:
             if provider in PROVIDER_ENV_KEYS:
                 return _chat_openai_stream(
                     provider, model, messages, tools, temperature, max_tokens,
-                    timeout or 120, on_delta, cancel_event,
+                    timeout or 120, on_delta, cancel_event, think,
                 )
 
             return {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
@@ -690,7 +676,7 @@ class ProviderClient:
         except Exception as exc:
             logger.exception("chat_stream %s gagal tak terduga", provider)
             return {"error": f"Streaming gagal: {exc}", "error_type": "other"}
-
+        
     @staticmethod
     def health_check(provider: str, model_id: Optional[str] = None) -> dict:
         provider = (provider or "").strip().lower()
