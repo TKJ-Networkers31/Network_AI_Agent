@@ -8,6 +8,7 @@ ditaruh di pesan user karena system prompt spec tidak menyebutkannya.
 classify() TIDAK PERNAH raise: gagal apa pun -> fallback general / 0.50.
 """
 
+import os
 import json
 import logging
 import re
@@ -19,6 +20,8 @@ from core.model_router import ModelRouter, get_model_router
 from core.model_types import (
     DEFAULT_LABEL, EVENT_TASK_CLASSIFIED, VALID_LABELS, TaskClassification,
 )
+
+from core.model_types import SelectedModel
 
 logger = logging.getLogger("aira.task_classifier")
 
@@ -56,7 +59,7 @@ User request:
 """
 
 MAX_PROMPT_CHARS = 1500
-CLASSIFIER_TIMEOUT = 60
+CLASSIFIER_TIMEOUT = 20
 CLASSIFIER_MAX_TOKENS = 120
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -136,12 +139,26 @@ class TaskClassifier:
 
         return result
 
+    def _pick_model(self) -> Optional[SelectedModel]:
+        """AIRA_CLASSIFIER_MODEL=<id model di halaman Models> -> pakai model kecil/lokal khusus
+        classifier. Kalau kosong/tidak valid, perilaku lama (model label general)."""
+        override = os.getenv("AIRA_CLASSIFIER_MODEL", "").strip()
+
+        if override:
+            row = self.router.store.get_model(override)
+
+            if row and row["enabled"]:
+                return SelectedModel.from_row(row)
+
+            logger.warning("AIRA_CLASSIFIER_MODEL='%s' tidak ada/nonaktif - pakai model general.", override)
+
+        return self.router.select_for_label(DEFAULT_LABEL, publish=False)
+
     def _classify_with_llm(self, prompt: str) -> TaskClassification:
-        model = self.router.select_for_label(DEFAULT_LABEL, publish=False)
+        model = self._pick_model()
         if model is None:
             logger.warning("Classifier: tidak ada model general - pakai fallback.")
             return TaskClassification.fallback()
-
         response = self._client.chat(
             provider=model.provider,
             model=model.model_id,

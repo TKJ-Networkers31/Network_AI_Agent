@@ -263,10 +263,11 @@ def maps_route(
     origin: Optional[str] = None,
     mode: str = "driving",
     allow_approximate: Any = False,
+    alternatives: Any = True,
     session_id: Optional[str] = None,
     **_ignored: Any,
 ) -> dict:
-    """Rute dari origin (default: lokasi user) ke destination."""
+    """Rute dari origin (default: lokasi user) ke destination, plus rute alternatif."""
     destination = (destination or "").strip()
 
     if not destination:
@@ -297,7 +298,11 @@ def maps_route(
         approximate = not _is_precise(access, session_id)
 
     mode = (mode or "driving").strip().lower()
-    result = get_maps_provider().route(origin_text, destination, mode=mode)
+    want_alternatives = _as_bool(alternatives)
+
+    result = get_maps_provider().route(
+        origin_text, destination, mode=mode, alternatives=want_alternatives,
+    )
 
     if not result.success:
         return _fail("maps_route", result)
@@ -313,18 +318,42 @@ def maps_route(
         for s in route.segments[:MAX_ROUTE_STEPS]
     ]
 
+    alternatives_list = [
+        {
+            "via": alt.get("via"),
+            "distance_km": round(alt["distance_m"] / 1000, 1) if alt.get("distance_m") is not None else None,
+            "duration_minutes": round(alt["duration_s"] / 60) if alt.get("duration_s") is not None else None,
+        }
+        for alt in (meta.get("alternatives") or [])
+    ]
+
+    if want_alternatives:
+        alt_note = (
+            "Rute alternatif SUDAH termasuk di hasil ini (field 'alternatives'). Kalau user "
+            "bertanya 'rute lain/alternatif', jawab dari field itu - JANGAN memanggil maps_route "
+            "lagi dengan tujuan yang sama. "
+            + ("Bandingkan via/jarak/durasi tiap alternatif secara singkat."
+               if alternatives_list else
+               "Field 'alternatives' kosong: sampaikan bahwa tidak ada rute alternatif yang ditemukan.")
+        )
+    else:
+        alt_note = "Rute alternatif tidak diminta pada panggilan ini."
+
     payload: dict[str, Any] = {
         "success": True, "tool": "maps_route",
         "origin": origin_label, "origin_approximate": approximate,
         "destination": destination, "mode": mode,
+        "via": meta.get("via"),
         "distance_km": round(route.distance_meters / 1000, 1) if route.distance_meters is not None else None,
         "duration_minutes": round(route.duration_seconds / 60) if route.duration_seconds is not None else None,
         "steps": steps,
         "steps_truncated": len(route.segments) > MAX_ROUTE_STEPS,
+        "alternatives": alternatives_list,
+        "alternatives_available": bool(alternatives_list),
         "note": (
             "Ringkas jarak & durasi, tampilkan langkah utama sebagai daftar, beri link "
             "[Buka di OpenStreetMap](maps_url) PERSIS dari hasil ini, lalu TEMPEL map_block "
-            "PERSIS apa adanya di akhir jawaban."
+            "PERSIS apa adanya di akhir jawaban. " + alt_note
         ),
     }
 
@@ -410,8 +439,10 @@ MAPS_TOOL_SCHEMAS: list[dict] = [
     {"type": "function", "function": {
         "name": "maps_route",
         "description": (
-            "Menghitung rute di OpenStreetMap: jarak, durasi, dan langkah utama. Kosongkan origin "
-            "untuk memakai lokasi user (form izin lokasi tampil otomatis kalau belum presisi). "
+            "Menghitung rute di OpenStreetMap: jarak, durasi, langkah utama, DAN rute alternatif "
+            "(field 'alternatives'). Panggil SEKALI saja per tujuan; jangan mengulang dengan argumen "
+            "yang sama. Untuk pertanyaan 'ada rute lain?', jawab dari hasil sebelumnya. Kosongkan "
+            "origin untuk memakai lokasi user (form izin lokasi tampil otomatis kalau belum presisi). "
             "Bukan untuk traceroute jaringan."
         ),
         "parameters": {"type": "object", "properties": {
@@ -420,6 +451,11 @@ MAPS_TOOL_SCHEMAS: list[dict] = [
             "mode": {
                 "type": "string", "description": "driving | walking | bicycling",
                 "default": "driving",
+            },
+            "alternatives": {
+                "type": "boolean",
+                "description": "Sertakan rute alternatif (default true).",
+                "default": True,
             },
             "allow_approximate": {"type": "boolean", "default": False},
         }, "required": ["destination"]},

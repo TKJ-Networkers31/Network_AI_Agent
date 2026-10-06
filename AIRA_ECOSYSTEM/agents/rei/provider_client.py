@@ -151,6 +151,30 @@ def _post_json(url: str, payload: dict, timeout: float, headers: Optional[dict] 
     response.raise_for_status()
     return response.json()
 
+def _resolve_think(think: Optional[bool]) -> Optional[bool]:
+    """Eksplisit menang. Kalau None, AIRA_DISABLE_THINKING=1 di .env mematikan thinking global."""
+    if think is not None:
+        return think
+
+    flag = os.getenv("AIRA_DISABLE_THINKING", "").strip().lower()
+    return False if flag in ("1", "true", "yes", "on") else None
+
+
+def _thinking_extras(provider: str, think: Optional[bool]) -> dict:
+    """Parameter tambahan untuk mematikan reasoning di provider OpenAI-compatible.
+    Nama parameter berbeda per provider/model; kalau ditolak (400/422) pemanggil
+    mengulang tanpa parameter ini."""
+    if think is not False:
+        return {}
+
+    if provider == "nvidia":
+        return {"chat_template_kwargs": {"enable_thinking": False}}
+
+    if provider == "openrouter":
+        return {"reasoning": {"enabled": False}}
+
+    return {}
+
 
 # ============================================================ adapters
 
@@ -200,7 +224,9 @@ def _chat_ollama(model_id, messages, tools, temperature, max_tokens, think, time
         return {"error": f"Ollama membalas body bukan JSON valid: {exc}", "error_type": "other"}
 
 
-def _chat_openai_compatible(provider, model_id, messages, tools, temperature, max_tokens, timeout) -> dict:
+def _chat_openai_compatible(
+    provider, model_id, messages, tools, temperature, max_tokens, timeout, think=None,
+) -> dict:
     api_key = _resolve_api_key(provider)
 
     if not api_key:
@@ -224,8 +250,25 @@ def _chat_openai_compatible(provider, model_id, messages, tools, temperature, ma
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
 
+    extras = _thinking_extras(provider, think)
+    payload.update(extras)
+
     try:
-        data = _post_json(url, payload, timeout, headers=headers)
+        try:
+            data = _post_json(url, payload, timeout, headers=headers)
+        except requests.exceptions.HTTPError as exc:
+            status = getattr(exc.response, "status_code", None)
+
+            if extras and status in (400, 422):
+                logger.warning(
+                    "Provider %s menolak parameter thinking-off - mengulang tanpa parameter itu.", provider,
+                )
+                for key in extras:
+                    payload.pop(key, None)
+                data = _post_json(url, payload, timeout, headers=headers)
+            else:
+                raise
+
         choices = data.get("choices") or [{}]
         choice = choices[0] if choices else {}
         return {"message": _normalize_message(choice.get("message") or {}), "usage": data.get("usage")}
@@ -234,7 +277,6 @@ def _chat_openai_compatible(provider, model_id, messages, tools, temperature, ma
         return _request_error(provider, url, exc)
     except ValueError as exc:
         return {"error": f"{url} membalas body bukan JSON valid: {exc}", "error_type": "other"}
-
 
 # ============================================================ streaming (Sprint 2.5)
 
@@ -479,7 +521,7 @@ def _consume_sse(response, on_delta, cancel_event) -> dict:
 
 
 def _chat_openai_stream(
-    provider, model_id, messages, tools, temperature, max_tokens, timeout, on_delta, cancel_event,
+    provider, model_id, messages, tools, temperature, max_tokens, timeout, on_delta, cancel_event, think=None
 ) -> dict:
     api_key = _resolve_api_key(provider)
 
@@ -496,9 +538,9 @@ def _chat_openai_stream(
         headers["HTTP-Referer"] = "http://localhost"
         headers["X-Title"] = "AIRA Ecosystem"
 
-    payload: dict = {
+        payload: dict = {
         "model": model_id, "messages": messages, "stream": True,
-        "stream_options": {"include_usage": True},   # usage di chunk terakhir
+        "stream_options": {"include_usage": True},
     }
     if tools:
         payload["tools"] = tools
@@ -507,21 +549,42 @@ def _chat_openai_stream(
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
 
+    extras = _thinking_extras(provider, think)
+    payload.update(extras)
+
     try:
-        try:
-            response = _open_stream(url, payload, timeout, headers=headers)
-        except requests.exceptions.HTTPError as exc:
-            body = _http_error_body(exc)
-            if "stream_options" in body or "include_usage" in body:
-                logger.warning("Provider %s menolak stream_options - mengulang tanpa usage stream.", provider)
-                payload.pop("stream_options")
+        response = None
+
+        for _ in range(3):
+            try:
                 response = _open_stream(url, payload, timeout, headers=headers)
-            elif _stream_unsupported(exc, body):
-                return _stream_unsupported_result(provider, exc)
-            else:
+                break
+            except requests.exceptions.HTTPError as exc:
+                body = _http_error_body(exc)
+                status = getattr(exc.response, "status_code", None)
+
+                if "stream_options" in payload and ("stream_options" in body or "include_usage" in body):
+                    logger.warning("Provider %s menolak stream_options - mengulang tanpa usage stream.", provider)
+                    payload.pop("stream_options")
+                    continue
+
+                if extras and status in (400, 422) and not _stream_unsupported(exc, body):
+                    logger.warning("Provider %s menolak parameter thinking-off - mengulang tanpa itu.", provider)
+                    for key in extras:
+                        payload.pop(key, None)
+                    extras = {}
+                    continue
+
+                if _stream_unsupported(exc, body):
+                    return _stream_unsupported_result(provider, exc)
+
                 raise
 
+        if response is None:
+            return {"error": "Gagal membuka stream ke provider.", "error_type": "other"}
+
         with closing(response):
+
             content_type = (response.headers.get("Content-Type") or "").lower()
 
             # Provider mengabaikan stream=true dan membalas JSON biasa:
@@ -572,6 +635,11 @@ class ProviderClient:
         if provider in PROVIDER_ENV_KEYS:
             return _chat_openai_compatible(provider, model, messages, tools, temperature, max_tokens, timeout or 120)
 
+        if provider in PROVIDER_ENV_KEYS:      # di chat():
+            return _chat_openai_compatible(
+                provider, model, messages, tools, temperature, max_tokens, timeout or 120, think,
+            )
+
         return {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
 
     @staticmethod
@@ -596,6 +664,13 @@ class ProviderClient:
         Tidak pernah raise.
         """
         provider = (provider or "").strip().lower()
+        think = _resolve_think(think)   
+
+        if provider in PROVIDER_ENV_KEYS:      # di chat_stream():
+            return _chat_openai_stream(
+                provider, model, messages, tools, temperature, max_tokens,
+                timeout or 120, on_delta, cancel_event, think,
+            )
 
         try:
             if provider == "ollama":

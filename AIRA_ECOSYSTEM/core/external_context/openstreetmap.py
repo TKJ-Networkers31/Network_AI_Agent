@@ -80,6 +80,8 @@ MAX_NEARBY_RADIUS_METERS = 15000
 SEARCH_WIDE_RADIUS_METERS = 15000   # radius kedua untuk pencarian berdasarkan nama
 FAR_RESULT_METERS = 50000           # di atas ini dianggap "jauh" (hasil tanpa batas)
 ROUTE_MAX_POINTS = 150
+MAX_ALTERNATIVES = 2
+GEOCODE_CACHE_TTL_SECONDS = 3600
 CACHE_TTL_SECONDS = 300
 CACHE_MAX_ENTRIES = 64
 
@@ -359,6 +361,21 @@ def _step_instruction(step: dict) -> str:
         return f"Belok {side}{road}"
 
     return f"Lanjut{road}"
+
+def _via(route: dict) -> str:
+    """Ringkasan rute: dua nama jalan terpanjang pada rute itu."""
+    legs = route.get("legs") or []
+    steps = (legs[0].get("steps") if legs else None) or []
+    named = [s for s in steps if (s.get("name") or "").strip()]
+    biggest = sorted(named, key=lambda s: s.get("distance") or 0, reverse=True)[:2]
+
+    names: list[str] = []
+    for step in biggest:
+        name = step["name"].strip()
+        if name not in names:
+            names.append(name)
+
+    return ", ".join(names) or "rute tanpa nama"
 
 
 # ------------------------------------------------------------------ provider
@@ -841,6 +858,12 @@ class OpenStreetMapProvider(ExternalContextProvider):
         if match:
             return (float(match.group(1)), float(match.group(2)), text.strip()), None
 
+        cache_key = ("geocode", (text or "").strip().lower())
+        cached = self._cache_get(cache_key)
+
+        if cached is not None:
+            return cached, None
+
         data, error = self._call(f"{NOMINATIM}/search", {
             "q": text, "format": "jsonv2", "limit": 1, "accept-language": "id",
         })
@@ -863,12 +886,19 @@ class OpenStreetMapProvider(ExternalContextProvider):
                 provider=PROVIDER_NAME, capability=capability,
             )
 
-        return (lat, lon, str(data[0].get("display_name") or text)), None
+        resolved = (lat, lon, str(data[0].get("display_name") or text))
+        self._cache_set(cache_key, resolved, ttl=GEOCODE_CACHE_TTL_SECONDS)
 
-    def _route(self, origin: str, destination: str, mode: str = DEFAULT_ROUTE_MODE, **kwargs) -> QueryResult:
+        return resolved, None
+
+    def _route(
+        self, origin: str, destination: str, mode: str = DEFAULT_ROUTE_MODE,
+        alternatives: bool = False, **kwargs,
+    ) -> QueryResult:
         origin = (origin or "").strip()
         destination = (destination or "").strip()
         mode = (mode or DEFAULT_ROUTE_MODE).strip().lower()
+        want_alternatives = bool(alternatives)
 
         if not origin or not destination:
             return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, ExternalContextError(
@@ -901,19 +931,28 @@ class OpenStreetMapProvider(ExternalContextProvider):
         base, profile = OSRM_SERVERS[mode]
         url = f"{base}/route/v1/{profile}/{start[1]},{start[0]};{end[1]},{end[0]}"
 
-        data, error = self._call(url, {
-            "overview": "full", "geometries": "geojson", "steps": "true", "alternatives": "false",
-        })
+        cache_key = ("osrm", url, want_alternatives)
+        data = self._cache_get(cache_key)
 
-        if error is not None:
-            error.capability = CAPABILITY_ROUTE
-            return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, error)
+        if data is None:
+            data, error = self._call(url, {
+                "overview": "full", "geometries": "geojson", "steps": "true",
+                "alternatives": "true" if want_alternatives else "false",
+            })
+
+            if error is not None:
+                error.capability = CAPABILITY_ROUTE
+                return QueryResult.fail(PROVIDER_NAME, CAPABILITY_ROUTE, error)
+
+            if isinstance(data, dict) and data.get("code") == "Ok":
+                self._cache_set(cache_key, data)
 
         code = str(data.get("code") or "") if isinstance(data, dict) else ""
 
         if code != "Ok":
             mapped = ERROR_NO_RESULTS if code == "NoRoute" else (
-                ERROR_INVALID_REQUEST if code in ("InvalidQuery", "InvalidUrl", "InvalidValue") else ERROR_PROVIDER_UNAVAILABLE
+                ERROR_INVALID_REQUEST if code in ("InvalidQuery", "InvalidUrl", "InvalidValue")
+                else ERROR_PROVIDER_UNAVAILABLE
             )
             message = (
                 str(data.get("message") or f"OSRM: {code or 'respons tidak valid'}")
@@ -953,6 +992,15 @@ class OpenStreetMapProvider(ExternalContextProvider):
         ]
         geometry = _downsample(geometry, ROUTE_MAX_POINTS)
 
+        alternative_routes = [
+            {
+                "via": _via(route),
+                "distance_m": route.get("distance"),
+                "duration_s": route.get("duration"),
+            }
+            for route in routes[1:1 + MAX_ALTERNATIVES]
+        ] if want_alternatives else []
+
         directions_url = (
             "https://www.openstreetmap.org/directions"
             f"?engine={OSM_DIRECTIONS_ENGINE[mode]}&route={start[0]}%2C{start[1]}%3B{end[0]}%2C{end[1]}"
@@ -965,13 +1013,15 @@ class OpenStreetMapProvider(ExternalContextProvider):
             metadata={
                 "mode": mode, "engine": "osrm", "osm_url": directions_url,
                 "geometry": geometry,
+                "via": _via(best),
+                "alternatives": alternative_routes,
+                "alternatives_requested": want_alternatives,
                 "origin_resolved": {"latitude": start[0], "longitude": start[1], "label": start[2]},
                 "destination_resolved": {"latitude": end[0], "longitude": end[1], "label": end[2]},
             },
         )
 
         return QueryResult.ok(PROVIDER_NAME, CAPABILITY_ROUTE, route=normalized)
-
     # ------------------------------------------------------------ context
 
     def _context(self, latitude: float, longitude: float, radius: int = 500, **kwargs) -> QueryResult:
