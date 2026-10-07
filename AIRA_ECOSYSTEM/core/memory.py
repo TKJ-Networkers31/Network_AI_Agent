@@ -14,8 +14,18 @@ dikembalikan di sini, dipasang balik ke ConversationMemory, supaya
 pemakaian token PER SESI bisa dipantau lagi seperti dulu - penting karena
 provider gratis (OpenRouter Nemotron) punya rate-limit dan model lokal
 (Ollama) performanya dipantau di hardware terbatas.
+
+FIX (Memory tidak terbaca LLM):
+build_context_snippet() sekarang
+  1. memuat sampai 30 fakta (sebelumnya 10, fakta lama seperti 'nama'
+     mudah tergeser fakta auto-extract),
+  2. memprioritaskan fakta identitas (nama/panggilan/dst) di urutan atas,
+  3. menyertakan profil user dari Global Settings (display_name/nickname),
+  4. menjelaskan EKSPLISIT bahwa isinya adalah data tentang USER (bukan
+     AIRA) dan wajib dipakai menjawab "siapa namaku?" dan sejenisnya.
 """
 
+import re
 import sqlite3
 import time
 import logging
@@ -316,19 +326,70 @@ def get_recent_events(limit: int = 10, device: str | None = None, category: str 
 # CONTEXT INJECTION (dipakai core/persona.py::build_system_prompt)
 # ============================================================
 
-def build_context_snippet(max_facts: int = 10, max_events: int = 5) -> str:
-    facts = get_all_facts()[:max_facts]
-    events = get_recent_events(limit=max_events)
+# Fakta yang menyangkut identitas user dinaikkan ke urutan atas supaya tidak
+# tergeser fakta lain dan tidak terpotong batas max_facts.
+_PRIORITY_KEY_RE = re.compile(
+    r"nama|name|panggil|nick|user|identitas|usia|umur", re.IGNORECASE
+)
 
-    if not facts and not events:
+MAX_FACT_VALUE_CHARS = 300
+
+
+def _profile_lines() -> list[str]:
+    """Profil user dari Global Settings (display_name/nickname). Tidak pernah raise."""
+    try:
+        from core.global_settings import read_all
+        settings = (read_all() or {}).get("settings") or {}
+    except Exception:
+        logger.debug("MEMORY | profil Global Settings tidak tersedia (diabaikan).", exc_info=True)
+        return []
+
+    lines = []
+
+    for key, label in (("display_name", "nama tampilan"), ("nickname", "nama panggilan")):
+        value = str(settings.get(key) or "").strip()
+        if value:
+            lines.append(f"- {label}: {value}")
+
+    return lines
+
+
+def build_context_snippet(max_facts: int = 30, max_events: int = 5) -> str:
+    all_facts = get_all_facts()
+
+    priority = [f for f in all_facts if _PRIORITY_KEY_RE.search(str(f["key"]))]
+    priority_keys = {f["key"] for f in priority}
+    others = [f for f in all_facts if f["key"] not in priority_keys]
+
+    facts = (priority + others)[:max_facts]
+    events = get_recent_events(limit=max_events)
+    profile = _profile_lines()
+
+    if not facts and not events and not profile:
         return ""
 
-    lines = ["=== LONG-TERM MEMORY ==="]
+    lines = ["=== LONG-TERM MEMORY (DATA TENTANG USER) ==="]
+    lines.append(
+        "Data di bawah ini adalah informasi tentang USER yang sedang kamu ajak bicara "
+        "(BUKAN tentang AIRA). Pertanyaan seperti 'siapa namaku?', 'kamu ingat aku?', "
+        "atau preferensi user WAJIB dijawab dari data ini - jangan bilang tidak tahu dan "
+        "jangan menjawab dengan nama AIRA. Kalau datanya memang tidak ada di sini, "
+        "panggil tool 'recall' dulu sebelum bilang tidak tahu."
+    )
+
+    if profile:
+        lines.append("")
+        lines.append("Profil user:")
+        lines.extend(profile)
 
     if facts:
-        lines.append("Fakta yang sudah diketahui dari sesi sebelumnya:")
+        lines.append("")
+        lines.append("Fakta tersimpan tentang user/project-nya (format: kunci: nilai):")
         for fact in facts:
-            lines.append(f"- {fact['key']}: {fact['value']}")
+            value = str(fact["value"])
+            if len(value) > MAX_FACT_VALUE_CHARS:
+                value = value[: MAX_FACT_VALUE_CHARS - 1].rstrip() + "…"
+            lines.append(f"- {fact['key']}: {value}")
 
     if events:
         lines.append("")
