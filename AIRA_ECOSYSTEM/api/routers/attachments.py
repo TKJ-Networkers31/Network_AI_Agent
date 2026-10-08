@@ -2,24 +2,27 @@
 api/routers/attachments.py — REST endpoint tipis untuk Universal Attachment
 (Sprint 2.7 / Wave 1 / Worker 2).
 
-Murni "pintu HTTP" di atas core/attachments/engine.py - tidak ada logic
-lifecycle/validasi di sini, mengikuti pola api/routers/selection.py dan
-api/routers/files.py. Upload memakai multipart/form-data (UploadFile);
-endpoint lain menerima JSON.
+Murni "pintu HTTP" di atas core/attachments/engine.py. Upload memakai
+multipart/form-data dan DISTREAM ke file sementara (tidak dibaca penuh ke RAM),
+lalu diserahkan ke AttachmentEngine.create_from_file().
 
-Content/bytes TIDAK PERNAH dikembalikan lewat endpoint metadata - hanya
-lewat GET /{id}/reference, dan itu pun hanya mengembalikan REFERENSI
-(path/URL), bukan isi file (sesuai batas Context: metadata/reference,
-bukan binary).
+Batas ukuran (kalau ada) ditegakkan SATU kali di core/attachments/validator.py
+lewat AIRA_MAX_ATTACHMENT_BYTES (0 = tanpa batas level aplikasi).
+Content/bytes TIDAK PERNAH dikembalikan lewat endpoint metadata.
 """
 
+import os
+import shutil
+import tempfile
 from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from core.attachments import AttachmentSource, get_attachment_engine
-from core.attachments.constants import MAX_ATTACHMENT_BYTES
+
+COPY_CHUNK = 1024 * 1024
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
@@ -50,27 +53,40 @@ def _raise_for_errors(errors: list[str]) -> None:
     raise HTTPException(status_code=400, detail="; ".join(errors) or "Permintaan tidak valid.")
 
 
+def _spool_to_disk(upload: UploadFile) -> str:
+    """Salin upload ke file sementara per chunk. Return path-nya."""
+    with tempfile.NamedTemporaryFile(delete=False, prefix="aira_upload_") as tmp:
+        shutil.copyfileobj(upload.file, tmp, COPY_CHUNK)
+        return tmp.name
+
+
 @router.post("")
 async def upload_attachment(
     session_id: str = Form(...),
     message_id: Optional[str] = Form(None),
     file: UploadFile = File(...),
 ):
-    content = await file.read()
+    name = os.path.basename((file.filename or "untitled").replace("\\", "/")) or "untitled"
 
-    if len(content) > MAX_ATTACHMENT_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File melebihi batas {MAX_ATTACHMENT_BYTES} byte.",
+    try:
+        tmp_path = await run_in_threadpool(_spool_to_disk, file)
+    except OSError as exc:
+        raise HTTPException(status_code=507, detail=f"Gagal menyimpan upload sementara: {exc}")
+
+    try:
+        result = await run_in_threadpool(
+            get_attachment_engine().create_from_file,
+            temp_path=tmp_path,
+            name=name,
+            session_id=session_id,
+            mime_type=file.content_type,
+            message_id=message_id,
         )
-
-    result = get_attachment_engine().create_from_upload(
-        content=content,
-        name=file.filename or "untitled",
-        session_id=session_id,
-        mime_type=file.content_type,
-        message_id=message_id,
-    )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
     if not result.success:
         _raise_for_errors(result.errors)
@@ -117,6 +133,12 @@ def list_attachments(
     return {"attachments": [a.to_dict() for a in items]}
 
 
+@router.get("/meta/sources")
+def list_sources():
+    """Daftar source yang valid (dipakai frontend untuk validasi form)."""
+    return {"sources": sorted(item.value for item in AttachmentSource)}
+
+
 @router.get("/{attachment_id}")
 def get_attachment(attachment_id: str, session_id: Optional[str] = Query(default=None)):
     attachment = get_attachment_engine().get(attachment_id, session_id=session_id)
@@ -129,8 +151,7 @@ def get_attachment(attachment_id: str, session_id: Optional[str] = Query(default
 
 @router.get("/{attachment_id}/reference")
 def get_attachment_reference(attachment_id: str, session_id: Optional[str] = Query(default=None)):
-    """Referensi eksplisit (path/URL) - BUKAN isi file. Dipanggil hanya
-    ketika sesuatu benar-benar butuh membaca/menyajikan kontennya."""
+    """Referensi eksplisit (path/URL) - BUKAN isi file."""
     reference = get_attachment_engine().get_content_reference(attachment_id, session_id=session_id)
 
     if reference is None:
@@ -160,9 +181,3 @@ def delete_attachment(attachment_id: str, session_id: Optional[str] = Query(defa
         raise HTTPException(status_code=404, detail="; ".join(result.errors))
 
     return result.to_dict()
-
-
-@router.get("/meta/sources")
-def list_sources():
-    """Daftar source yang valid (dipakai frontend untuk validasi form)."""
-    return {"sources": sorted(item.value for item in AttachmentSource)}

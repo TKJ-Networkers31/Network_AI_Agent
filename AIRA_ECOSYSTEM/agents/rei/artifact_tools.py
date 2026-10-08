@@ -1,6 +1,5 @@
 """agents/rei/artifact_tools.py — tool LLM untuk ArtifactEngine & Attachment."""
 import json
-from pathlib import Path
 from typing import Any, Optional
 
 from core.artifacts import (
@@ -8,8 +7,13 @@ from core.artifacts import (
 )
 from core.artifacts.models import DOCUMENT_TYPES, SPREADSHEET_TYPES, PRESENTATION_TYPES
 from core.attachments import get_attachment_engine
+from core.file_processing.service import process_attachment
+from core.file_processing.context import processing_context_text
 
-_TEXT_EXT = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".log"}
+# Ukuran SATU halaman context (bukan batas ukuran file; file selalu diproses penuh).
+DEFAULT_READ_CHARS = 20000
+MIN_READ_CHARS = 1000
+MAX_READ_CHARS = 200000
 
 
 def create_artifact(artifact_type: str, spec: Any, name: Optional[str] = None,
@@ -52,54 +56,20 @@ def create_artifact(artifact_type: str, spec: Any, name: Optional[str] = None,
     }
 
 
-def _extract(path: Path, max_chars: int):
-    ext = path.suffix.lower()
-    try:
-        if ext in _TEXT_EXT:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        elif ext == ".pdf":
-            from pypdf import PdfReader
-            text = "\n".join((p.extract_text() or "") for p in PdfReader(str(path)).pages)
-        elif ext == ".docx":
-            from docx import Document
-            d = Document(str(path))
-            text = "\n".join(p.text for p in d.paragraphs)
-            for t in d.tables:
-                for row in t.rows:
-                    text += "\n" + " | ".join(c.text for c in row.cells)
-        elif ext == ".xlsx":
-            from openpyxl import load_workbook
-            wb = load_workbook(str(path), read_only=True, data_only=True)
-            lines = []
-            for ws in wb.worksheets:
-                lines.append(f"## {ws.title}")
-                for row in ws.iter_rows(values_only=True):
-                    lines.append(" | ".join("" if c is None else str(c) for c in row))
-                    if sum(len(x) for x in lines) > max_chars:
-                        break
-            text = "\n".join(lines)
-        elif ext == ".pptx":
-            from pptx import Presentation
-            text = "\n".join(
-                f"[Slide {i}] " + " ".join(sh.text_frame.text for sh in s.shapes if sh.has_text_frame)
-                for i, s in enumerate(Presentation(str(path)).slides, 1)
-            )
-        else:
-            return None, False, f"Format '{ext}' belum bisa diekstrak."
-    except ImportError as exc:
-        return None, False, f"Library '{exc.name}' belum terpasang (pip install)."
-    except Exception as exc:
-        return None, False, f"Gagal membaca file: {exc}"
-    return text[:max_chars], len(text) > max_chars, None
-
-
 def list_attachments(session_id: Optional[str] = None, **_ignored) -> dict:
     items = get_attachment_engine().list(session_id=session_id) if session_id else []
-    return {"success": True, "tool": "list_attachments", "count": len(items),
-            "attachments": [{"id": a.id, "name": a.name, "mime_type": a.mime_type, "size": a.size} for a in items]}
+    out = []
+    for a in items:
+        proc = (a.metadata or {}).get("processing")
+        out.append({
+            "id": a.id, "name": a.name, "mime_type": a.mime_type, "size": a.size,
+            "processing_status": proc.get("status") if isinstance(proc, dict) else None,
+        })
+    return {"success": True, "tool": "list_attachments", "count": len(out), "attachments": out}
 
 
-def read_attachment(attachment: str, max_chars: Any = 6000, session_id: Optional[str] = None, **_ignored) -> dict:
+def read_attachment(attachment: str, max_chars: Any = DEFAULT_READ_CHARS, offset: Any = 0,
+                    reprocess: Any = False, session_id: Optional[str] = None, **_ignored) -> dict:
     engine = get_attachment_engine()
     items = engine.list(session_id=session_id) if session_id else []
     key = (attachment or "").strip().lower()
@@ -109,26 +79,49 @@ def read_attachment(attachment: str, max_chars: Any = 6000, session_id: Optional
         return {"success": False, "tool": "read_attachment",
                 "error": f"Attachment '{attachment}' tidak ditemukan. Yang ada: {names}."}
 
-    if match.mime_type.startswith("image/"):
-        img = (match.metadata or {}).get("image") or {}
-        return {"success": True, "tool": "read_attachment", "name": match.name,
-                "note": "Ini gambar; vision provider belum terpasang, isi gambar tidak bisa dibaca. "
-                        f"Dimensi: {img.get('width')}x{img.get('height')}."}
+    try:
+        limit = max(MIN_READ_CHARS, min(int(max_chars), MAX_READ_CHARS))
+    except (TypeError, ValueError):
+        limit = DEFAULT_READ_CHARS
+    try:
+        start = max(0, int(offset))
+    except (TypeError, ValueError):
+        start = 0
+    if isinstance(reprocess, str):
+        reprocess = reprocess.strip().lower() in ("true", "1", "yes", "ya")
 
-    ref = engine.get_content_reference(match.id, session_id=session_id)
-    if not ref or ref.get("kind") != "workspace_path":
-        return {"success": False, "tool": "read_attachment", "error": "File tidak tersedia untuk dibaca."}
+    cached = (match.metadata or {}).get("processing")
+    force = bool(reprocess) or (isinstance(cached, dict) and cached.get("status") == "failed")
 
     try:
-        limit = max(500, min(int(max_chars), 20000))
-    except (TypeError, ValueError):
-        limit = 6000
+        proc = process_attachment(engine, match.id, session_id=session_id, force=force)
+    except Exception as exc:
+        return {"success": False, "tool": "read_attachment",
+                "error": f"Pemrosesan gagal: {type(exc).__name__}: {exc}"}
 
-    text, truncated, error = _extract(Path(ref["absolute_path"]), limit)
-    if error:
-        return {"success": False, "tool": "read_attachment", "error": error}
-    return {"success": True, "tool": "read_attachment", "name": match.name,
-            "content": text, "truncated": truncated}
+    if proc is None:
+        return {"success": False, "tool": "read_attachment",
+                "error": "File tidak tersedia untuk diproses (referensi eksternal / belum tersimpan)."}
+
+    text = processing_context_text(proc)
+    chunk = text[start:start + limit]
+    end = start + len(chunk)
+
+    return {
+        "success": proc["status"] != "failed",
+        "tool": "read_attachment",
+        "name": match.name,
+        "status": proc["status"],  # completed | partial | failed
+        "files": [{"path": f["path"], "type": f["type"], "status": f["status"]} for f in proc["files"][:50]],
+        "files_total": len(proc["files"]),
+        "errors": proc["errors"][:10],
+        "errors_total": len(proc["errors"]),
+        "content": chunk,
+        "offset": start,
+        "total_chars": len(text),
+        "truncated": end < len(text),
+        "next_offset": end if end < len(text) else None,
+    }
 
 
 ARTIFACT_TOOLS = {"create_artifact": create_artifact, "list_attachments": list_attachments,
@@ -154,13 +147,22 @@ ARTIFACT_TOOL_SCHEMAS = [
             "required": ["artifact_type", "spec"]}}},
     {"type": "function", "function": {
         "name": "list_attachments",
-        "description": "Melihat file yang di-upload user ke chat ini.",
+        "description": "Melihat file yang di-upload user ke chat ini (beserta status pemrosesannya).",
         "parameters": {"type": "object", "properties": {}, "required": []}}},
     {"type": "function", "function": {
         "name": "read_attachment",
-        "description": "Membaca ISI file yang di-upload user (txt/md/csv/json/pdf/docx/xlsx/pptx). WAJIB dipakai kalau user bertanya soal file yang dilampirkan - jangan mengarang isinya.",
+        "description": (
+            "Membaca/memproses ISI file yang di-upload user: gambar (OCR + analisis visual bila tersedia), "
+            "PDF (teks & hasil scan), docx/xlsx/pptx, teks/config (.rsc/.conf/.log/dst), dan archive "
+            "zip/tar/tgz/gz/bz2/xz (diekstrak aman, rekursif). WAJIB dipakai kalau user bertanya soal file "
+            "yang dilampirkan - jangan mengarang isinya. Hasil punya status completed/partial/failed + errors "
+            "per file: sampaikan jujur bagian yang berhasil dan yang gagal. Seluruh file diproses; hasil "
+            "dibagi per halaman context. Kalau 'truncated' true, panggil lagi dengan offset=next_offset "
+            "sampai habis."),
         "parameters": {"type": "object", "properties": {
             "attachment": {"type": "string", "description": "id atau nama file."},
-            "max_chars": {"type": "integer", "default": 6000}},
+            "max_chars": {"type": "integer", "description": "Ukuran satu halaman context.", "default": 20000},
+            "offset": {"type": "integer", "description": "Posisi mulai (pakai next_offset).", "default": 0},
+            "reprocess": {"type": "boolean", "description": "Paksa proses ulang.", "default": False}},
             "required": ["attachment"]}}},
 ]

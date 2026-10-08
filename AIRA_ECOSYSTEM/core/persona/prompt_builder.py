@@ -6,21 +6,9 @@ Pembagian tanggung jawab (Sprint 2 / Worker 2):
   PERSONA (presentasi)  -> core/persona/context.py::PersonaContext, dibangun
                            dari identity.yaml / behavior.yaml / tone.yaml /
                            styles/*.yaml + profile/behavior di database.
-                           Isi: identitas, gaya bicara, nuansa, gaya mengajar,
-                           gaya jawab, ekspresi emosi, format jawaban.
 
   ATURAN SISTEM (bukan persona) -> tetap di file ini:
-      CORE_RULES          - aturan inti: satu identitas publik, hasil tool =
-                            fakta, kemampuan tool, kapan memanggil DIO.
-      ILLUSTRATION_RULES  - kontrak SVG/renderer + tool web_image_search.
-      LOCATION_RULES      - kapan memakai/meminta lokasi.
-      MAPS_RULES          - kapan memakai tool peta & cara menampilkannya.
-  Semuanya menyangkut kemampuan/tool sehingga BUKAN wewenang persona.
-
-FIX: CORE_RULES kini punya aturan memory (jawab 'siapa namaku' dari blok
-LONG-TERM MEMORY). MAPS_RULES kini melarang bertanya asal/nama jalan lewat
-teks - langsung panggil tool agar DIO (form izin lokasi / form tujuan)
-aktif otomatis, dan rute alternatif memakai blocked_near_origin.
+      CORE_RULES, ILLUSTRATION_RULES, LOCATION_RULES, MAPS_RULES.
 
 Urutan section:
     identitas -> CORE_RULES -> gaya (bicara, nuansa, mengajar, jawab, emosi)
@@ -43,7 +31,7 @@ CORE_RULES = """
 - Tool perangkat jaringan (get_interfaces, get_resources, dll) butuh device_name. Kalau user tidak menyebut nama perangkat, isi device_name dengan string kosong - sistem akan menanyakannya ke user (atau memilih otomatis kalau hanya ada satu). Jangan mengarang nama perangkat.
 - Kamu BISA membuka koneksi SSH ke perangkat lewat tool connect_device (dan menutupnya dengan disconnect_device / melihat list_connections). Jangan pernah bilang tidak bisa membuka koneksi ke router.
 - Kamu BISA membuat file docx/pdf/xlsx/pptx/csv lewat create_artifact, lalu beri user link unduhnya. Jangan bilang tidak bisa membuat dokumen.
-- Kalau user melampirkan file, baca isinya dengan read_attachment sebelum menjawab. Jangan mengarang isi file.
+- Kamu dapat menggunakan read_attachment untuk membaca dan memproses attachment yang didukung sistem, termasuk image (OCR/vision), PDF, document, text/config, dan archive. Kalau user melampirkan file, panggil read_attachment sebelum menjawab soal isinya. Selalu gunakan hasil tool nyata. Jangan mengarang isi attachment. Jika status processing partial atau failed, sampaikan bagian yang berhasil dan bagian yang gagal secara jujur. Jangan mengklaim berhasil membaca atau menganalisis data yang tidak benar-benar tersedia dari tool. Jika hasil 'truncated', lanjutkan dengan offset=next_offset sampai seluruh context terbaca.
 - Kamu bisa membaca riwayat chat ini lewat conversation_history_recent/search/summary.
 """
 
@@ -81,6 +69,7 @@ MAPS_RULES = """
 - Kalau tidak ada rute yang menghindari jalan itu, katakan jujur bahwa OSM tidak tahu soal perbaikan jalan, lalu tawarkan via_point (jalan pengganti dari user).
 """
 
+
 def build_prompt(
     profile: Optional[dict] = None,
     behavior: Optional[dict] = None,
@@ -90,8 +79,6 @@ def build_prompt(
 ) -> str:
     """
     Dipanggil HANYA oleh core/persona/engine.py::PersonaEngine.build()/preview().
-    Signature lama (profile, behavior, persona_text, extra_context) tetap
-    berlaku; persona_context opsional kalau pemanggil sudah punya konteksnya.
     """
     ctx = persona_context or build_persona_context(profile, behavior, persona_text)
 

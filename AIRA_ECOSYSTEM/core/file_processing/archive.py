@@ -1,19 +1,22 @@
 """
-core/file_processing/archive.py - ekstraksi archive AMAN (ZIP/TAR/TGZ/GZ).
+core/file_processing/archive.py - ekstraksi archive AMAN
+(ZIP / TAR / TGZ / GZ / BZ2 / XZ).
 
 Tidak ada batas ukuran file/upload. Yang ada hanya proteksi resource:
-  - Zip Slip / path traversal: setiap nama entry divalidasi, hasil resolve
-    wajib di dalam direktori ekstraksi; tidak pernah memakai extractall().
+  - Zip Slip / path traversal / path absolut: setiap nama entry divalidasi,
+    hasil resolve wajib di dalam direktori ekstraksi; tidak pernah extractall().
   - symlink/hardlink/device/fifo TIDAK diekstrak (security_blocked).
   - ukuran diukur dari byte NYATA yang ditulis (header archive tidak dipercaya).
-  - decompression bomb: rasio ekspansi (baru berlaku setelah EXPANSION_FLOOR
-    byte supaya archive wajar tetap lolos) + cek sisa disk di tiap chunk.
-  - jumlah entry dibatasi; kedalaman archive bersarang dibatasi di processor.
-Semua konstanta bisa diubah lewat ArchiveLimits / env, bukan batas ukuran file.
+  - decompression bomb: rasio ekspansi (berlaku setelah expansion_floor byte)
+    + cek sisa disk di tiap chunk.
+  - jumlah entry dan kedalaman archive bersarang dibatasi.
+File hasil ekstraksi diperlakukan sebagai DATA; tidak pernah dieksekusi.
 """
 from __future__ import annotations
 
+import bz2
 import gzip
+import lzma
 import os
 import re
 import shutil
@@ -27,7 +30,7 @@ from core.file_processing.models import E_CORRUPTED, E_EXTRACTION, E_RESOURCE, E
 CHUNK = 1024 * 1024
 ZIP_EXT = (".zip",)
 TAR_EXT = (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
-GZ_EXT = (".gz",)
+SINGLE_OPENERS = {".gz": gzip.open, ".bz2": bz2.open, ".xz": lzma.open}
 
 
 @dataclass
@@ -58,8 +61,8 @@ def archive_kind(name: str):
         return "zip"
     if n.endswith(TAR_EXT):
         return "tar"
-    if n.endswith(GZ_EXT):
-        return "gz"
+    if n.endswith(tuple(SINGLE_OPENERS)):
+        return "single"
     return None
 
 
@@ -83,7 +86,7 @@ class _Budget:
     def __init__(self, dest: Path, compressed: int, limits: ArchiveLimits):
         self.dest, self.compressed, self.limits, self.total = dest, max(compressed, 1), limits, 0
 
-    def copy(self, src, target: Path) -> int:
+    def copy(self, src, target: Path):
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
             n = 1
@@ -117,16 +120,17 @@ def extract_archive(path: Path, dest: Path, limits: ArchiveLimits = None) -> Arc
     try:
         if kind == "zip":
             _zip(path, dest, budget, report, limits)
-        elif kind == "tar" or (kind == "gz" and tarfile.is_tarfile(path)):
+        elif kind == "tar" or (kind == "single" and tarfile.is_tarfile(path)):
             _tar(path, dest, budget, report, limits)
-        elif kind == "gz":
-            _gz(path, dest, budget, report)
+        elif kind == "single":
+            _single(path, dest, budget, report)
         else:
             raise _Stop(E_EXTRACTION, "Format archive tidak dikenali.")
     except _Stop as stop:
         report.errors.append((stop.code, stop.message, path.name))
         report.fatal = True
-    except (zipfile.BadZipFile, tarfile.TarError, EOFError, gzip.BadGzipFile, OSError, ValueError) as exc:
+    except (zipfile.BadZipFile, tarfile.TarError, EOFError, gzip.BadGzipFile,
+            lzma.LZMAError, OSError, ValueError) as exc:
         report.errors.append((E_CORRUPTED, f"Archive rusak atau tidak bisa dibaca: {type(exc).__name__}: {exc}", path.name))
         report.fatal = True
     return report
@@ -189,9 +193,11 @@ def _tar(path, dest, budget, report, limits):
                 report.errors.append((E_SECURITY, f"Entry bukan file biasa (link/device) tidak diekstrak: {m.name!r}", m.name))
 
 
-def _gz(path, dest, budget, report):
-    inner = path.name[:-3] or "data"
+def _single(path, dest, budget, report):
+    """File tunggal terkompresi: .gz / .bz2 / .xz."""
+    suffix = path.suffix.lower()
+    inner = path.name[: -len(suffix)] or "data"
     target = safe_target(dest, inner)
-    with gzip.open(path, "rb") as src:
+    with SINGLE_OPENERS[suffix](path, "rb") as src:
         size, real = budget.copy(src, target)
     _add(report, str(real.relative_to(dest.resolve())), real, size)

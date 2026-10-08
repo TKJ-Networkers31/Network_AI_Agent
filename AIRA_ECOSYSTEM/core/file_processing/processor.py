@@ -70,8 +70,10 @@ class FileProcessor:
 
     @staticmethod
     def _looks_text(path: Path) -> bool:
+        """Cek hanya 8 KB pertama - tidak membaca seluruh file ke RAM."""
         try:
-            head = path.read_bytes()[:8192] if path.stat().st_size else b""
+            with open(path, "rb") as fh:
+                head = fh.read(8192)
             head.decode("utf-8")
             return b"\x00" not in head
         except (UnicodeDecodeError, OSError):

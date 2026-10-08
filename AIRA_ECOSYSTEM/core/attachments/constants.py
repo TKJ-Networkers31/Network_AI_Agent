@@ -2,31 +2,24 @@
 core/attachments/constants.py - Universal Attachment vocabulary
 (Sprint 2.7 / Wave 1 / Worker 2).
 
-Single source of truth for what an attachment is allowed to be: size
-limits, and the MIME-type / extension allowlist used by
-core/attachments/validator.py. Kept separate from models.py so callers
-that only need the vocabulary (not the dataclasses) can import lightly -
-the same split already used by core/capability (constants.py vs models.py)
-and core/dio (constants.py vs models.py).
+Hanya format yang BENAR-BENAR bisa diproses core/file_processing yang boleh
+masuk whitelist ini.
 """
 
 from __future__ import annotations
 
-# Default workspace subfolder attachments are materialized into (mirrors
-# core/artifacts/engine.py::DEFAULT_WORKSPACE_SUBDIR - a sibling folder,
-# not a new storage root).
+import os
+
 DEFAULT_WORKSPACE_SUBDIR = "Attachments"
 
-# Hard ceiling on any single attachment. Generous enough for documents/
-# images, small enough that one upload can't exhaust disk in the sandbox.
-MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25 MiB
+# 0 = tanpa batas level aplikasi. >0 = batas opsional dari administrator.
+# (Batas disk/RAM/reverse proxy di luar aplikasi tetap berlaku.)
+MAX_ATTACHMENT_BYTES = int(os.getenv("AIRA_MAX_ATTACHMENT_BYTES", "0") or 0)
 
-# name/path safety
 MAX_NAME_CHARS = 255
 
-# mime_type (lowercased) -> set of accepted extensions (lowercased, with
-# leading dot). Used both to validate an explicit mime_type and to infer
-# one from an extension when the caller doesn't supply mime_type.
+# Urutan penting: EXTENSION_TO_MIME memakai entri TERAKHIR per ekstensi, jadi
+# alias browser ditaruh SEBELUM tipe kanonik.
 ALLOWED_MIME_EXTENSIONS: dict[str, frozenset[str]] = {
     # images
     "image/png": frozenset({".png"}),
@@ -34,22 +27,34 @@ ALLOWED_MIME_EXTENSIONS: dict[str, frozenset[str]] = {
     "image/gif": frozenset({".gif"}),
     "image/webp": frozenset({".webp"}),
     "image/svg+xml": frozenset({".svg"}),
+    "image/bmp": frozenset({".bmp"}),
+    "image/tiff": frozenset({".tif", ".tiff"}),
     # documents
     "application/pdf": frozenset({".pdf"}),
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": frozenset({".docx"}),
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": frozenset({".xlsx"}),
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": frozenset({".pptx"}),
+    # text / config
     "text/markdown": frozenset({".md"}),
-    "text/plain": frozenset({".txt", ".log"}),
+    "text/tab-separated-values": frozenset({".tsv"}),
+    "application/xml": frozenset({".xml"}),
+    "text/html": frozenset({".html"}),
+    "application/vnd.ms-excel": frozenset({".csv"}),  # Windows mengirim ini untuk .csv
     "text/csv": frozenset({".csv"}),
+    "text/plain": frozenset({".txt", ".log", ".rsc", ".conf", ".cfg", ".ini"}),
     "application/json": frozenset({".json"}),
     "application/yaml": frozenset({".yaml", ".yml"}),
     "text/yaml": frozenset({".yaml", ".yml"}),
+    # archive (alias browser dulu, kanonik terakhir)
+    "application/x-zip-compressed": frozenset({".zip"}),
+    "application/zip": frozenset({".zip"}),
+    "application/x-gzip": frozenset({".gz", ".tgz"}),
+    "application/gzip": frozenset({".gz", ".tgz"}),
+    "application/x-tar": frozenset({".tar"}),
+    "application/x-bzip2": frozenset({".bz2", ".tbz2"}),
+    "application/x-xz": frozenset({".xz", ".txz"}),
 }
 
-# Reverse index: extension -> mime_type, built once at import time. Ties
-# (an extension shared by two mime types, e.g. none currently) keep the
-# LAST entry above - none exist today, kept deterministic regardless.
 EXTENSION_TO_MIME: dict[str, str] = {
     ext: mime
     for mime, extensions in ALLOWED_MIME_EXTENSIONS.items()
@@ -59,8 +64,8 @@ EXTENSION_TO_MIME: dict[str, str] = {
 ALLOWED_EXTENSIONS: frozenset[str] = frozenset(EXTENSION_TO_MIME.keys())
 ALLOWED_MIME_TYPES: frozenset[str] = frozenset(ALLOWED_MIME_EXTENSIONS.keys())
 
-# Extensions never accepted regardless of declared mime_type - executable/
-# script content has no legitimate reason to arrive as a chat attachment.
+# Tidak pernah diterima apa pun mime-nya. Isi archive yang berekstensi ini
+# diperlakukan sebagai DATA oleh file_processing (tidak pernah dieksekusi).
 BLOCKED_EXTENSIONS: frozenset[str] = frozenset({
     ".exe", ".bat", ".cmd", ".com", ".sh", ".ps1", ".msi", ".dll",
     ".so", ".dylib", ".apk", ".app", ".scr", ".vbs", ".js", ".jar",

@@ -4,38 +4,16 @@ core/attachments/engine.py - AttachmentEngine (Sprint 2.7 / Wave 1 / W2).
     upload / reference
         -> validate (core/attachments/validator.py)
         -> persist bytes (user_upload) OR reference existing storage
-           (workspace / generated / external) via the EXISTING Workspace
-           (core.filesystem.WorkspaceManager - NO second storage system)
         -> register metadata (core/attachments/store.py)
         -> AttachmentResult (JSON-safe)
 
-Mirrors core/artifacts/engine.py's shape deliberately (same Sprint, same
-"structured request -> deterministic engine -> stored metadata + existing
-storage" contract), but an Attachment differs from an Artifact in one
-essential way: an Artifact is ALWAYS AIRA-generated; an Attachment may
-point at a file AIRA never touched (a pre-existing workspace file, or an
-external URL it never downloads). That's why create_from_workspace() and
-create_from_external() never write bytes - they only register a reference.
-
-Storage: path resolution and sandboxing are delegated to
-core.filesystem.WorkspaceManager.resolve() (the SAME sandbox FSE/HAL
-already enforce), injected lazily so importing this module never touches
-disk (same Dependency Injection pattern as core/artifacts/engine.py and
-core/selection/builder.py). Bytes for user uploads are written directly at
-the resolved path (core.filesystem.FileOperations.write_text() is
-text-only; attachments may be binary) - identical reasoning to
-core/artifacts/engine.py's own doc comment.
-
-Context boundary: nothing in this module ever returns raw bytes to a
-caller that only asked for metadata. Binary content is only touched by
-get_content_reference() (an explicit "give me the reference to read/serve
-this" call) and even then it returns a path/URL, never the bytes
-themselves - reading the bytes is left to the HTTP layer (StreamingResponse)
-or whatever explicitly needs them.
+Tambahan: create_from_file() - upload dari file sementara di disk, disalin per
+chunk (tidak membaca seluruh file ke RAM).
 """
 from __future__ import annotations
 
 import logging
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -53,17 +31,14 @@ from core.attachments.validator import validate_for_create
 
 logger = logging.getLogger("aira.attachments.engine")
 
+COPY_CHUNK = 1024 * 1024
+
 
 class AttachmentAccessError(Exception):
-    """Raised (caught internally, never propagated past AttachmentResult
-    call sites that use the *_or_result helpers) when a caller's
-    session_id does not own the attachment it's trying to touch."""
+    """Dipakai internal untuk pelanggaran kepemilikan sesi."""
 
 
 def _default_resolve_path(relative_path: str) -> Path:
-    """Lazy import - default only. Resolves through the REAL AIRA Workspace
-    sandbox; never imported at module load time (see core/artifacts/engine.py
-    for the identical pattern)."""
     from core.filesystem import get_workspace_manager
     return get_workspace_manager().resolve(relative_path)
 
@@ -74,17 +49,12 @@ def _default_workspace_exists(relative_path: str) -> bool:
 
 
 def _default_trash_delete(relative_path: str) -> bool:
-    """Move a file the engine itself materialized into Trash (never a
-    permanent delete) via the EXISTING FileOperations/TrashEngine - see
-    core/filesystem/operations.py::FileOperations.delete()."""
     from core.filesystem import FileOperations
     result = FileOperations().delete(relative_path)
     return bool(result.success)
 
 
 def _publish(event_name: str, **data: Any) -> None:
-    """Best-effort publish to the EXISTING Event Bus. Never raises - same
-    defensive pattern as core/artifacts/engine.py::_publish."""
     try:
         from core.events import event_bus
         event_bus.publish(event_name, source="ATTACHMENTS", agent="ATTACHMENTS", data=data)
@@ -93,12 +63,6 @@ def _publish(event_name: str, **data: Any) -> None:
 
 
 class AttachmentEngine:
-    """
-    Dependency Injection: `store`, `resolve_path`, `workspace_exists`, and
-    `trash_delete` can all be swapped - tests inject a temp AttachmentStore
-    + a temp-dir resolver so no real Workspace or database/attachments.db
-    is ever touched (same approach as core/artifacts/tests/test_engine.py).
-    """
 
     def __init__(
         self,
@@ -133,9 +97,7 @@ class AttachmentEngine:
         message_id: Optional[str] = None,
         metadata: Optional[dict] = None,
     ) -> AttachmentResult:
-        """User-uploaded file: bytes are written into the AIRA Workspace
-        (under Attachments/<id><ext>) and the attachment owns that copy -
-        deleting the attachment later moves that copy to Trash."""
+        """Upload dari bytes di memori (file kecil / test)."""
         if not isinstance(content, (bytes, bytearray)):
             return AttachmentResult(False, errors=["content harus berupa bytes."])
 
@@ -146,18 +108,15 @@ class AttachmentEngine:
         if not validation.is_valid:
             return AttachmentResult(False, errors=validation.messages())
 
-        resolved_mime = self._resolve_mime(name, mime_type)
-
         attachment = Attachment(
             session_id=session_id, message_id=message_id, name=name.strip(),
-            mime_type=resolved_mime, size=len(content),
+            mime_type=self._resolve_mime(name, mime_type), size=len(content),
             source=AttachmentSource.USER_UPLOAD.value,
             status=AttachmentStatus.PENDING.value,
             metadata=dict(metadata or {}),
         )
 
-        extension = Path(name).suffix
-        relative_path = f"{self._workspace_subdir}/{attachment.id}{extension}"
+        relative_path = f"{self._workspace_subdir}/{attachment.id}{Path(name).suffix}"
 
         try:
             output_path = self._resolve_path(relative_path)
@@ -170,6 +129,64 @@ class AttachmentEngine:
         except OSError as exc:
             return self._fail(attachment, f"Gagal menyimpan file: {exc}")
 
+        return self._finalize_upload(attachment, relative_path)
+
+    def create_from_file(
+        self,
+        *,
+        temp_path,
+        name: str,
+        session_id: str,
+        mime_type: Optional[str] = None,
+        message_id: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> AttachmentResult:
+        """Upload dari file sementara di disk. Disalin per chunk ke Workspace;
+        ukuran dibaca dari disk, isi file tidak pernah dimuat penuh ke RAM.
+        Pemanggil bertanggung jawab menghapus temp_path."""
+        temp_path = Path(temp_path)
+
+        try:
+            size = temp_path.stat().st_size
+        except OSError as exc:
+            return AttachmentResult(False, errors=[f"File sementara tidak terbaca: {exc}"])
+
+        validation = validate_for_create(
+            name=name, mime_type=mime_type, size=size, session_id=session_id,
+            source=AttachmentSource.USER_UPLOAD.value, session_lookup=self._session_lookup,
+        )
+        if not validation.is_valid:
+            return AttachmentResult(False, errors=validation.messages())
+
+        attachment = Attachment(
+            session_id=session_id, message_id=message_id, name=name.strip(),
+            mime_type=self._resolve_mime(name, mime_type), size=size,
+            source=AttachmentSource.USER_UPLOAD.value,
+            status=AttachmentStatus.PENDING.value,
+            metadata=dict(metadata or {}),
+        )
+
+        relative_path = f"{self._workspace_subdir}/{attachment.id}{Path(name).suffix}"
+
+        try:
+            output_path = self._resolve_path(relative_path)
+        except Exception as exc:
+            return self._fail(attachment, f"Gagal resolve path penyimpanan: {exc}")
+
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(temp_path, "rb") as src, open(output_path, "wb") as dst:
+                shutil.copyfileobj(src, dst, COPY_CHUNK)
+        except OSError as exc:
+            try:
+                output_path.unlink()
+            except OSError:
+                pass
+            return self._fail(attachment, f"Gagal menyimpan file: {exc}")
+
+        return self._finalize_upload(attachment, relative_path)
+
+    def _finalize_upload(self, attachment: Attachment, relative_path: str) -> AttachmentResult:
         attachment.storage_reference = relative_path
         attachment.status = AttachmentStatus.AVAILABLE.value
         attachment.updated_at = time.time()
@@ -178,8 +195,9 @@ class AttachmentEngine:
             self.store.save(attachment)
 
         logger.info("ATTACHMENT CREATED (upload) | id=%s session=%s path=%s",
-                    attachment.id, session_id, relative_path)
-        _publish("attachment.created", id=attachment.id, source=attachment.source, session_id=session_id)
+                    attachment.id, attachment.session_id, relative_path)
+        _publish("attachment.created", id=attachment.id, source=attachment.source,
+                 session_id=attachment.session_id)
 
         return AttachmentResult(True, attachment=attachment)
 
@@ -193,9 +211,6 @@ class AttachmentEngine:
         mime_type: Optional[str] = None,
         metadata: Optional[dict] = None,
     ) -> AttachmentResult:
-        """Reference a file that already exists in the Workspace - no bytes
-        are copied or moved. Deleting this attachment never touches the
-        original file (it isn't the attachment's own copy)."""
         relative_path = (relative_path or "").strip()
 
         if not relative_path:
@@ -250,11 +265,6 @@ class AttachmentEngine:
         message_id: Optional[str] = None,
         metadata: Optional[dict] = None,
     ) -> AttachmentResult:
-        """Wrap an AIRA-generated file (core.artifacts.models.Artifact) as
-        an attachment - references the artifact's own storage_reference,
-        never duplicates it. `artifact` duck-types Artifact (id, name,
-        mime_type, size, storage_reference) so this stays decoupled from a
-        hard import of core.artifacts at module load time."""
         storage_reference = getattr(artifact, "storage_reference", None)
 
         if not storage_reference:
@@ -299,10 +309,6 @@ class AttachmentEngine:
         message_id: Optional[str] = None,
         metadata: Optional[dict] = None,
     ) -> AttachmentResult:
-        """Reference a file outside AIRA's storage entirely (a URL). AIRA
-        never fetches the bytes here - only the reference is recorded, kept
-        in metadata['url']. size is unknown up front (0) unless the caller
-        supplies it in metadata."""
         url = (url or "").strip()
 
         if not url:
@@ -342,9 +348,6 @@ class AttachmentEngine:
     # ============================================================== READ
 
     def get(self, attachment_id: str, *, session_id: Optional[str] = None) -> Optional[Attachment]:
-        """Metadata only. Enforces ownership when session_id is given -
-        an attachment belonging to another session is treated as not
-        found, never leaked as "exists but forbidden"."""
         attachment = self.store.get(attachment_id)
 
         if attachment is None or attachment.is_deleted:
@@ -368,12 +371,6 @@ class AttachmentEngine:
     def get_content_reference(
         self, attachment_id: str, *, session_id: Optional[str] = None,
     ) -> Optional[dict]:
-        """Explicit "I need to actually read/serve this file" call - the
-        ONLY place this module hands back something that lets a caller
-        reach binary content. Even here it returns a REFERENCE (an
-        absolute path or an external URL), never the bytes themselves;
-        Context must never receive this, only metadata (see module
-        docstring's Context boundary section)."""
         attachment = self.get(attachment_id, session_id=session_id)
 
         if attachment is None or not attachment.is_available:
@@ -429,11 +426,6 @@ class AttachmentEngine:
     # ------------------------------------------------------------- delete
 
     def delete(self, attachment_id: str, *, session_id: Optional[str] = None) -> AttachmentResult:
-        """Soft delete: status -> 'deleted'. The underlying file is only
-        moved to Trash (never permanently destroyed here) when the
-        attachment materialized its OWN copy (source == user_upload) -
-        workspace/generated/external attachments only ever reference
-        storage they don't own, so their files are left untouched."""
         attachment = self.get(attachment_id, session_id=session_id)
 
         if attachment is None:
@@ -473,11 +465,15 @@ class AttachmentEngine:
 
     @staticmethod
     def _resolve_mime(name: str, mime_type: Optional[str]) -> str:
-        if isinstance(mime_type, str) and mime_type.strip():
-            return mime_type.strip().lower()
-
         from core.attachments.constants import EXTENSION_TO_MIME
+
         extension = Path(name).suffix.lower()
+
+        if isinstance(mime_type, str) and mime_type.strip():
+            declared = mime_type.strip().lower()
+            if declared != "application/octet-stream":
+                return declared
+
         return EXTENSION_TO_MIME.get(extension, "application/octet-stream")
 
 

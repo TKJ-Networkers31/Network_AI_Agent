@@ -1,6 +1,11 @@
 """core/file_processing/ocr.py - OCR nyata via Tesseract (pytesseract + binary tesseract).
 Tidak ada hasil palsu: kalau engine/bahasa tidak tersedia, OCRUnavailable dilempar
-dan pemanggil mencatat ocr_failed."""
+dan pemanggil mencatat ocr_failed.
+
+Konfigurasi (.env):
+  AIRA_OCR_LANG        bahasa tesseract, default "eng+ind"
+  AIRA_TESSERACT_CMD   path binary tesseract (atau TESSERACT_CMD); kosong = dari PATH
+"""
 from __future__ import annotations
 
 import os
@@ -23,14 +28,19 @@ class TesseractOCR:
         except ImportError as exc:
             raise OCRUnavailable("pytesseract belum terpasang (pip install pytesseract).") from exc
 
+        cmd = os.getenv("AIRA_TESSERACT_CMD") or os.getenv("TESSERACT_CMD")
+        if cmd:
+            pytesseract.pytesseract.tesseract_cmd = cmd
+
         lang = self.lang
         try:
             data = pytesseract.image_to_data(image, lang=lang, output_type=Output.DICT)
         except pytesseract.TesseractNotFoundError as exc:
-            raise OCRUnavailable("Binary tesseract tidak ditemukan di PATH.") from exc
+            raise OCRUnavailable("Binary tesseract tidak ditemukan (isi AIRA_TESSERACT_CMD atau tambahkan ke PATH).") from exc
         except pytesseract.TesseractError as exc:
-            if "load" in str(exc).lower() and "+" in lang or lang != "eng":
-                lang = "eng"  # paket bahasa belum ada; dilaporkan lewat language_used
+            # Paket bahasa belum terpasang -> ulangi dengan "eng"; dilaporkan lewat language_used.
+            if lang != "eng" and "load" in str(exc).lower():
+                lang = "eng"
                 data = pytesseract.image_to_data(image, lang=lang, output_type=Output.DICT)
             else:
                 raise
@@ -65,5 +75,5 @@ class TesseractOCR:
             "extracted_text": "\n".join(l["text"] for l in out),
             "lines": out,
             "confidence": round(sum(confs) / len(confs), 1) if confs else None,
-            "language": lang, "language_used": lang, "engine": self.name,
+            "language": self.lang, "language_used": lang, "engine": self.name,
         }

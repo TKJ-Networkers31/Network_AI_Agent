@@ -2,26 +2,8 @@
 core/attachments/validator.py - validation for Universal Attachment
 (Sprint 2.7 / Wave 1 / Worker 2).
 
-Same split as core/artifacts (specs.py builds tolerant objects,
-validator.py decides what's safe) and core/plugins (manifest.py builds,
-validator.py checks): nothing here raises. AttachmentEngine calls
-validate_for_create() BEFORE it ever touches storage, so a rejected
-attachment never gets a file written for it.
-
-Checks performed (per the Sprint 2.7 W2 brief):
-    - MIME type            : must be in the allowlist (constants.py)
-    - extension             : must be in the allowlist AND consistent with
-                              the declared/inferred mime_type
-    - size                  : > 0 and <= MAX_ATTACHMENT_BYTES
-    - filename/path safety  : no path separators, no traversal segments,
-                              no null bytes, bounded length
-    - ownership/access      : session_id required (attachments are always
-                              scoped to a session - there is no "global"
-                              attachment in this contract)
-    - session association   : session_id must refer to a session that
-                              actually exists (checked via an injected
-                              lookup, same Dependency Injection pattern as
-                              core/selection/builder.py's message_lookup)
+Nothing here raises. AttachmentEngine calls validate_for_create() BEFORE it
+touches storage. Batas ukuran hanya berlaku bila MAX_ATTACHMENT_BYTES > 0.
 """
 
 from __future__ import annotations
@@ -47,8 +29,6 @@ SessionLookup = Callable[[str], bool]
 
 
 def _default_session_lookup(session_id: str) -> bool:
-    """session_id -> exists? Lazy import so importing this module never
-    touches disk (same pattern as core/selection/builder.py::_default_message_lookup)."""
     from core import chat_sessions as store
     return store.get_session_row(session_id) is not None
 
@@ -93,9 +73,7 @@ def validate_name(name: Any, issues: list[ValidationIssue]) -> Optional[str]:
 def validate_mime_and_extension(
     name: str, mime_type: Any, issues: list[ValidationIssue],
 ) -> Optional[str]:
-    """Cross-checks extension against mime_type (inferring one from the
-    other when only one is given). Returns the resolved mime_type, or None
-    if rejected."""
+    """Cross-checks extension against mime_type. Returns resolved mime or None."""
     extension = _extension_of(name)
 
     if extension in BLOCKED_EXTENSIONS:
@@ -117,7 +95,12 @@ def validate_mime_and_extension(
         return None
 
     if declared is None:
-        # Infer from extension - deterministic, no guessing beyond the map.
+        return EXTENSION_TO_MIME[extension]
+
+    # Browser sering mengirim application/octet-stream untuk ekstensi yang
+    # tidak dikenalnya (mis. .rsc, .conf). Ekstensi sudah lolos whitelist,
+    # jadi pakai mime hasil inferensi.
+    if declared == "application/octet-stream":
         return EXTENSION_TO_MIME[extension]
 
     if declared not in ALLOWED_MIME_EXTENSIONS:
@@ -148,9 +131,12 @@ def validate_size(size: Any, issues: list[ValidationIssue]) -> Optional[int]:
         issues.append(ValidationIssue("size", "size harus lebih besar dari 0."))
         return None
 
-    if value > MAX_ATTACHMENT_BYTES:
+    # 0 = tanpa batas aplikasi. Batas hanya ada kalau administrator mengaturnya.
+    if MAX_ATTACHMENT_BYTES > 0 and value > MAX_ATTACHMENT_BYTES:
         issues.append(ValidationIssue(
-            "size", f"size ({value} byte) melebihi batas maksimum {MAX_ATTACHMENT_BYTES} byte.",
+            "size",
+            f"size ({value} byte) melebihi batas yang dikonfigurasi administrator "
+            f"({MAX_ATTACHMENT_BYTES} byte).",
         ))
         return None
 
@@ -162,7 +148,6 @@ def validate_session(
     issues: list[ValidationIssue],
     session_lookup: Optional[SessionLookup] = None,
 ) -> Optional[str]:
-    """Ownership/access: every attachment MUST belong to a real session."""
     if not isinstance(session_id, str) or not session_id.strip():
         issues.append(ValidationIssue("session_id", "session_id wajib diisi (attachment harus terikat sesi)."))
         return None
@@ -191,16 +176,10 @@ def validate_for_create(
     source: Any,
     session_lookup: Optional[SessionLookup] = None,
 ) -> ValidationResult:
-    """
-    Full structural + policy validation BEFORE an attachment is created.
-    Never raises. Order matches the lifecycle checklist in the brief:
-    mime type, extension, size, filename/path safety, ownership/access,
-    session association.
-    """
     issues: list[ValidationIssue] = []
 
     validate_name(name, issues)
-    if not issues:  # extension/mime check needs a valid name
+    if not issues:
         validate_mime_and_extension(name, mime_type, issues)
 
     validate_size(size, issues)

@@ -14,18 +14,62 @@ async function request(path, options = {}) {
   return res.json();
 }
 
-async function rawRequest(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+// Kandidat basis URL untuk endpoint non-/api (files, host). Yang terbukti jalan di-cache.
+let rawBase = null;
 
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new Error(detail.detail || `Request gagal (${res.status})`);
+function rawCandidates() {
+  const list = [BASE, ""]; // "/api/..." lalu "/..."
+  if (typeof window !== "undefined" && window.location.port === "5173") {
+    const origin = `${window.location.protocol}//${window.location.hostname}:8000`;
+    list.push(origin, `${origin}${BASE}`); // dev: langsung ke backend
+  }
+  return list;
+}
+
+async function rawRequest(path, options = {}) {
+  const bases = rawBase === null ? rawCandidates() : [rawBase];
+  let lastError = null;
+
+  for (const base of bases) {
+    let res;
+    try {
+      res = await fetch(`${base}${path}`, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+    } catch (err) {
+      lastError = err; // CORS / koneksi gagal -> coba kandidat berikutnya
+      continue;
+    }
+
+    const type = res.headers.get("content-type") || "";
+
+    // Bukan JSON (HTML SPA fallback) -> route tidak ada di basis ini.
+    if (!type.includes("json")) {
+      lastError = new Error(`Endpoint ${base}${path} tidak ditemukan (balasan bukan JSON).`);
+      continue;
+    }
+
+    const body = await res.json().catch(() => ({}));
+
+    // 404 bawaan FastAPI untuk route yang tidak ada: detail persis "Not Found".
+    if (res.status === 404 && body && body.detail === "Not Found") {
+      lastError = new Error(`Route ${base}${path} tidak ada di backend.`);
+      continue;
+    }
+
+    rawBase = base;
+
+    if (!res.ok) {
+      throw new Error(
+        typeof body.detail === "string" ? body.detail : `Request gagal (${res.status})`
+      );
+    }
+
+    return body;
   }
 
-  return res.json();
+  throw lastError || new Error("Backend tidak terjangkau.");
 }
 
 export const api = {

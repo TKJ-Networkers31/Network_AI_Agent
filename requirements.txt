@@ -19,3 +19,6 @@ python-docx
 openpyxl 
 python-pptx 
 reportlab
+pypdfium2
+pytesseract
+pillow
