@@ -47,6 +47,16 @@ Streaming (Sprint 2.5):
   yang mendukung streaming benar-benar di-stream (stream.start /
   stream.delta di Event Bus). Teks pengantar sebelum tool call ikut
   ter-stream, lalu 'response' (COMPLETE) membawa answer + interaction_schema.
+
+PERUBAHAN (Inventory SQLite - penyamaran secret):
+  Argumen tool yang namanya mengandung pass/secret/token/community/api_key/
+  ssh_key/private (mis. add_device(password=...), add_credential(secret=...))
+  DISAMARKAN ("***") di semua tempat yang bisa terbaca/tersimpan di luar
+  eksekusi tool: event Event Bus (-> log DB, WebSocket, UI), `steps`
+  (-> chat_turns di database + tampil di UI), dan log peringatan. Tool itu
+  sendiri tetap menerima argumen ASLI. Satu-satunya salinan yang tersisa
+  adalah riwayat pesan LLM (memory.add_message) - itu memang harus utuh
+  supaya model konsisten dalam giliran yang sama.
 """
 
 import json
@@ -76,6 +86,31 @@ SESSION_AWARE_TOOLS = {"request_location_permission", "maps_search", "maps_route
 DEFAULT_INTERACTION_TEXT = "Aku butuh info tambahan dulu ya."
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+# Nama argumen yang nilainya rahasia. Cocok dengan SENSITIVE_KEY_RE di
+# agents/rei/dio_tools.py, ditambah ssh_key/private (kunci SSH privat).
+_SENSITIVE_ARG_RE = re.compile(r"pass|secret|token|community|api.?key|ssh_key|private", re.IGNORECASE)
+
+
+def _mask_arguments(arguments: dict) -> dict:
+    """
+    Salinan `arguments` dengan nilai rahasia diganti "***". Boolean (mis.
+    no_password=true) dan nilai kosong (None / "") dibiarkan apa adanya -
+    itu bukan rahasia dan berguna untuk diagnosa. Tidak memutasi input.
+    """
+    if not isinstance(arguments, dict):
+        return {}
+
+    return {
+        key: (
+            "***"
+            if _SENSITIVE_ARG_RE.search(str(key))
+            and not isinstance(value, bool)
+            and value not in (None, "")
+            else value
+        )
+        for key, value in arguments.items()
+    }
 
 
 def _intro_text(message, schema) -> str:
@@ -267,6 +302,10 @@ class Planner:
 
                 category = self.tool_category.get(name, "tool")
 
+                # Salinan aman untuk event/steps/log. `arguments` asli HANYA
+                # dipakai untuk mengeksekusi tool.
+                safe_arguments = _mask_arguments(arguments)
+
                 signature = f"{name}:{json.dumps(arguments, sort_keys=True, ensure_ascii=False)}"
                 call_signatures[signature] = call_signatures.get(signature, 0) + 1
 
@@ -279,7 +318,7 @@ class Planner:
                         "type": "tool_call",
                         "name": name,
                         "category": category,
-                        "arguments": arguments,
+                        "arguments": safe_arguments,
                         "success": False,
                         "duration": 0,
                         "result_preview": "dilewati (dipanggil berulang tanpa hasil baru)",
@@ -302,7 +341,10 @@ class Planner:
                     continue
 
                 if name in self.dangerous_tools:
-                    steps.append({"type": "confirmation_required", "name": name, "category": category, "arguments": arguments})
+                    steps.append({
+                        "type": "confirmation_required", "name": name,
+                        "category": category, "arguments": safe_arguments,
+                    })
                     emit(EventNames.TOOL_FINISH, {"name": name, "category": category, "success": False, "skipped": True})
                     memory.add_tool_result(
                         json.dumps({"success": False, "error": "Tool ini butuh konfirmasi manual, dilewati otomatis."}),
@@ -311,7 +353,7 @@ class Planner:
                     tool_count += 1
                     continue
 
-                emit(EventNames.TOOL_START, {"name": name, "category": category, "arguments": arguments})
+                emit(EventNames.TOOL_START, {"name": name, "category": category, "arguments": safe_arguments})
                 emit(EventNames.TOOL_PROGRESS, {"name": name, "category": category, "message": f"Menjalankan {name}..."})
 
                 # session_id disisipkan planner, bukan diminta dari LLM.
@@ -339,7 +381,7 @@ class Planner:
 
                 steps.append({
                     "type": "tool_call", "name": name, "category": category,
-                    "arguments": arguments,  # argumen asli LLM, tanpa session_id
+                    "arguments": safe_arguments,  # argumen LLM, secret disamarkan, tanpa session_id
                     "success": bool(result.get("success")),
                     "duration": round(step_duration, 3), "result_preview": _preview(result),
                 })

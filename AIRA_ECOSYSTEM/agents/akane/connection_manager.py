@@ -16,6 +16,22 @@ Integrasi DIO: orchestrator (core/orchestrator.py) memastikan device_name
 valid SEBELUM execute_for_device() dipanggil - kalau kosong/ambigu AIRA
 bertanya lewat form pilihan perangkat.
 
+PERUBAHAN (Inventory SQLite):
+- Device & credential TIDAK lagi dibaca dari inventory/router.yaml dan
+  password TIDAK lagi dari SSH_PASSWORD di .env. Semuanya lewat
+  core/inventory_store.py::resolve_ssh() (satu-satunya jalur yang
+  mengembalikan secret ter-decrypt).
+- Password kosong "" adalah password VALID (RouterOS default user admin
+  tanpa password) dan dibedakan dari None (= tidak ada credential). Semua
+  pengecekan memakai `is None`, BUKAN `not password`.
+- Reconnect otomatis mengambil credential TERBARU dari inventory (kalau
+  device terdaftar), jadi ganti password di menu Devices langsung berlaku
+  tanpa restart. Untuk sesi manual (host diketik tangan) password disimpan
+  di memori proses saja (tidak pernah ke disk/log/event).
+- Credential bertipe ssh_key belum didukung oleh PersistentShell
+  (tools/ssh/shell.py hanya menerima password); device yang HANYA punya
+  key mendapat pesan error yang jelas, bukan gagal diam-diam.
+
 FIX (Optimalisasi APCE):
 1. Race condition TOCTOU di open_connection(): slot direservasi ke
    self._pending_hosts SAAT MASIH DALAM LOCK yang sama dengan pengecekan
@@ -31,7 +47,6 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import yaml
 from dotenv import load_dotenv
 
 from tools.ssh.shell import PersistentShell
@@ -40,6 +55,7 @@ from agents.akane.session_state import (
     STATUS_BUSY, STATUS_CLOSED, STATUS_ERROR,
 )
 from core.events import event_bus
+from core.inventory_store import get_inventory_store
 from core.logger import get_logger, log_event
 
 logger = get_logger("connection_manager")
@@ -48,7 +64,6 @@ logger = get_logger("connection_manager")
 EVENT_AGENT = "AIRA"
 
 BASE_DIR = Path(__file__).resolve().parents[2]  # AIRA_ECOSYSTEM/
-INVENTORY_FILE = BASE_DIR / "inventory" / "router.yaml"
 
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR.parent / ".env", override=False)
@@ -56,6 +71,12 @@ load_dotenv(BASE_DIR.parent / ".env", override=False)
 MAX_CONCURRENT_SESSIONS = 5
 IDLE_TIMEOUT_SECONDS = 10 * 60  # 10 menit
 MONITOR_INTERVAL_SECONDS = 30
+
+KEY_ONLY_ERROR = (
+    "Device ini hanya punya credential bertipe ssh_key, sedangkan koneksi persisten "
+    "(invoke_shell) saat ini hanya mendukung password. Tambahkan credential ssh_password "
+    "ke device ini di menu Devices."
+)
 
 
 class ConnectionManager:
@@ -68,6 +89,10 @@ class ConnectionManager:
         self._lock = threading.RLock()
         self._session_locks: dict[str, threading.Lock] = {}
 
+        # Password sesi MANUAL (host diketik tangan, bukan dari inventory).
+        # Hanya di memori proses; tidak pernah ditulis ke disk/log/event.
+        self._manual_secrets: dict[str, str] = {}
+
         self._monitor_stop = threading.Event()
         self._monitor_thread = threading.Thread(
             target=self._idle_monitor_loop, daemon=True
@@ -78,22 +103,45 @@ class ConnectionManager:
     # INVENTORY HELPERS
     # ------------------------------------------------------------
 
-    def _load_inventory(self) -> dict:
-        with open(INVENTORY_FILE, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+    @staticmethod
+    def _resolve_target(device_name: str) -> dict:
+        """
+        Device + credential dari Inventory Store.
 
-    def _resolve_device(self, device_name: str) -> Optional[dict]:
-        devices = self._load_inventory().get("devices", {})
+        Return {"success": True, "name", "host", "port", "username", "password"}
+        atau {"success": False, "error": ...}. `password` bisa "" (valid) atau
+        None (tidak ada credential ssh_password).
+        """
+        target = get_inventory_store().resolve_ssh(device_name)
 
-        if device_name in devices:
-            return {"name": device_name, **devices[device_name]}
+        if not target.get("success"):
+            return {
+                "success": False,
+                "error": target.get("error") or f"Device '{device_name}' tidak ditemukan di inventory.",
+            }
 
-        lowered = device_name.strip().lower()
-        for key, value in devices.items():
-            if key.lower() == lowered:
-                return {"name": key, **value}
+        password = target.get("password")
 
-        return None
+        if password is None:
+            if target.get("key"):
+                return {"success": False, "error": KEY_ONLY_ERROR}
+
+            return {
+                "success": False,
+                "error": (
+                    f"Device '{device_name}' belum punya credential SSH. Tambahkan credential "
+                    "(menu Devices, atau tool add_credential/link_credential) lalu coba lagi."
+                ),
+            }
+
+        return {
+            "success": True,
+            "name": target.get("name") or target.get("device_name") or device_name,
+            "host": target["host"],
+            "port": int(target.get("port") or 22),
+            "username": target["username"],
+            "password": password,
+        }
 
     @staticmethod
     def _host_key(host: str, port: int, username: str) -> str:
@@ -123,10 +171,19 @@ class ConnectionManager:
         port: int = 22,
         device_name: Optional[str] = None,
     ) -> dict:
-        password = password or os.getenv("SSH_PASSWORD")
+        # None = tidak diberikan -> fallback .env. "" = password kosong yang
+        # SENGAJA (valid), jangan ditimpa fallback.
+        if password is None:
+            password = os.getenv("SSH_PASSWORD")
 
-        if not password:
-            return {"success": False, "error": "Password SSH tidak diberikan dan SSH_PASSWORD tidak diset di .env."}
+        if password is None:
+            return {
+                "success": False,
+                "error": (
+                    "Password SSH tidak diberikan. Isi password (boleh kosong kalau device memang "
+                    "tanpa password), atau daftarkan device + credential di menu Devices."
+                ),
+            }
 
         key = self._host_key(host, port, username)
 
@@ -177,6 +234,12 @@ class ConnectionManager:
                 self._sessions[session_id] = session
                 self._host_index[key] = session_id
 
+                # Sesi manual: simpan password di memori untuk reconnect.
+                # Sesi dari inventory tidak menyimpan apa pun (credential
+                # selalu diambil segar dari Inventory Store).
+                if not device_name:
+                    self._manual_secrets[session_id] = password
+
             log_event(
                 logger, "INFO", f"Koneksi SSH persisten dibuka ke {host}",
                 category="connection_manager",
@@ -197,17 +260,17 @@ class ConnectionManager:
                 self._pending_hosts.discard(key)
 
     def open_connection_for_device(self, device_name: str) -> dict:
-        device = self._resolve_device(device_name)
+        target = self._resolve_target(device_name)
 
-        if not device:
-            return {"success": False, "error": f"Device '{device_name}' tidak ditemukan di inventory."}
+        if not target["success"]:
+            return {"success": False, "error": target["error"]}
 
         return self.open_connection(
-            host=device["host"],
-            username=device["username"],
-            password=os.getenv("SSH_PASSWORD"),
-            port=device.get("port", 22),
-            device_name=device["name"],
+            host=target["host"],
+            username=target["username"],
+            password=target["password"],
+            port=target["port"],
+            device_name=target["name"],
         )
 
     def close_connection(self, session_id: str, reason: str = "manual") -> dict:
@@ -235,6 +298,9 @@ class ConnectionManager:
             if self._host_index.get(key) == session_id:
                 self._host_index.pop(key, None)
 
+            # Password sesi manual dibuang begitu sesi ditutup.
+            self._manual_secrets.pop(session_id, None)
+
         log_event(
             logger, "INFO", f"Koneksi SSH ditutup ({reason})",
             category="connection_manager",
@@ -247,6 +313,35 @@ class ConnectionManager:
         )
 
         return {"success": True}
+
+    def _reconnect_credentials(self, session: ConnectionSession) -> dict:
+        """
+        Credential untuk reconnect otomatis.
+        Sesi dari inventory -> ambil SEGAR dari Inventory Store.
+        Sesi manual        -> password di memori, fallback SSH_PASSWORD.
+        Return {"success", "host", "port", "username", "password"} / {"success": False, "error"}.
+        """
+        if session.device_name:
+            target = self._resolve_target(session.device_name)
+
+            if not target["success"]:
+                return target
+
+            return target
+
+        with self._lock:
+            password = self._manual_secrets.get(session.session_id)
+
+        if password is None:
+            password = os.getenv("SSH_PASSWORD")
+
+        if password is None:
+            return {"success": False, "error": "Password sesi manual tidak tersedia untuk reconnect."}
+
+        return {
+            "success": True, "host": session.host, "port": session.port,
+            "username": session.username, "password": password,
+        }
 
     def execute(self, session_id: str, command: str, timeout: float = 25.0) -> dict:
         with self._lock:
@@ -268,11 +363,22 @@ class ConnectionManager:
             # DAN status BUKAN closed (user belum menekan Close manual).
             if not session.shell.is_alive() and session.status != STATUS_CLOSED:
                 logger.warning("Session %s terputus, mencoba reconnect otomatis...", session_id)
+
+                creds = self._reconnect_credentials(session)
+
+                if not creds["success"]:
+                    session.status = STATUS_ERROR
+                    session.last_error = f"Reconnect gagal: {creds['error']}"
+                    self._publish(
+                        "connection.error",
+                        data={"session_id": session_id, "error": session.last_error},
+                    )
+                    return {"success": False, "session_id": session_id, "command": command, "error": session.last_error}
+
                 try:
                     session.shell.open(
-                        host=session.host, port=session.port,
-                        username=session.username,
-                        password=os.getenv("SSH_PASSWORD"),
+                        host=creds["host"], port=creds["port"],
+                        username=creds["username"], password=creds["password"],
                     )
                     self._publish(
                         "connection.opened",
@@ -340,12 +446,12 @@ class ConnectionManager:
         command-command berikutnya - TIDAK PERNAH login ulang selama
         session masih hidup.
         """
-        device = self._resolve_device(device_name)
+        target = self._resolve_target(device_name)
 
-        if not device:
-            return {"success": False, "error": f"Device '{device_name}' tidak ditemukan di inventory."}
+        if not target["success"]:
+            return {"success": False, "error": target["error"]}
 
-        key = self._host_key(device["host"], device.get("port", 22), device["username"])
+        key = self._host_key(target["host"], target["port"], target["username"])
 
         with self._lock:
             session_id = self._host_index.get(key)

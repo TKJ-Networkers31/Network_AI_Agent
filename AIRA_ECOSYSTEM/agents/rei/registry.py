@@ -1,9 +1,11 @@
 """
-agents/rei/registry.py — pintu masuk kemampuan riset, memori, dan File
-System Engine (FSE) milik REI: web_search, web_fetch, web_image_search,
-remember, recall, forget, list_workspace, read_file, write_file,
-create_folder, move_file, copy_file, rename_file, delete_file,
-restore_file, list_trash.
+agents/rei/registry.py — pintu masuk kemampuan riset, memori, File
+System Engine (FSE), dan Inventory milik REI: web_search, web_fetch,
+web_image_search, remember, recall, forget, list_workspace, read_file,
+write_file, create_folder, move_file, copy_file, rename_file,
+delete_file, restore_file, list_trash, add_device, update_device,
+delete_device, list_credentials, add_credential, link_credential,
+conversation_history_*.
 
 FIX (root cause "AI bilang tidak punya fitur file"):
 FSE didaftarkan lewat agents/rei/fs_tools.py (wrapper tipis di atas
@@ -30,6 +32,12 @@ REI_DANGEROUS_TOOLS di sini DAN gabungkan ke DANGEROUS_TOOLS di
 core/orchestrator.py (saat ini orchestrator.py hanya menggabungkan
 AKANE_DANGEROUS_TOOLS | HIKARI_DANGEROUS_TOOLS, REI belum diikutkan).
 
+Inventory (agents/rei/inventory_tools.py): add_device/update_device/
+add_credential/link_credential/list_credentials memang tidak dangerous.
+delete_device memakai parameter confirm=true di tool itu sendiri (AI wajib
+bertanya ke user dulu) - bukan lewat DANGEROUS_TOOLS, karena mekanisme itu
+hanya melewati tool tanpa konfirmasi interaktif.
+
 FIX (Ilustrasi visual):
 'web_image_search' didaftarkan di sini (kategori "web", sama dengan
 web_search/web_fetch). Tanpa registrasi ini LLM tidak akan pernah tahu
@@ -43,6 +51,8 @@ from agents.rei import fs_tools as fs
 from core.memory import remember_fact, recall_facts, forget_fact
 from agents.rei import dio_tools as dio
 from agents.rei import conversation_tools as ct
+from agents.rei import inventory_tools as inv
+
 
 def recall(query: str) -> dict:
     results = recall_facts(query)
@@ -362,6 +372,9 @@ REI_TOOL_SCHEMAS = [
                 "JANGAN PERNAH menjawab dengan menebak/mengasumsikan "
                 "nilai yang belum disebutkan user - panggil tool ini "
                 "supaya user diberi form/pilihan interaktif yang jelas. "
+                "Form ini HANYA mengumpulkan input - TIDAK menyimpan apa pun. "
+                "Begitu user mengirim form, kamu WAJIB memanggil tool yang "
+                "benar-benar menjalankan aksinya (mis. add_device). "
                 "Setelah memanggil tool ini, JANGAN menulis jawaban "
                 "teks panjang di giliran yang sama - cukup kalimat "
                 "pengantar singkat, karena antarmuka interaktif akan "
@@ -384,7 +397,7 @@ REI_TOOL_SCHEMAS = [
                                 "label": {"type": "string"},
                                 "data_type": {
                                     "type": "string",
-                                    "description": "string|number|boolean|date|time|file|choice",
+                                    "description": "string|number|boolean|date|time|file|choice|secret",
                                 },
                                 "required": {"type": "boolean", "default": True},
                                 "placeholder": {"type": "string"},
@@ -433,7 +446,7 @@ REI_TOOL_SCHEMAS = [
             },
         },
     },
-        {
+    {
         "type": "function",
         "function": {
             "name": "request_location_permission",
@@ -468,6 +481,12 @@ REI_TOOL_SCHEMAS = [
     },
 ]
 
+# Tool riwayat percakapan (conversation_tools.py)
 REI_TOOLS.update(ct.CONVERSATION_TOOLS)
 REI_TOOL_CATEGORY.update(ct.CONVERSATION_TOOL_CATEGORY)
 REI_TOOL_SCHEMAS.extend(ct.CONVERSATION_TOOL_SCHEMAS)
+
+# Tool inventory device & credential (inventory_tools.py)
+REI_TOOLS.update(inv.INVENTORY_TOOLS)
+REI_TOOL_CATEGORY.update(inv.INVENTORY_TOOL_CATEGORY)
+REI_TOOL_SCHEMAS.extend(inv.INVENTORY_TOOL_SCHEMAS)

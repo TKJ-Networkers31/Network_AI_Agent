@@ -1,35 +1,35 @@
-from pathlib import Path
-import yaml
+"""
+tools/inventory.py — daftar device untuk AIRA (sekarang dari database/inventory.db).
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-INVENTORY_FILE = BASE_DIR / "inventory" / "router.yaml"
+Bentuk keluaran list_devices() tetap kompatibel dengan versi YAML lama
+(name, host, port, username), ditambah field baru.
+"""
+
+from core.inventory_store import get_inventory_store
 
 
-def list_devices():
+def list_devices(include_disabled: bool = False):
     try:
-        with open(INVENTORY_FILE, "r", encoding="utf-8") as file:
-            inventory = yaml.safe_load(file) or {}
+        result = get_inventory_store().list_devices(enabled_only=not include_disabled)
 
-        devices = inventory.get("devices", {})
+        if not result.get("success"):
+            return {"success": False, "error": result.get("error", "Gagal membaca inventory.")}
 
-        result = []
+        devices = [
+            {
+                "name": d["name"],
+                "host": d["host"],
+                "port": d["port"],
+                "username": d["username"],
+                "device_type": d["device_type"],
+                "enabled": d["enabled"],
+                "note": d["note"],
+                "credentials": [{"name": c["name"], "type": c["type"]} for c in d["credentials"]],
+            }
+            for d in result["devices"]
+        ]
 
-        for name, device in devices.items():
-            result.append({
-                "name": name,
-                "host": device.get("host"),
-                "port": device.get("port", 22),
-                "username": device.get("username")
-            })
-
-        return {
-            "success": True,
-            "count": len(result),
-            "devices": result
-        }
+        return {"success": True, "count": len(devices), "devices": devices}
 
     except Exception as exc:
-        return {
-            "success": False,
-            "error": str(exc)
-        }
+        return {"success": False, "error": str(exc)}
