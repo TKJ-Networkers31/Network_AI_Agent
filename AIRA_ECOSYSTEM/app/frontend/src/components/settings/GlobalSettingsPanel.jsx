@@ -19,7 +19,7 @@ const FIELDS = [
     type: "select",
     options: ["default", "casual", "formal"],
   },
-  { key: "voice_enabled", label: "Suara Aktif", type: "switch" },
+  { key: "voice_enabled", label: "Voice Companion Aktif", type: "switch" },
 ];
 
 const INPUT_CLASS =

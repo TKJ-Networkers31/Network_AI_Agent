@@ -34,6 +34,8 @@ from core.logger import setup_logging
 
 setup_logging()
 
+logger = logging.getLogger("aira.api")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -41,7 +43,8 @@ from fastapi.staticfiles import StaticFiles
 from api.routers import (
     chat, providers, memory, devices, sessions, tools, logs, models, persona,
     connections, files, location, settings, selection, attachments,
-    vision, workspace_links, capabilities, artifacts,
+    vision, workspace_links, capabilities, artifacts, topology, nms, voice,
+    network_intelligence,
 )
 from api.routers import ws
 from api.ws_bridge import get_ws_bridge
@@ -76,6 +79,7 @@ app.include_router(models.router)
 app.include_router(persona.router)
 app.include_router(connections.router)
 app.include_router(files.router)
+app.include_router(files.router, prefix="/api")
 app.include_router(location.router)
 app.include_router(settings.router)
 app.include_router(selection.router)
@@ -84,6 +88,10 @@ app.include_router(vision.router)          # === SPRINT 2.7.1 P0 FIX ===
 app.include_router(workspace_links.router)  # === SPRINT 2.7.1 P0 FIX ===
 app.include_router(capabilities.router)     # === SPRINT 2.7.1 P0 FIX (baru) ===
 app.include_router(artifacts.router)        # === SPRINT 2.7.1 P0 FIX (baru) ===
+app.include_router(topology.router)         # The Dude Native Topology Engine
+app.include_router(nms.router)              # Network Management System & Live Telemetry
+app.include_router(voice.router)            # Background Voice Service
+app.include_router(network_intelligence.router)  # Network Intelligence, Playbooks & Config Simulator
 app.include_router(ws.router)
 
 
@@ -159,6 +167,15 @@ def _startup_capability_registry():
         logger.exception("Gagal registrasi provider capabilities saat startup.")
 
 @app.on_event("startup")
+def _startup_sync_devices():
+    try:
+        from api.routers.devices import sync_inventory_and_topology
+        sync_inventory_and_topology()
+        logger.info("INVENTORY-TOPOLOGY-NMS sync completed on startup.")
+    except Exception as exc:
+        logger.warning("INVENTORY-TOPOLOGY-NMS startup sync skipped: %s", exc)
+
+@app.on_event("startup")
 async def _startup_event_bridge():
     # Async supaya berjalan DI event loop utama (loop yang sama dengan
     # WebSocket) - bridge mengikat loop ini ke Event Bus.
@@ -170,15 +187,56 @@ async def _shutdown_event_bridge():
     await get_ws_bridge().stop()
 
 
+@app.on_event("startup")
+async def _startup_nms_monitoring():
+    try:
+        from core.nms_engine import get_nms_engine
+        engine = get_nms_engine()
+        settings = engine.get_settings()
+        if settings.get("auto_monitoring_enabled", True):
+            engine.start_monitoring()
+            logger.info("NMS background monitoring scheduler started successfully on application startup.")
+    except Exception as exc:
+        logger.error("Failed to start NMS background monitoring scheduler on startup: %s", exc)
+
+
+@app.on_event("shutdown")
+def _shutdown_nms_monitoring():
+    try:
+        from core.nms_engine import get_nms_engine
+        get_nms_engine().stop_monitoring()
+        logger.info("NMS background monitoring scheduler stopped.")
+    except Exception as exc:
+        logger.error("Error stopping NMS monitoring scheduler on shutdown: %s", exc)
+
+
+@app.on_event("shutdown")
+def _shutdown_voice_service():
+    try:
+        from agents.yuki.service import get_voice_service
+        get_voice_service().stop()
+        logger.info("Background voice service stopped.")
+    except Exception as exc:
+        logger.error("Error stopping voice service on shutdown: %s", exc)
+
+
 @app.on_event("shutdown")
 def _shutdown_connections():
     get_connection_manager().shutdown()
 
 
+@app.get("/health")
 @app.get("/api/health")
 def health():
     return {"status": "ok", "ecosystem": "AIRA"}
 
 
+class SafeStaticFiles(StaticFiles):
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "websocket":
+            await send({"type": "websocket.close", "code": 404})
+            return
+        await super().__call__(scope, receive, send)
+
 if APP_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(APP_DIST), html=True), name="app")
+    app.mount("/", SafeStaticFiles(directory=str(APP_DIST), html=True), name="app")

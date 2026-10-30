@@ -41,7 +41,7 @@ export default function BrandEmblem({ size = 32, glow = false, className = "" })
       className={`shrink-0 object-contain select-none ${className}`}
       style={{
         ...boxStyle,
-        ...(glow ? { filter: "drop-shadow(0 0 16px rgba(244,114,182,0.45))" } : {}),
+        ...(glow ? { filter: "drop-shadow(0 0 16px rgba(56,189,248,0.7)) drop-shadow(0 0 30px rgba(139,92,246,0.45))" } : {}),
       }}
     />
   );

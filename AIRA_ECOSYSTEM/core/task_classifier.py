@@ -1,16 +1,16 @@
 """
 core/task_classifier.py — klasifikasi intent dengan LLM kecil (Sprint 1).
 
-Model classifier = model default label "general" dari Model Router (bukan
-nama model yang di-hardcode). System prompt persis sesuai spec; daftar label
+Model classifier = model default label "general" dari Model Router (bisa di-override
+lewat AIRA_CLASSIFIER_MODEL di .env). System prompt persis sesuai spec; daftar label
 ditaruh di pesan user karena system prompt spec tidak menyebutkannya.
 
 classify() TIDAK PERNAH raise: gagal apa pun -> fallback general / 0.50.
 """
 
-import os
 import json
 import logging
+import os
 import re
 from typing import Optional
 
@@ -18,10 +18,12 @@ from agents.rei.provider_client import ProviderClient
 from core.events import event_bus
 from core.model_router import ModelRouter, get_model_router
 from core.model_types import (
-    DEFAULT_LABEL, EVENT_TASK_CLASSIFIED, VALID_LABELS, TaskClassification,
+    DEFAULT_LABEL,
+    EVENT_TASK_CLASSIFIED,
+    SelectedModel,
+    TaskClassification,
+    VALID_LABELS,
 )
-
-from core.model_types import SelectedModel
 
 logger = logging.getLogger("aira.task_classifier")
 
@@ -59,7 +61,7 @@ User request:
 """
 
 MAX_PROMPT_CHARS = 1500
-CLASSIFIER_TIMEOUT = 20
+CLASSIFIER_TIMEOUT = 10  # Batas wajar (10s) agar tidak menggantung lama
 CLASSIFIER_MAX_TOKENS = 120
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -131,7 +133,8 @@ class TaskClassifier:
 
         try:
             event_bus.publish(
-                EVENT_TASK_CLASSIFIED, agent="CLASSIFIER",
+                EVENT_TASK_CLASSIFIED,
+                agent="CLASSIFIER",
                 data={"label": result.primary_label, "confidence": result.confidence},
             )
         except Exception:
@@ -141,7 +144,7 @@ class TaskClassifier:
 
     def _pick_model(self) -> Optional[SelectedModel]:
         """AIRA_CLASSIFIER_MODEL=<id model di halaman Models> -> pakai model kecil/lokal khusus
-        classifier. Kalau kosong/tidak valid, perilaku lama (model label general)."""
+        classifier. Kalau kosong/tidak valid, perilaku standar (model label general)."""
         override = os.getenv("AIRA_CLASSIFIER_MODEL", "").strip()
 
         if override:
@@ -159,6 +162,7 @@ class TaskClassifier:
         if model is None:
             logger.warning("Classifier: tidak ada model general - pakai fallback.")
             return TaskClassification.fallback()
+
         response = self._client.chat(
             provider=model.provider,
             model=model.model_id,

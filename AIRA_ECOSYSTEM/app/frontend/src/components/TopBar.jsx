@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Menu } from "lucide-react";
 import WsStatusBadge from "./WsStatusBadge.jsx";
 import ConnectionIndicator from "./connection/ConnectionIndicator.jsx";
+import VoiceCompanionPill from "./voice/VoiceCompanionPill.jsx";
 import { useGlobalSettings } from "../hooks/useGlobalSettings.js";
 import { TIME_PERIOD, buildGreetingContext } from "../utils/greetingContext.js";
 
@@ -33,9 +34,12 @@ export default function TopBar({
   title,
   subtitle,
   onMenuClick,
+  onOpenMenu,
   wsStatus,
   hideConnectionIndicator = false,
+  actions = null,
 }) {
+  const handleMenu = onMenuClick || onOpenMenu;
   const [now, setNow] = useState(new Date());
   const settings = useGlobalSettings();
 
@@ -50,12 +54,12 @@ export default function TopBar({
   const mm = String(now.getMinutes()).padStart(2, "0");
 
   return (
-    <header className="sticky top-0 z-30 shrink-0 -mx-3 sm:-mx-5 lg:-mx-6 mb-3 sm:mb-4 bg-surface/80 backdrop-blur-xl border-b border-border">
-      <div className="h-14 px-3 sm:px-5 lg:px-6 flex items-center justify-between gap-3">
+    <header className="sticky top-0 z-30 shrink-0 -mx-3 sm:-mx-5 lg:-mx-6 mb-2 bg-app/80 backdrop-blur-2xl border-b border-white/[0.08]">
+      <div className="h-12 sm:h-13 px-3 sm:px-5 lg:px-6 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          {onMenuClick && (
+          {handleMenu && (
             <button
-              onClick={onMenuClick}
+              onClick={handleMenu}
               className="md:hidden shrink-0 w-9 h-9 flex items-center justify-center rounded-control bg-white/5 border border-border text-text-secondary hover:text-text-primary transition"
               aria-label="Buka menu"
             >
@@ -79,6 +83,8 @@ export default function TopBar({
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
+          {actions}
+          <VoiceCompanionPill />
           {!hideConnectionIndicator && <ConnectionIndicator onClick={goToAkane} />}
 
           <div className="text-right leading-tight">

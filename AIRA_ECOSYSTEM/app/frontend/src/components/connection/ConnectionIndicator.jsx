@@ -14,22 +14,41 @@ export default function ConnectionIndicator({ onClick }) {
 
   useEffect(() => {
     let cancelled = false;
+    let timer = null;
+    let inFlight = false;
 
-    function load() {
-      api.connections
-        .list()
-        .then((res) => {
-          if (!cancelled) setSessions(res.connections);
-        })
-        .catch(() => {});
+    async function load() {
+      if (cancelled || inFlight || document.hidden) return;
+      inFlight = true;
+      try {
+        const res = await api.connections.list();
+        if (!cancelled && res?.connections) {
+          setSessions(res.connections);
+        }
+      } catch {
+        // Abaikan kegagalan jaringan sementara
+      } finally {
+        inFlight = false;
+        if (!cancelled) {
+          timer = setTimeout(load, 5000);
+        }
+      }
     }
 
     load();
-    const timer = setInterval(load, 3000);
+
+    function onVisibility() {
+      if (!document.hidden && !cancelled) {
+        if (timer) clearTimeout(timer);
+        load();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 

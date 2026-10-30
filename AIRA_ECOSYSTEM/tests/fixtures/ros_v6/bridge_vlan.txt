@@ -1,0 +1,4 @@
+Flags: X - disabled, D - dynamic
+ #   BRIDGE      VLAN-IDS  CURRENT-TAGGED  CURRENT-UNTAGGED
+ 0   bridge1     10                        ether2
+ 1   bridge1     20        ether1

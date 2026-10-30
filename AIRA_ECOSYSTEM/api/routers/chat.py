@@ -41,8 +41,10 @@ def chat(payload: ChatRequest):
     memory = get_memory(session_id)
 
     try:
-        brain = Brain(memory)
-        result = brain.think(llm_message)
+        from core.events import event_scope
+        with event_scope(session_id=session_id):
+            brain = Brain(memory)
+            result = brain.think(llm_message)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

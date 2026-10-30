@@ -3,8 +3,6 @@ import { colors } from "./src/theme/colors.js";
 import { radius } from "./src/theme/radius.js";
 import { typography } from "./src/theme/typography.js";
 
-
-
 export default {
   content: ["./index.html", "./src/**/*.{js,jsx}"],
   theme: {
@@ -13,21 +11,24 @@ export default {
         app: colors.app,
         surface: colors.surface,
         "surface-hover": colors.surfaceHover,
-        // kept for any file not yet migrated off the old token names
         panel: colors.surface,
         card: colors.surface,
         border: colors.border,
         accent: {
-          DEFAULT: colors.primary, // violet
+          DEFAULT: colors.sakura,
           light: colors.cyan,
-          soft: colors.primary,
+          soft: "rgba(56, 189, 248, 0.15)",
         },
         sakura: {
-          DEFAULT: colors.sakura,
-          soft: "rgba(244,114,182,0.12)",
+          DEFAULT: colors.sakura, // Tech Cyan / Electric Blue
+          soft: "rgba(56, 189, 248, 0.12)",
         },
         cyan: {
           DEFAULT: colors.cyan,
+        },
+        purple: {
+          DEFAULT: colors.purple,
+          soft: "rgba(168, 85, 247, 0.15)",
         },
         success: colors.success,
         danger: colors.danger,
@@ -48,22 +49,25 @@ export default {
       borderRadius: {
         control: radius.control,
         card: radius.card,
-        xl2: radius.card, // legacy alias used across existing components
+        xl2: radius.card,
         pill: radius.pill,
       },
       boxShadow: {
-        card: "0 8px 30px -12px rgba(0,0,0,0.45)",
-        floating: "0 20px 60px -20px rgba(0,0,0,0.6)",
-        "sakura-glow": "0 0 40px -8px rgba(244,114,182,0.35)",
-        "violet-glow": "0 0 40px -8px rgba(159,122,234,0.35)",
+        card: "0 8px 32px -8px rgba(0,0,0,0.6)",
+        floating: "0 20px 60px -15px rgba(0,0,0,0.8)",
+        "sakura-glow": "0 0 25px -4px rgba(56, 189, 248, 0.4)",
+        "cyan-glow": "0 0 25px -4px rgba(56, 189, 248, 0.45)",
+        "violet-glow": "0 0 25px -4px rgba(139, 92, 246, 0.45)",
+        "purple-glow": "0 0 25px -4px rgba(168, 85, 247, 0.45)",
       },
       backgroundImage: {
-        "sakura-gradient": "linear-gradient(135deg, #F472B6 0%, #9F7AEA 100%)",
-        "accent-gradient": "linear-gradient(90deg, #9F7AEA 0%, #60A5FA 100%)",
+        "sakura-gradient": "linear-gradient(135deg, #38BDF8 0%, #8B5CF6 100%)",
+        "accent-gradient": "linear-gradient(90deg, #38BDF8 0%, #8B5CF6 100%)",
+        "tech-gradient": "linear-gradient(135deg, #0284C7 0%, #38BDF8 50%, #8B5CF6 100%)",
         "hero-gradient":
-          "radial-gradient(60% 60% at 50% 40%, rgba(159,122,234,0.25) 0%, rgba(7,7,20,0) 70%)",
+          "radial-gradient(60% 60% at 50% 40%, rgba(56, 189, 248, 0.15) 0%, rgba(139, 92, 246, 0.08) 45%, rgba(3, 7, 18, 0) 75%)",
         "core-glow":
-          "radial-gradient(circle at 50% 50%, #F472B6 0%, #9F7AEA 55%, rgba(159,122,234,0) 75%)",
+          "radial-gradient(circle at 50% 50%, #38BDF8 0%, #8B5CF6 55%, rgba(139, 92, 246, 0) 75%)",
       },
       maxWidth: {
         shell: "1600px",

@@ -14,13 +14,16 @@ html {
 body {
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
+  background-color: #000000 !important; /* Hitam Pekat Murni */
+  color: #F8FAFC;
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
 * {
   box-sizing: border-box;
 }
 
-/* Cegah auto-zoom di Safari iOS saat fokus input (butuh >=16px) */
+/* Cegah auto-zoom di Safari iOS saat fokus input */
 input, textarea, select {
   font-size: 16px;
 }
@@ -31,9 +34,10 @@ input, textarea, select {
   }
 }
 
+/* Minimalist Tech Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -41,11 +45,58 @@ input, textarea, select {
 ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
   border-radius: 999px;
+  transition: background 0.2s;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(56, 189, 248, 0.5);
 }
 
+/* ============================================================
+   JET BLACK GLASSMORPHISM & NEON GLOW BORDERS
+   ============================================================ */
+
+.glass-panel {
+  background: rgba(2, 4, 10, 0.75);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.glass-card {
+  background: rgba(3, 6, 14, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Hover glowing effects (Electric Blue / Tech Purple) */
+.glass-card:hover,
+.glow-border:hover,
+.glass-panel:hover {
+  border-color: rgba(56, 189, 248, 0.55) !important;
+  box-shadow: 0 0 24px -2px rgba(56, 189, 248, 0.35), inset 0 0 12px rgba(56, 189, 248, 0.08) !important;
+  transform: translateY(-1px);
+}
+
+.glow-purple:hover {
+  border-color: rgba(168, 85, 247, 0.55) !important;
+  box-shadow: 0 0 24px -2px rgba(168, 85, 247, 0.35), inset 0 0 12px rgba(168, 85, 247, 0.08) !important;
+  transform: translateY(-1px);
+}
+
+/* Default glow borders for buttons and controls */
+button, [role="button"], a {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+input:focus, textarea:focus {
+  border-color: rgba(56, 189, 248, 0.7) !important;
+  box-shadow: 0 0 20px -2px rgba(56, 189, 248, 0.35) !important;
+}
+
+/* Animations */
 @keyframes toast-in {
   from {
     opacity: 0;
@@ -56,71 +107,40 @@ input, textarea, select {
     transform: translateY(0) scale(1);
   }
 }
-
 .toast-in {
   animation: toast-in 0.18s ease-out;
 }
 
 @keyframes mic-pulse {
-  0% {
-    transform: scale(0.9);
-    opacity: 0.55;
-  }
-  70% {
-    transform: scale(1.6);
-    opacity: 0;
-  }
-  100% {
-    transform: scale(1.6);
-    opacity: 0;
-  }
+  0% { transform: scale(0.9); opacity: 0.55; }
+  70% { transform: scale(1.6); opacity: 0; }
+  100% { transform: scale(1.6); opacity: 0; }
 }
-
 .mic-pulse {
   animation: mic-pulse 1.4s ease-out infinite;
 }
 
 @keyframes orb-ring {
-  0% {
-    transform: scale(0.8);
-    opacity: 0.6;
-  }
-  100% {
-    transform: scale(1.9);
-    opacity: 0;
-  }
+  0% { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(1.9); opacity: 0; }
 }
-
 .orb-ring {
   animation: orb-ring 1.8s ease-out infinite;
 }
 
 @keyframes eq-bar {
-  0%,
-  100% {
-    transform: scaleY(0.3);
-  }
-  50% {
-    transform: scaleY(1);
-  }
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
 }
-
 .eq-bar {
   animation: eq-bar 0.9s ease-in-out infinite;
   transform-origin: bottom;
 }
 
 @keyframes thinking-dot {
-  0%, 80%, 100% {
-    transform: scale(0.6);
-    opacity: 0.4;
-  }
-  40% {
-    transform: scale(1);
-    opacity: 1;
-  }
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
 }
-
 .thinking-dot {
   width: 6px;
   height: 6px;
@@ -161,19 +181,19 @@ input, textarea, select {
 .shimmer-text {
   background: linear-gradient(
     90deg,
-    rgba(255,255,255,0.35) 0%,
-    rgba(255,255,255,0.95) 50%,
-    rgba(255,255,255,0.35) 100%
+    rgba(255,255,255,0.4) 0%,
+    rgba(56,189,248,0.95) 50%,
+    rgba(255,255,255,0.4) 100%
   );
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: shimmer-text 2s linear infinite;
+  animation: shimmer-text 2.2s linear infinite;
 }
 
 @keyframes pulse-ring-soft {
-  0%   { box-shadow: 0 0 0 0 rgba(56,189,248,0.35); }
+  0%   { box-shadow: 0 0 0 0 rgba(56,189,248,0.4); }
   100% { box-shadow: 0 0 0 10px rgba(56,189,248,0); }
 }
 .pulse-ring-soft {
@@ -188,101 +208,57 @@ input, textarea, select {
   animation: reveal-fade 0.35s ease-out;
 }
 
-@keyframes status-blink {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.35; }
-}
-.status-blink {
-  animation: status-blink 1.4s ease-in-out infinite;
-}
-
-
-/* ============================================================
-   AIRA OS Redesign — additive CSS.
-   Nothing below removes or renames an existing class — all current
-   animations (mic-pulse, orb-ring, thinking-dot, shimmer-text, etc.)
-   stay exactly as they are. Font @import moved to the top of this
-   file (CSS requires all @import statements to precede every other
-   rule, including @tailwind).
-   ============================================================ */
-
-html, body {
-  background: #070714;
-  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
-}
-
-/* Sakura pulse — the spec's required loading treatment
-   ("Loading memakai Sakura pulse"). Use on any spinner/skeleton that
-   isn't already covered by mic-pulse/orb-ring. */
 @keyframes sakura-pulse {
-  0%   { transform: scale(0.9); opacity: 0.6; box-shadow: 0 0 0 0 rgba(244,114,182,0.35); }
-  70%  { transform: scale(1.05); opacity: 1; box-shadow: 0 0 0 12px rgba(244,114,182,0); }
-  100% { transform: scale(0.9); opacity: 0.6; box-shadow: 0 0 0 0 rgba(244,114,182,0); }
+  0%   { transform: scale(0.9); opacity: 0.6; box-shadow: 0 0 0 0 rgba(56,189,248,0.4); }
+  70%  { transform: scale(1.05); opacity: 1; box-shadow: 0 0 0 12px rgba(56,189,248,0); }
+  100% { transform: scale(0.9); opacity: 0.6; box-shadow: 0 0 0 0 rgba(56,189,248,0); }
 }
 .sakura-pulse {
   animation: sakura-pulse 1.6s ease-in-out infinite;
 }
 
-/* Micro-animation durations per spec (180–250ms) for anything that
-   isn't already using an explicit duration utility. */
 .fade-scale-in {
   animation: reveal-fade 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-
 /* ============================================================
-   DROPDOWN (<select>) — tema gelap AIRA
-
-   Masalah: daftar opsi <select> dirender native oleh browser. Karena
-   select memakai latar transparan (bg-white/5), popup-nya jatuh ke
-   latar putih bawaan sementara teksnya putih -> tak terbaca.
-
-   Fix global (berlaku ke SEMUA select: form DIO, filter Logs/Models,
-   dialog model, Default Routing, dst) tanpa mengubah komponen apa pun.
-   Warna mengikuti theme/colors.js:
-     surface #111122 | surface-hover #1B1B30
-     text #F8FAFC | secondary #A1A1B5 | sakura #F472B6
+   DROPDOWN (<select>) — Tema Gelap Hitam Pekat
    ============================================================ */
 
 select {
-  color-scheme: dark; /* popup native ikut gelap (juga untuk macOS/iOS) */
+  color-scheme: dark;
 }
 
-/* Ganti panah bawaan browser dengan chevron yang seragam */
 select:not([multiple]) {
   -webkit-appearance: none;
   appearance: none;
-  padding-right: 2.25rem; /* ruang untuk chevron */
+  padding-right: 2.25rem;
   cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23A1A1B5' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338BDF8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   background-size: 1rem 1rem;
 }
 
-/* Chevron jadi sakura saat fokus */
 select:not([multiple]):focus {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23F472B6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338BDF8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 select:disabled {
   cursor: not-allowed;
 }
 
-/* Popup opsi: latar gelap + teks terang */
 select option,
 select optgroup {
-  background-color: #111122;
+  background-color: #000000;
   color: #F8FAFC;
 }
 
-/* Placeholder "Pilih salah satu..." (option disabled) */
 select option:disabled {
-  color: #A1A1B5;
+  color: #64748B;
 }
 
-/* Opsi yang sedang terpilih */
 select option:checked {
-  background-color: #1B1B30;
-  color: #F472B6;
+  background-color: #091224;
+  color: #38BDF8;
 }

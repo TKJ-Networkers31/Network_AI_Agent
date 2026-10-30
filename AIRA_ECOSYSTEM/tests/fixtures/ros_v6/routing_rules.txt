@@ -1,0 +1,2 @@
+Flags: X - disabled, I - inactive
+ 0 src-address=192.168.100.0/24 action=lookup table=ISP2

@@ -4,15 +4,18 @@
 // di PAGES pada App.jsx.
 
 import {
+  Activity,
   MessageSquare,
   FolderOpen,
   Server,
   Cable,
+  Network,
   Cpu,
   Sparkles,
   Brain,
   ScrollText,
   Settings,
+  ShieldCheck,
 } from "lucide-react";
 
 export const NAV_GROUPS = [
@@ -28,7 +31,10 @@ export const NAV_GROUPS = [
     id: "network",
     label: "Jaringan",
     items: [
+      { id: "topology", label: "Topology", icon: Network },
+      { id: "nms", label: "Monitoring NMS", icon: Activity },
       { id: "devices", label: "Devices", icon: Server },
+      { id: "intelligence", label: "Investigasi & Planning", icon: ShieldCheck },
       { id: "akane", label: "AKANE", icon: Cable },
     ],
   },

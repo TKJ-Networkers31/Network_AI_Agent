@@ -183,7 +183,7 @@ test("ChatPage: tanpa mock, memakai heroModel W4 + cockpit, greeting lama tidak 
   assert.doesNotMatch(code, /MOCK_|mockData/);
   assert.doesNotMatch(code, /cockpit\/index\.js/);
   assert.match(code, /resolveGreetingModel/);
-  assert.match(code, /<WorkspaceCockpit/);
+  assert.match(code, /<(?:WorkspaceCockpit|ComposerCockpit)/);
   assert.match(code, /heroModel=\{heroModel\}/);
   assert.match(code, /hideConnectionIndicator/);
   assert.doesNotMatch(code, /buildGreeting\s*\(/);

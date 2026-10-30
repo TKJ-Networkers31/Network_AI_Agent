@@ -1,6 +1,9 @@
+import ipaddress
 import logging
 import os
-from urllib.parse import urlparse
+import re
+import socket
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -50,23 +53,103 @@ def web_search(query, max_results=5):
         }
 
 
-def web_fetch(url, max_chars=3000):
+def _validate_safe_url(url: str) -> tuple[bool, str]:
+    """Validates URL against SSRF attacks (only http/https, no private/internal IPs)."""
+    try:
+        parsed = urlparse(url)
+    except Exception as e:
+        return False, f"Invalid URL format: {e}"
+
+    if parsed.scheme not in ("http", "https"):
+        return False, f"Invalid scheme '{parsed.scheme}'. Only http and https are permitted."
+
+    hostname = parsed.hostname
+    if not hostname:
+        return False, "URL missing hostname."
 
     try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        addr_info = socket.getaddrinfo(hostname, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for _, _, _, _, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            ip_obj = ipaddress.ip_address(ip_str)
+            if (
+                ip_obj.is_private
+                or ip_obj.is_loopback
+                or ip_obj.is_link_local
+                or ip_obj.is_reserved
+                or ip_obj.is_multicast
+            ):
+                return False, f"Access to private/local address '{ip_str}' is denied."
+    except socket.gaierror as e:
+        return False, f"Could not resolve hostname '{hostname}': {e}"
+    except Exception as e:
+        return False, f"Error validating target host '{hostname}': {e}"
+
+    return True, ""
+
+
+def web_fetch(url, max_chars=3000):
+    try:
+        is_safe, reason = _validate_safe_url(url)
+        if not is_safe:
+            return {
+                "success": False,
+                "tool": "web_fetch",
+                "url": url,
+                "error": f"SSRF Protection: {reason}",
+            }
+
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (compatible; NetworkAIAgent/1.0)"
             )
         }
 
-        response = requests.get(
-            url,
-            headers=headers,
-            timeout=15
-        )
+        current_url = url
+        session = requests.Session()
+        session.headers.update(headers)
+
+        response = None
+        for _ in range(5):
+            res = session.get(current_url, timeout=15, stream=True, allow_redirects=False)
+            if 300 <= res.status_code < 400 and "Location" in res.headers:
+                next_url = urljoin(current_url, res.headers["Location"])
+                is_safe, reason = _validate_safe_url(next_url)
+                if not is_safe:
+                    return {
+                        "success": False,
+                        "tool": "web_fetch",
+                        "url": next_url,
+                        "error": f"SSRF Protection (Redirect): {reason}",
+                    }
+                current_url = next_url
+                continue
+            response = res
+            break
+
+        if response is None:
+            return {
+                "success": False,
+                "tool": "web_fetch",
+                "url": url,
+                "error": "Too many redirects or no response."
+            }
+
         response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        chunks = []
+        bytes_read = 0
+        max_bytes = 2 * 1024 * 1024
+        for chunk in response.iter_content(chunk_size=8192, decode_unicode=True):
+            if chunk:
+                chunks.append(chunk)
+                bytes_read += len(chunk.encode("utf-8", errors="ignore"))
+                if bytes_read >= max_bytes:
+                    break
+        content_text = "".join(chunks)
+
+        soup = BeautifulSoup(content_text, "html.parser")
 
         for tag in soup(["script", "style", "nav", "header", "footer"]):
             tag.decompose()
@@ -84,7 +167,7 @@ def web_fetch(url, max_chars=3000):
         return {
             "success": True,
             "tool": "web_fetch",
-            "url": url,
+            "url": current_url,
             "content": truncated,
             "is_truncated": len(text) > max_chars
         }
@@ -129,19 +212,23 @@ def _google_images(query, count):
     if not api_key or not cx:
         return None
 
-    response = requests.get(
-        GOOGLE_CSE_ENDPOINT,
-        params={
-            "key": api_key,
-            "cx": cx,
-            "q": query,
-            "searchType": "image",
-            "num": min(count, 10),
-            "safe": "active",
-        },
-        timeout=15,
-    )
-    response.raise_for_status()
+    try:
+        response = requests.get(
+            GOOGLE_CSE_ENDPOINT,
+            params={
+                "key": api_key,
+                "cx": cx,
+                "q": query,
+                "searchType": "image",
+                "num": min(count, 10),
+                "safe": "active",
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+    except Exception as exc:
+        sanitized = re.sub(r"key=[^&\s'\"]+", "key=[REDACTED]", str(exc))
+        raise RuntimeError(f"Google CSE error: {sanitized}") from None
 
     results = []
 
@@ -233,7 +320,8 @@ def web_image_search(query, max_results=DEFAULT_IMAGE_RESULTS):
         try:
             raw_results = _google_images(query, count)
         except Exception as exc:
-            logger.warning("Google Image Search gagal, fallback ke DuckDuckGo: %s", exc)
+            sanitized = re.sub(r"key=[^&\s'\"]+", "key=[REDACTED]", str(exc))
+            logger.warning("Google Image Search gagal, fallback ke DuckDuckGo: %s", sanitized)
 
         if not raw_results:
             source = "duckduckgo"

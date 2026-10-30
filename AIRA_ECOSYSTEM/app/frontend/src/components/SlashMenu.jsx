@@ -15,7 +15,7 @@ export default function SlashMenu({ tools, query, onPick }) {
         <button
           key={t.name}
           type="button"
-          onClick={() => onPick(t.name)}
+          onClick={() => onPick(t)}
           className="w-full text-left px-4 py-2.5 hover:bg-white/5 border-b border-border/50 last:border-b-0 flex items-start gap-3"
         >
           <span className="text-accent-light font-mono text-sm shrink-0">

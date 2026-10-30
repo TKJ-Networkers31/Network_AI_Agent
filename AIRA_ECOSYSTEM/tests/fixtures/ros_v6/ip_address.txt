@@ -1,0 +1,3 @@
+Flags: X - disabled, I - invalid, D - dynamic
+ 0   address=192.168.88.1/24 network=192.168.88.0 interface=ether2 actual-interface=ether2
+ 1 D address=10.0.0.150/24 network=10.0.0.0 interface=ether1 actual-interface=ether1

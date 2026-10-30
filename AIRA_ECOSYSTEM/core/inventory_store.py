@@ -362,13 +362,34 @@ class InventoryStore:
 
     @staticmethod
     def _device_row(conn, name: str):
-        row = conn.execute("SELECT * FROM devices WHERE name = ?", (str(name or "").strip(),)).fetchone()
+        query_name = str(name or "").strip()
+        # 1. Exact match (case insensitive)
+        row = conn.execute("SELECT * FROM devices WHERE name = ? COLLATE NOCASE", (query_name,)).fetchone()
+        if row is not None:
+            return row
 
-        if row is None:
-            known = ", ".join(r["name"] for r in conn.execute("SELECT name FROM devices ORDER BY name")) or "(kosong)"
-            raise InventoryError(f"Device '{name}' tidak ditemukan. Device terdaftar: {known}.", not_found=True)
+        # 2. Match by host IP
+        row = conn.execute("SELECT * FROM devices WHERE host = ?", (query_name,)).fetchone()
+        if row is not None:
+            return row
 
-        return row
+        # 3. Flexible alias match (e.g. 'R1' -> 'ROUTER-1', 'router1' -> 'ROUTER-1')
+        all_devices = conn.execute("SELECT * FROM devices").fetchall()
+        norm_q = re.sub(r"[^a-zA-Z0-9]", "", query_name).lower()
+
+
+
+        for dev in all_devices:
+            dev_norm = re.sub(r"[^a-zA-Z0-9]", "", dev["name"]).lower()
+            if dev_norm == norm_q:
+                return dev
+            if norm_q.startswith("r") and norm_q[1:].isdigit() and dev_norm == f"router{norm_q[1:]}":
+                return dev
+            if dev_norm.startswith("r") and dev_norm[1:].isdigit() and norm_q == f"router{dev_norm[1:]}":
+                return dev
+
+        known = ", ".join(r["name"] for r in conn.execute("SELECT name FROM devices ORDER BY name")) or "(kosong)"
+        raise InventoryError(f"Device '{name}' tidak ditemukan. Device terdaftar: {known}.", not_found=True)
 
     @staticmethod
     def _credential_row(conn, name: str):
@@ -471,6 +492,7 @@ class InventoryStore:
         self, *, name, host, port=22, username=None, device_type="mikrotik",
         snmp_community=None, snmp_port=161, note="", enabled=True,
         credential_names=None, new_credential: Optional[dict] = None,
+        new_credentials: Optional[list[dict]] = None,
     ) -> dict:
         clean_name = _clean_name(name, "nama device")
         values = (
@@ -491,8 +513,25 @@ class InventoryStore:
             )
             device_id = cursor.lastrowid
 
+            creds_to_create = list(new_credentials or [])
             if new_credential:
-                credential_id = self._insert_credential(conn, **new_credential)
+                creds_to_create.append(new_credential)
+
+            for cred_spec in creds_to_create:
+                if not isinstance(cred_spec, dict):
+                    continue
+                spec = dict(cred_spec)
+                if not spec.get("name"):
+                    ctype = spec.get("type", "ssh_password")
+                    candidate_name = f"{clean_name}-{ctype.replace('_', '-')}"
+                    c_n, c_idx = candidate_name, 2
+                    while conn.execute("SELECT 1 FROM credentials WHERE name = ?", (c_n,)).fetchone():
+                        c_n = f"{candidate_name}-{c_idx}"
+                        c_idx += 1
+                    spec["name"] = c_n
+                if "username" not in spec or spec["username"] is None:
+                    spec["username"] = _opt(username, 80)
+                credential_id = self._insert_credential(conn, **spec)
                 conn.execute(
                     "INSERT OR IGNORE INTO device_credentials (device_id, credential_id) VALUES (?, ?)",
                     (device_id, credential_id),
@@ -513,7 +552,7 @@ class InventoryStore:
     def update_device(self, name: str, **fields) -> dict:
         allowed = {
             "new_name", "host", "port", "username", "device_type", "snmp_community",
-            "snmp_port", "note", "enabled", "credential_names",
+            "snmp_port", "note", "enabled", "credential_names", "new_credentials", "new_credential",
         }
         unknown = set(fields) - allowed
 
@@ -556,6 +595,31 @@ class InventoryStore:
                 conn.execute("DELETE FROM device_credentials WHERE device_id = ?", (row["id"],))
                 for cname in fields["credential_names"]:
                     self._link(conn, row["id"], cname)
+                conn.execute("UPDATE devices SET updated_at = ? WHERE id = ?", (time.time(), row["id"]))
+
+            creds_to_create = list(fields.get("new_credentials") or [])
+            if fields.get("new_credential"):
+                creds_to_create.append(fields["new_credential"])
+
+            for cred_spec in creds_to_create:
+                if not isinstance(cred_spec, dict):
+                    continue
+                spec = dict(cred_spec)
+                if not spec.get("name"):
+                    ctype = spec.get("type", "ssh_password")
+                    candidate_name = f"{row['name']}-{ctype.replace('_', '-')}"
+                    c_n, c_idx = candidate_name, 2
+                    while conn.execute("SELECT 1 FROM credentials WHERE name = ?", (c_n,)).fetchone():
+                        c_n = f"{candidate_name}-{c_idx}"
+                        c_idx += 1
+                    spec["name"] = c_n
+                if "username" not in spec or spec["username"] is None:
+                    spec["username"] = row["username"]
+                credential_id = self._insert_credential(conn, **spec)
+                conn.execute(
+                    "INSERT OR IGNORE INTO device_credentials (device_id, credential_id) VALUES (?, ?)",
+                    (row["id"], credential_id),
+                )
                 conn.execute("UPDATE devices SET updated_at = ? WHERE id = ?", (time.time(), row["id"]))
 
             conn.commit()

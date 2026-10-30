@@ -1,9 +1,9 @@
 """
 core/attachments/context.py - Context boundary for Universal Attachment.
 
-Hanya metadata/reference; tidak pernah isi file. Status pemrosesan
-(metadata["processing"]) ditampilkan sebagai catatan singkat; isi hasilnya
-diambil AIRA lewat tool read_attachment (dengan paginasi).
+Hanya metadata/reference dan ringkasan teks hasil OCR / ekstraksi pemrosesan file;
+tidak pernah mengembalikan raw bytes file. Teks hasil ekstraksi/OCR disertakan secara aman
+sehingga LLM dan reasoning model dapat langsung menganalisa isi gambar dan dokumen.
 """
 
 from __future__ import annotations
@@ -27,14 +27,55 @@ def _processing_status(attachment: Attachment) -> Optional[str]:
     return None
 
 
+def _extract_text_preview(attachment: Attachment, max_chars: int = 1500) -> str:
+    """Ambil ringkasan teks hasil OCR gambar atau ekstraksi dokumen jika tersedia."""
+    meta = attachment.metadata if isinstance(attachment.metadata, dict) else {}
+    proc = meta.get("processing")
+    if not isinstance(proc, dict):
+        return ""
+
+    texts: list[str] = []
+    # Ambil teks OCR dari gambar / scan
+    for ocr_entry in proc.get("ocr") or []:
+        t = (ocr_entry.get("extracted_text") or "").strip()
+        if t:
+            texts.append(t)
+
+    # Ambil teks dari dokumen / PDF / Office
+    for text_entry in proc.get("text") or []:
+        t = (text_entry.get("text") or "").strip()
+        if t:
+            texts.append(t)
+
+    # Ambil analisis visual / deskripsi gambar jika tersedia
+    for img_entry in proc.get("images") or []:
+        v = img_entry.get("vision") or {}
+        if isinstance(v, dict) and v.get("status") == "available":
+            desc = ((v.get("analysis") or {}).get("description") or "").strip()
+            if desc:
+                texts.append(f"[Deskripsi Visual: {desc}]")
+
+    combined = "\n".join(texts).strip()
+    if not combined:
+        return ""
+
+    if len(combined) > max_chars:
+        return combined[:max_chars] + f"... [dipotong {len(combined) - max_chars} karakter]"
+    return combined
+
+
 def attachment_to_context_dict(attachment: Attachment) -> dict[str, Any]:
-    """Metadata/reference dict. Tidak pernah memuat isi file."""
+    """Metadata/reference dict. Tidak pernah memuat bytes biner file."""
     full = attachment.to_dict()
     data = {key: full[key] for key in _CONTEXT_SAFE_FIELDS if key in full}
 
     status = _processing_status(attachment)
     if status:
         data["processing_status"] = status
+
+    preview = _extract_text_preview(attachment, max_chars=300)
+    if preview:
+        data["text_preview"] = preview
 
     return data
 
@@ -47,10 +88,14 @@ def attachments_context_summary_text(attachments: Iterable[Attachment], limit: i
             continue
 
         status = _processing_status(attachment)
-        note = f", diproses={status}" if status else ", belum diproses (pakai read_attachment)"
-        lines.append(
-            f"- {attachment.name} (id={attachment.id}, {attachment.mime_type}, {attachment.status}{note})"
-        )
+        note = f", diproses={status}" if status else ", belum diproses"
+        header = f"- {attachment.name} (id={attachment.id}, {attachment.mime_type}, {attachment.status}{note})"
+        lines.append(header)
+
+        # Sertakan hasil OCR / analisis teks dokumen agar reasoning LLM bisa menganalisanya
+        preview = _extract_text_preview(attachment, max_chars=1200)
+        if preview:
+            lines.append(f"  [Hasil Analisis Dokumen / OCR {attachment.name}]:\n  \"\"\"\n  {preview}\n  \"\"\"")
 
     return "\n".join(lines)
 

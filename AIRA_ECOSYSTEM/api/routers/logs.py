@@ -34,6 +34,12 @@ def categories():
     return {"categories": log_store.get_categories_with_counts()}
 
 
+@router.get("/stats")
+def stats(since_minutes: Optional[int] = None):
+    since = time.time() - (since_minutes * 60) if since_minutes else None
+    return {"stats": log_store.get_stats(since=since)}
+
+
 @router.get("/{log_id}")
 def get_log_detail(log_id: int):
     from fastapi import HTTPException
@@ -46,11 +52,6 @@ def get_log_detail(log_id: int):
         raise HTTPException(status_code=404, detail="Log tidak ditemukan.")
 
     return match[0]
-
-@router.get("/stats")
-def stats(since_minutes: Optional[int] = None):
-    since = time.time() - (since_minutes * 60) if since_minutes else None
-    return {"stats": log_store.get_stats(since=since)}
 
 
 @router.delete("")

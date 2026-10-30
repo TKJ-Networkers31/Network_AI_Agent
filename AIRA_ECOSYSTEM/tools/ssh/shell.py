@@ -42,9 +42,27 @@ logger = logging.getLogger("aira.tools.ssh.shell")
 # terhadap tag tambahan (mis. "<SAFE>") yang mengandung karakter ">".
 # Sekarang pakai ".*" (greedy, backtracking) supaya regex mencari ">"
 # TERAKHIR di baris sebagai penutup prompt, apa pun yang ada sebelumnya.
-PROMPT_RE = re.compile(r"\[[^\]\r\n]+@[^\]\r\n]+\].*>\s*$")
-PAGINATE_MARKERS = ("-- [Q quit", "[Q quit|D dump", "--more--")
-ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]")
+ANSI_ESCAPE_RE = re.compile(
+    r"\x1b(?:"
+    r"\[[0-?]*[ -/]*[@-~]"
+    r"|\][^\x07\x1b\r\n]*(?:\x07|\x1b\\|[\r\n]|$)"
+    r"|[()#%][A-Za-z0-9]"
+    r"|[=><~]"
+    r"|[A-Za-z0-9]"
+    r")"
+)
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+PROMPT_RE = re.compile(r"\[[^\]\r\n]+@[^\]\r\n]+\].*>\s*$", re.MULTILINE)
+PAGINATE_MARKERS = (
+    "-- [q quit",
+    "[q quit|d dump",
+    "--more--",
+    "more--",
+    "(q to abort",
+    "q to abort",
+    "press enter",
+    "-- press enter",
+)
 
 
 class ShellNotConnectedError(Exception):
@@ -68,27 +86,68 @@ class PersistentShell:
         self,
         host: str,
         username: str,
-        password: str,
+        password: str | None = None,
         port: int = 22,
+        key_data: str | None = None,
         term: str = "dumb",
         width: int = 200,
         height: int = 50,
-        connect_timeout: float = 10.0,
+        connect_timeout: float = 15.0,
     ) -> None:
+        # Bersihkan channel/koneksi lama jika ada sebelum membuka baru
+        self.close()
+
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-        client.connect(
-            hostname=host,
-            port=port,
-            username=username,
-            password=password,
-            look_for_keys=False,
-            allow_agent=False,
-            timeout=connect_timeout,
-            banner_timeout=connect_timeout,
-            auth_timeout=connect_timeout,
-        )
+        pkey = None
+        if key_data and key_data.strip():
+            import io
+            key_file = io.StringIO(key_data.strip())
+            for key_cls in (paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.DSSKey):
+                try:
+                    key_file.seek(0)
+                    pkey = key_cls.from_private_key(key_file, password=password or None)
+                    break
+                except Exception:
+                    continue
+            if not pkey:
+                raise ValueError("Format SSH Private Key tidak dikenali atau passphrase salah.")
+
+        # MikroTik RouterOS mendukung modifier "+ct200w" pada username untuk
+        # mematikan deteksi terminal interaktif (\x1b[6n yang bikin hang 10 detik)
+        # dan mematikan kode warna ANSI. Jika target bukan RouterOS dan gagal auth,
+        # otomatis fallback ke username standar.
+        login_user = username if "+" in username else f"{username}+ct200w"
+        try:
+            client.connect(
+                hostname=host,
+                port=port,
+                username=login_user,
+                password=password if not pkey else None,
+                pkey=pkey,
+                look_for_keys=False,
+                allow_agent=False,
+                timeout=connect_timeout,
+                banner_timeout=max(connect_timeout, 25.0),
+                auth_timeout=max(connect_timeout, 20.0),
+            )
+        except paramiko.AuthenticationException:
+            if login_user != username:
+                client.connect(
+                    hostname=host,
+                    port=port,
+                    username=username,
+                    password=password if not pkey else None,
+                    pkey=pkey,
+                    look_for_keys=False,
+                    allow_agent=False,
+                    timeout=connect_timeout,
+                    banner_timeout=max(connect_timeout, 25.0),
+                    auth_timeout=max(connect_timeout, 20.0),
+                )
+            else:
+                raise
 
         channel = client.invoke_shell(term=term, width=width, height=height)
         channel.settimeout(0.5)
@@ -99,9 +158,8 @@ class PersistentShell:
         self.port = port
         self.username = username
 
-        # Buang banner/prompt awal supaya buffer bersih sebelum command
-        # pertama user dikirim.
-        self._read_until_idle(max_wait=3.0, idle_gap=0.4)
+        # Buang banner/prompt awal dan tangani prompt interaktif (mis. Software License [Y/n])
+        self._drain_initial_handshake(max_wait=6.0)
 
         logger.info("SHELL OPEN | host=%s user=%s - invoke_shell aktif.", host, username)
 
@@ -130,9 +188,22 @@ class PersistentShell:
                 f"Shell channel ke {self.host} tidak aktif/sudah terputus."
             )
 
-        # Bersihkan sisa buffer yang mungkin belum terbaca dari command
-        # sebelumnya (safety net - normalnya sudah kosong).
-        self._drain_nonblocking()
+        # Bersihkan sisa buffer dan lepaskan pager/lisensi yang mungkin menggantung
+        pre = self._drain_nonblocking()
+        if pre:
+            lower_pre = pre.lower()
+            if any(marker in lower_pre for marker in PAGINATE_MARKERS):
+                self.channel.send("q\r\n")
+                time.sleep(0.2)
+                self._drain_nonblocking()
+            elif "[y/n]" in lower_pre or "software license" in lower_pre:
+                self.channel.send("n\r\n")
+                time.sleep(0.2)
+                self._drain_nonblocking()
+            elif "new password>" in lower_pre or "ctrl-c to skip" in lower_pre:
+                self.channel.send("\x03")
+                time.sleep(0.2)
+                self._drain_nonblocking()
 
         self.channel.send(command.strip() + "\r\n")
 
@@ -168,6 +239,56 @@ class PersistentShell:
 
         return buffer
 
+    def _drain_initial_handshake(self, max_wait: float = 6.0) -> str:
+        buffer = ""
+        start = time.time()
+        last_data = time.time()
+
+        while time.time() - start < max_wait:
+            if self.channel.recv_ready():
+                chunk = self.channel.recv(4096).decode(errors="replace")
+                buffer += chunk
+                last_data = time.time()
+
+                # Jawab kueri ukuran layar ANSI DSR (\x1b[6n) dari RouterOS agar tidak hang 10 detik
+                if "\x1b[6n" in chunk:
+                    self.channel.send("\x1b[50;200R")
+                    continue
+
+                probe = ANSI_ESCAPE_RE.sub("", buffer)
+                probe_clean = CONTROL_CHARS_RE.sub("", probe).lower()
+
+                if "[y/n]" in probe_clean or "software license" in probe_clean:
+                    self.channel.send("n\r\n")
+                    time.sleep(0.3)
+                    buffer = ""
+                    continue
+
+                if any(marker in probe_clean for marker in PAGINATE_MARKERS):
+                    self.channel.send("q\r\n")
+                    time.sleep(0.3)
+                    buffer = ""
+                    continue
+
+                if "new password>" in probe_clean or "ctrl-c to skip" in probe_clean:
+                    self.channel.send("\x03")
+                    time.sleep(0.3)
+                    buffer = ""
+                    continue
+
+                lines = [l.strip() for l in probe.splitlines() if l.strip()]
+                if lines and PROMPT_RE.search(lines[-1]):
+                    time.sleep(0.15)
+                    if not self.channel.recv_ready():
+                        break
+
+            else:
+                if buffer and (time.time() - last_data) > 2.0:
+                    break
+                time.sleep(0.05)
+
+        return buffer
+
     def _read_until_idle(self, max_wait: float, idle_gap: float) -> str:
         buffer = ""
         start = time.time()
@@ -196,18 +317,29 @@ class PersistentShell:
                 buffer += chunk
                 last_data = time.time()
 
+                if "\x1b[6n" in chunk:
+                    self.channel.send("\x1b[50;200R")
+
                 # FIX: cek paginasi & prompt terhadap versi TANPA escape
                 # ANSI, bukan buffer mentah - kode warna di sekitar
                 # prompt sebelumnya bisa merusak pencocokan regex.
                 probe = ANSI_ESCAPE_RE.sub("", buffer)
+                probe_clean = CONTROL_CHARS_RE.sub("", probe)
 
-                # RouterOS paginasi hasil panjang - kirim 'Q' supaya
-                # keluar dari mode paging alih-alih macet menunggu prompt
-                # yang tidak akan pernah muncul.
-                if any(marker in probe for marker in PAGINATE_MARKERS):
-                    self.channel.send("Q")
+                # RouterOS paginasi hasil panjang atau prompt lisensi
+                probe_lower = probe_clean.lower()
+                if "[y/n]" in probe_lower or "software license" in probe_lower:
+                    self.channel.send("n\r\n")
+                    time.sleep(0.2)
 
-                if PROMPT_RE.search(probe):
+                if any(marker in probe_lower for marker in PAGINATE_MARKERS):
+                    self.channel.send("q\r\n")
+                    time.sleep(0.2)
+
+                lines = [line.strip() for line in probe_clean.splitlines() if line.strip()]
+                last_line = lines[-1] if lines else ""
+
+                if "\n" in probe_clean and last_line and PROMPT_RE.search(last_line):
                     prompt_matched = True
                     break
 
@@ -235,27 +367,35 @@ class PersistentShell:
 
     def _clean_output(self, raw: str, command: str) -> str:
         text = ANSI_ESCAPE_RE.sub("", raw)
-        text = text.replace("\r", "")
+        text = CONTROL_CHARS_RE.sub("", text)
 
-        lines = text.split("\n")
+        # RouterOS mengakhiri baris dengan '\r\n' dan me-redraw baris panjang dengan '\r'.
+        # Buang '\r' di ujung baris dulu, lalu ambil segmen terakhir setelah '\r'.
+        raw_lines = text.split("\n")
+        lines = [rl.rstrip("\r").split("\r")[-1] for rl in raw_lines]
 
-        # Baris pertama biasanya echo dari command yang kita kirim.
-        if lines and command.strip() in lines[0]:
-            lines = lines[1:]
-
-        # Buang baris kosong / prompt baru di ekor output.
-        while lines and not lines[-1].strip():
-            lines.pop()
-
-        if lines and PROMPT_RE.search(lines[-1]):
-            lines.pop()
+        # Buang baris echo command dan baris prompt RouterOS ([user@host] > ...)
+        cmd_s = command.strip()
+        cmd_prefix = cmd_s[:20] if cmd_s else ""
+        filtered = []
+        for idx, l in enumerate(lines):
+            ls = l.strip()
+            if idx == 0 and cmd_prefix and (cmd_s in ls or ls.startswith(cmd_prefix)):
+                continue
+            if PROMPT_RE.search(ls) or re.match(r"^\[[^\]\r\n]+@[^\]\r\n]+\].*>", ls):
+                continue
+            filtered.append(l)
+        lines = filtered
 
         while lines and not lines[-1].strip():
             lines.pop()
 
         cleaned_lines = [
             line for line in lines
-            if not any(marker in line for marker in PAGINATE_MARKERS)
+            if not any(marker in line.lower() for marker in PAGINATE_MARKERS)
+            and "[y/n]" not in line.lower()
+            and "software license" not in line.lower()
+            and "license agreement" not in line.lower()
         ]
 
         return "\n".join(cleaned_lines).strip()

@@ -1,16 +1,16 @@
 """
 api/routers/attachments.py — REST endpoint tipis untuk Universal Attachment
-(Sprint 2.7 / Wave 1 / Worker 2).
+(Sprint 2.7 / Wave 1 / Worker 2 + Multi-file & OCR Auto-Processing).
 
 Murni "pintu HTTP" di atas core/attachments/engine.py. Upload memakai
 multipart/form-data dan DISTREAM ke file sementara (tidak dibaca penuh ke RAM),
 lalu diserahkan ke AttachmentEngine.create_from_file().
-
-Batas ukuran (kalau ada) ditegakkan SATU kali di core/attachments/validator.py
-lewat AIRA_MAX_ATTACHMENT_BYTES (0 = tanpa batas level aplikasi).
-Content/bytes TIDAK PERNAH dikembalikan lewat endpoint metadata.
+Mendukung single upload maupun batch multi-file upload, dengan auto-processing
+(OCR untuk gambar/scan, ekstraksi dokumen untuk PDF/Word/Excel) agar langsung
+siap di-reasoning oleh AI.
 """
 
+import logging
 import os
 import shutil
 import tempfile
@@ -22,9 +22,19 @@ from starlette.concurrency import run_in_threadpool
 
 from core.attachments import AttachmentSource, get_attachment_engine
 
+logger = logging.getLogger("aira.api.attachments")
 COPY_CHUNK = 1024 * 1024
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
+
+
+def _try_process_attachment(engine, attachment_id: str, session_id: str) -> None:
+    """Jalankan OCR/ekstraksi teks di background thread agar hasil analisis langsung tersedia."""
+    try:
+        from core.file_processing.service import process_attachment
+        process_attachment(engine, attachment_id, session_id=session_id)
+    except Exception as exc:
+        logger.warning("Auto-processing attachment %s gagal (%s): %s", attachment_id, type(exc).__name__, exc)
 
 
 class WorkspaceAttachmentRequest(BaseModel):
@@ -73,9 +83,10 @@ async def upload_attachment(
     except OSError as exc:
         raise HTTPException(status_code=507, detail=f"Gagal menyimpan upload sementara: {exc}")
 
+    engine = get_attachment_engine()
     try:
         result = await run_in_threadpool(
-            get_attachment_engine().create_from_file,
+            engine.create_from_file,
             temp_path=tmp_path,
             name=name,
             session_id=session_id,
@@ -91,12 +102,78 @@ async def upload_attachment(
     if not result.success:
         _raise_for_errors(result.errors)
 
+    # Otomatis proses OCR / analisis teks dokumen
+    if result.attachment:
+        await run_in_threadpool(_try_process_attachment, engine, result.attachment.id, session_id)
+        # Ambil kembali attachment terbaru dengan metadata processing
+        fresh = engine.get(result.attachment.id, session_id=session_id)
+        if fresh:
+            return {"success": True, "attachment": fresh.to_dict()}
+
     return result.to_dict()
+
+
+@router.post("/batch")
+@router.post("/upload-multiple")
+async def upload_multiple_attachments(
+    session_id: str = Form(...),
+    message_id: Optional[str] = Form(None),
+    files: list[UploadFile] = File(...),
+):
+    """Upload beberapa file/gambar sekaligus untuk reasoning dan analisis dokumen."""
+    if not files:
+        raise HTTPException(status_code=400, detail="Tidak ada file yang diunggah.")
+
+    engine = get_attachment_engine()
+    succeeded = []
+    failed = []
+
+    for f in files:
+        name = os.path.basename((f.filename or "untitled").replace("\\", "/")) or "untitled"
+        try:
+            tmp_path = await run_in_threadpool(_spool_to_disk, f)
+        except OSError as exc:
+            failed.append({"name": name, "error": f"Gagal spool ke disk: {exc}"})
+            continue
+
+        try:
+            result = await run_in_threadpool(
+                engine.create_from_file,
+                temp_path=tmp_path,
+                name=name,
+                session_id=session_id,
+                mime_type=f.content_type,
+                message_id=message_id,
+            )
+            if result.success and result.attachment:
+                # Otomatis jalankan OCR / file processing
+                await run_in_threadpool(_try_process_attachment, engine, result.attachment.id, session_id)
+                fresh = engine.get(result.attachment.id, session_id=session_id)
+                succeeded.append(fresh.to_dict() if fresh else result.attachment.to_dict())
+            else:
+                failed.append({"name": name, "error": "; ".join(result.errors)})
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    if not succeeded and failed:
+        errors = [f"{item['name']}: {item['error']}" for item in failed]
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+
+    return {
+        "success": len(succeeded) > 0,
+        "attachments": succeeded,
+        "failed": failed,
+        "count": len(succeeded),
+    }
 
 
 @router.post("/workspace")
 def attach_workspace_file(payload: WorkspaceAttachmentRequest):
-    result = get_attachment_engine().create_from_workspace(
+    engine = get_attachment_engine()
+    result = engine.create_from_workspace(
         relative_path=payload.relative_path, session_id=payload.session_id,
         message_id=payload.message_id, name=payload.name, mime_type=payload.mime_type,
         metadata=payload.metadata,
@@ -104,6 +181,9 @@ def attach_workspace_file(payload: WorkspaceAttachmentRequest):
 
     if not result.success:
         _raise_for_errors(result.errors)
+
+    if result.attachment:
+        _try_process_attachment(engine, result.attachment.id, payload.session_id)
 
     return result.to_dict()
 

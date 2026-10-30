@@ -4,6 +4,8 @@ archive -> ekstrak aman, rekursif. Semua hasil dari pemrosesan nyata; tanpa trun
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -106,13 +108,39 @@ class FileProcessor:
         if kind != "archive" and entry["status"] == FILE_COMPLETED and len(result.errors) > before:
             entry["status"] = FILE_PARTIAL if entry["processors"] else FILE_FAILED
 
+    def _extract_tmp_dir(self, path: Path) -> str | None:
+        env_dir = os.getenv("AIRA_TMP_DIR")
+        if env_dir:
+            try:
+                p = Path(env_dir)
+                p.mkdir(parents=True, exist_ok=True)
+                if shutil.disk_usage(p).free >= self.limits.disk_margin:
+                    return str(p)
+            except Exception:
+                pass
+        try:
+            sys_tmp = tempfile.gettempdir()
+            if shutil.disk_usage(sys_tmp).free >= self.limits.disk_margin:
+                return None
+        except Exception:
+            pass
+        try:
+            cand = path.resolve().parent / ".aira_extract_tmp"
+            cand.mkdir(parents=True, exist_ok=True)
+            if shutil.disk_usage(cand).free >= self.limits.disk_margin:
+                return str(cand)
+        except Exception:
+            pass
+        return None
+
     # ---------------------------------------------------------------- archive
     def _archive(self, result, path, rel, depth, entry):
         if depth >= self.limits.max_depth:
             entry["status"] = FILE_FAILED
             result.error(E_SECURITY, f"Archive bersarang melewati kedalaman {self.limits.max_depth}.", rel)
             return
-        with tempfile.TemporaryDirectory(prefix="aira_extract_") as tmp:  # cleanup otomatis
+        tmp_dir = self._extract_tmp_dir(path)
+        with tempfile.TemporaryDirectory(prefix="aira_extract_", dir=tmp_dir) as tmp:  # cleanup otomatis
             report = arc.extract_archive(path, Path(tmp), self.limits)
             for code, msg, p in report.errors:
                 result.error(code, msg, f"{rel}!{p}" if p else rel)

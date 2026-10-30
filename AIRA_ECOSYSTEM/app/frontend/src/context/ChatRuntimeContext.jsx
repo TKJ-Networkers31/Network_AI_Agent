@@ -233,6 +233,8 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
         case "thinking":
         case "tool_start":
         case "tool_finish":
+        case "stream_start":
+        case "stream_delta":
         case EVENT_RESPONSE_CHUNK: {
           commitRunEvent(sid, event);
           break;

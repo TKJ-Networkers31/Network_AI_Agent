@@ -40,10 +40,11 @@ class ProcessingResult:
     def finalize(self) -> "ProcessingResult":
         leaves = [f for f in self.files if f.get("type") != "archive"]
         done = [f for f in leaves if f["status"] == FILE_COMPLETED]
-        bad = [f for f in leaves if f["status"] != FILE_COMPLETED]
-        if (leaves or self.errors) and not done and (bad or self.errors):
+        partial = [f for f in leaves if f["status"] == FILE_PARTIAL]
+        has_extracted = bool(self.text or self.ocr or any(img.get("vision", {}).get("status") == "available" for img in self.images))
+        if (leaves or self.errors) and not done and not partial and not has_extracted:
             self.status = FAILED
-        elif bad or self.errors:
+        elif (leaves or self.errors) and (len(done) < len(leaves) or self.errors or partial):
             self.status = PARTIAL
         else:
             self.status = COMPLETED

@@ -337,6 +337,36 @@ def _cleanup_run(session_id: str, task: "asyncio.Task") -> None:
 # ENDPOINT
 # ============================================================
 
+@router.websocket("/nms")
+async def nms_ws(websocket: WebSocket):
+    await manager.connect("nms", websocket)
+    get_ws_bridge().ensure_started(asyncio.get_running_loop())
+
+    try:
+        from core.nms_engine import get_nms_engine
+        engine = get_nms_engine()
+        # Kirim initial snapshot langsung saat connect
+        await websocket.send_json({
+            "type": "nms_snapshot",
+            "data": {
+                "overview": engine.get_overview(),
+                "is_running": engine.is_running(),
+                "timestamp": time.time(),
+            },
+            "ts": time.time(),
+        })
+
+        while True:
+            raw = await websocket.receive_json()
+            msg_type = raw.get("type", "ping")
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong", "ts": time.time()})
+    except WebSocketDisconnect:
+        await manager.disconnect("nms", websocket)
+    except Exception:
+        await manager.disconnect("nms", websocket)
+
+
 @router.websocket("/chat/{session_id}")
 async def chat_ws(websocket: WebSocket, session_id: str):
     await manager.connect(session_id, websocket)
@@ -349,6 +379,11 @@ async def chat_ws(websocket: WebSocket, session_id: str):
         while True:
             raw = await websocket.receive_json()
             msg_type = raw.get("type", "text")
+
+            # ---- PING / HEARTBEAT ----
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
 
             # ---- STOP ----
             if msg_type == "cancel":

@@ -82,7 +82,7 @@ class TestValidateMimeAndExtension(unittest.TestCase):
 
     def test_unsupported_extension_rejected(self):
         issues = []
-        result = validate_mime_and_extension("archive.zip", None, issues)
+        result = validate_mime_and_extension("disc.iso", None, issues)
         self.assertIsNone(result)
         self.assertTrue(issues)
 
@@ -130,7 +130,7 @@ class TestValidateSize(unittest.TestCase):
 
     def test_oversized_rejected(self):
         issues = []
-        self.assertIsNone(validate_size(999_999_999_999, issues))
+        self.assertIsNone(validate_size(999_999_999_999, issues, max_bytes=50_000_000))
         self.assertTrue(issues)
 
     def test_non_numeric_rejected(self):

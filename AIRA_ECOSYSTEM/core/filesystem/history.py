@@ -150,7 +150,17 @@ class HistoryEngine:
                 logger.error("RESTORE GAGAL | snapshot_id=%s file hilang: %s", snapshot_id, snapshot_file)
                 return False
 
-            target = self.workspace_root / record["path"]
+            root_res = self.workspace_root.resolve()
+            target = (root_res / record["path"]).resolve()
+            try:
+                target.relative_to(root_res)
+            except ValueError:
+                logger.error("RESTORE GAGAL | Path traversal terdeteksi: %s", record["path"])
+                return False
+            norm_p = str(record["path"]).replace("\\", "/").strip("/").lower()
+            if any(norm_p == p or norm_p.startswith(f"{p}/") for p in (".aira_history", "trash")):
+                logger.error("RESTORE GAGAL | Target direktori sistem terproteksi: %s", norm_p)
+                return False
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(snapshot_file.read_bytes())
 

@@ -143,7 +143,17 @@ class TrashEngine:
                 logger.error("TRASH RESTORE GAGAL | trash_id=%s file hilang.", trash_id)
                 return False
 
-            target = self.workspace_root / record["original_path"]
+            root_res = self.workspace_root.resolve()
+            target = (root_res / record["original_path"]).resolve()
+            try:
+                target.relative_to(root_res)
+            except ValueError:
+                logger.error("TRASH RESTORE GAGAL | Path traversal terdeteksi: %s", record["original_path"])
+                return False
+            norm_orig = str(record["original_path"]).replace("\\", "/").strip("/").lower()
+            if any(norm_orig == p or norm_orig.startswith(f"{p}/") for p in (".aira_history", "trash")):
+                logger.error("TRASH RESTORE GAGAL | Target direktori sistem terproteksi: %s", norm_orig)
+                return False
             target.parent.mkdir(parents=True, exist_ok=True)
 
             if target.exists():

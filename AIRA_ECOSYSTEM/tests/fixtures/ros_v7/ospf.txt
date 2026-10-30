@@ -1,0 +1,2 @@
+Flags: D - DYNAMIC
+ 0 router-id=10.255.255.2 address=10.0.0.2 instance=ospf-instance-1 state="Full" priority=1 dr=10.0.0.2 bdr=10.0.0.1

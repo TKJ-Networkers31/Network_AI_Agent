@@ -1,4 +1,4 @@
-import gzip, io, tarfile, tempfile, unittest, zipfile
+import gzip, io, os, tarfile, tempfile, unittest, zipfile
 from pathlib import Path
 
 from core.file_processing.archive import extract_archive
@@ -23,12 +23,13 @@ def png(w=8, h=8):
 
 class T(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(); self.d = Path(self.tmp.name)
+        tmp_dir = os.getenv("AIRA_TMP_DIR")
+        self.tmp = tempfile.TemporaryDirectory(dir=tmp_dir); self.d = Path(self.tmp.name)
     def tearDown(self): self.tmp.cleanup()
 
-    def zip(self, files, name="a.zip"):
+    def zip(self, files, name="a.zip", compression=zipfile.ZIP_STORED):
         p = self.d / name
-        with zipfile.ZipFile(p, "w") as z:
+        with zipfile.ZipFile(p, "w", compression=compression) as z:
             for k, v in files.items(): z.writestr(k, v)
         return p
 
@@ -87,7 +88,7 @@ class T(unittest.TestCase):
 
     def test_bomb_guard(self):
         from core.file_processing.archive import ArchiveLimits
-        p = self.zip({"z.bin": b"\x00" * 5_000_000})
+        p = self.zip({"z.bin": b"\x00" * 5_000_000}, compression=zipfile.ZIP_DEFLATED)
         rep = extract_archive(p, self.d / "o", ArchiveLimits(max_ratio=10, expansion_floor=1000))
         self.assertTrue(rep.fatal); self.assertEqual(rep.errors[0][0], "resource_exhausted")
 

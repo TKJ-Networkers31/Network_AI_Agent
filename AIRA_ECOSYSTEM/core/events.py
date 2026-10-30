@@ -1,5 +1,5 @@
 """
-AIRA OS — Internal Event Bus
+AIRA OS â€” Internal Event Bus
 ============================
 
 File:
@@ -202,6 +202,11 @@ class EventNames:
 
     # HOST (HAL)
     HOST_DETECTED = "host.detected"
+
+    # NMS MONITORING
+    NMS_DEVICE_STATUS = "nms.device_status"
+    NMS_CYCLE_COMPLETED = "nms.cycle_completed"
+    NMS_INCIDENT = "nms.incident"
 
 
 STANDARD_EVENTS: frozenset[str] = frozenset(

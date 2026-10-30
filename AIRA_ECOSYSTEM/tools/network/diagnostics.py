@@ -2,40 +2,54 @@ import platform
 import subprocess
 
 
-def ping(target, count=4):
+def ping(target, count=4, timeout_sec=4):
     """
-    Cross-platform ping.
+    Cross-platform ping with structured alive & RTT parsing.
 
-    Windows  : ping -n <count> <target>
-    Unix/Mac : ping -c <count> <target>
+    Windows  : ping -n <count> -w <ms> <target>
+    Unix/Mac : ping -c <count> -W <sec> <target>
     """
+    from core.topology_models import parse_ping_output
 
     try:
         is_windows = platform.system().lower() == "windows"
+        count = max(1, min(int(count), 10))
+        timeout_sec = max(1, min(int(timeout_sec), 10))
 
-        count_flag = "-n" if is_windows else "-c"
+        extra_kwargs = {}
+        if is_windows:
+            cmd = ["ping", "-n", str(count), "-w", str(timeout_sec * 1000), str(target)]
+            extra_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        else:
+            cmd = ["ping", "-c", str(count), "-W", str(timeout_sec), str(target)]
 
         result = subprocess.run(
-            ["ping", count_flag, str(count), target],
+            cmd,
             capture_output=True,
             text=True,
-            timeout=20
+            timeout=max(10, count * timeout_sec + 4),
+            **extra_kwargs,
         )
+        parsed = parse_ping_output(result.stdout, result.returncode)
 
         return {
-            "success": result.returncode == 0,
+            "success": parsed["alive"],
+            "alive": parsed["alive"],
+            "avg_rtt_ms": parsed["avg_rtt_ms"],
             "tool": "ping",
             "target": target,
             "output": result.stdout,
-            "error": result.stderr
+            "error": result.stderr,
         }
 
     except Exception as exc:
         return {
             "success": False,
+            "alive": False,
+            "avg_rtt_ms": 0.0,
             "tool": "ping",
             "target": target,
-            "error": str(exc)
+            "error": str(exc),
         }
 
 
@@ -45,6 +59,9 @@ def nslookup(
 
     try:
 
+        extra_kwargs = {}
+        if platform.system().lower() == "windows":
+            extra_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         result = subprocess.run(
             [
                 "nslookup",
@@ -52,7 +69,8 @@ def nslookup(
             ],
             capture_output=True,
             text=True,
-            timeout=20
+            timeout=20,
+            **extra_kwargs,
         )
 
         return {
@@ -115,11 +133,15 @@ def traceroute(
 
     try:
 
+        extra_kwargs = {}
+        if is_windows:
+            extra_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         result = subprocess.run(
             command,
             capture_output=True,
             text=True,
-            timeout=timeout_seconds
+            timeout=timeout_seconds,
+            **extra_kwargs,
         )
 
         return {

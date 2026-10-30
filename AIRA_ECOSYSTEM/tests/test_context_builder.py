@@ -33,6 +33,7 @@ from core.context import (
     ContextSection,
     summarize_tool_schemas,
 )
+from core.attachments.models import Attachment
 
 # Builder yang dibuat tanpa `semantic_memory` akan memanggil singleton produksi
 # (database/semantic_memory.db). Di test builder itu tidak boleh terjadi.
@@ -80,12 +81,24 @@ TOOL_SUMMARY = {
     "categories": {"network": ["ping"], "mikrotik": ["get_routes"]},
 }
 
+DEFAULT_ATTACHMENTS = [
+    Attachment(
+        id="att-test-1",
+        session_id="s1",
+        name="test_file.txt",
+        mime_type="text/plain",
+        size=100,
+        storage_reference="test_file.txt",
+    )
+]
+
 DEFAULTS = {
     "persona_state": PERSONA_STATE,
     "memory_text": MEMORY,
     "runtime_text": RUNTIME,
     "location_text": LOCATION,
     "tool_summary": TOOL_SUMMARY,
+    "attachments": DEFAULT_ATTACHMENTS,
     "prompt_composer": None,  # nilai diabaikan; hanya Exception yang berpengaruh
 }
 
@@ -127,6 +140,7 @@ def make_builder(calls=None, **overrides):
         runtime_text=wrap("runtime_text"),
         location_text=wrap("location_text"),
         tool_summary=wrap("tool_summary"),
+        attachments_for_session=wrap("attachments"),
     )
 
 
@@ -165,7 +179,7 @@ class TestContextModels(unittest.TestCase):
             persona=ContextSection("persona", text="PERSONA_TEXT_JANGAN_MASUK"),
         )
 
-        self.assertEqual(PROMPT_SECTIONS, ("runtime_state", "memory", "location"))
+        self.assertEqual(PROMPT_SECTIONS, ("runtime_state", "memory", "location", "attachment"))
         self.assertEqual(context.extra_context(), "RUN\n\nMEM\n\nLOC")
         self.assertNotIn("JANGAN_MASUK", context.extra_context())
 
@@ -219,7 +233,7 @@ class TestBuilderMinimal(unittest.TestCase):
     def test_no_sources_available_gives_minimal_context(self):
         builder = make_builder(
             persona_state=None, memory_text=None, runtime_text=None,
-            location_text=None, tool_summary=None,
+            location_text=None, tool_summary=None, attachments=None,
         )
 
         context = builder.build("halo", session_id="s1")
@@ -290,7 +304,7 @@ class TestBuilderFull(unittest.TestCase):
             calls,
             {
                 "persona_state": 1, "runtime_text": 1, "memory_text": 1,
-                "location_text": 1, "tool_summary": 1, "prompt_composer": 1,
+                "location_text": 1, "tool_summary": 1, "attachments": 1, "prompt_composer": 1,
             },
         )
 
@@ -376,7 +390,7 @@ class TestMissingOptionalContext(unittest.TestCase):
         boom = RuntimeError("x")
         builder = make_builder(
             persona_state=boom, memory_text=boom, runtime_text=boom,
-            location_text=boom, tool_summary=boom, prompt_composer=boom,
+            location_text=boom, tool_summary=boom, attachments=boom, prompt_composer=boom,
         )
 
         context = builder.build("halo", session_id="s1", task=FakeTask())

@@ -264,7 +264,7 @@ class TestPromptAssembly(unittest.TestCase):
         prompt = build_prompt(AKANE["profile"], AKANE["behavior"], AKANE["persona_text"], "EXTRA_MARK")
         order = [
             "Kamu adalah AIRA", "=== ATURAN INTI ===", "=== GAYA BICARA ===", "=== GAYA JAWAB ===",
-            "=== EKSPRESI EMOSI ===", "=== FORMAT JAWABAN ===", "=== ILUSTRASI VISUAL ===",
+            "=== EKSPRESI EMOSI ===", "=== FORMAT JAWABAN ===", "=== ILUSTRASI VISUAL",
             "=== LOKASI USER ===", "EXTRA_MARK",
         ]
         positions = [prompt.index(marker) for marker in order]

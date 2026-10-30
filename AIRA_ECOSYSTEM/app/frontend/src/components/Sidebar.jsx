@@ -117,8 +117,8 @@ function NavButton({ item, active, compact, dot, onClick }) {
         ${compact ? "justify-center" : "gap-3 px-3"}
         ${
           active
-            ? "bg-white/[0.07] text-text-primary"
-            : "text-text-secondary hover:text-text-primary hover:bg-white/[0.04]"
+            ? "bg-cyan-500/10 text-cyan-300 border border-cyan-500/25 shadow-[0_0_15px_rgba(56,189,248,0.2)] font-medium"
+            : "text-text-secondary hover:text-text-primary hover:bg-white/[0.03] hover:border hover:border-white/10"
         }`}
     >
       {active && (
@@ -239,7 +239,7 @@ export default function Sidebar({
           md:static md:z-auto md:max-w-none md:translate-x-0 md:transition-[width] md:duration-200
           ${compact ? "md:w-[68px]" : "md:w-64"}
           ${isOpen ? "translate-x-0" : "-translate-x-full"}
-          bg-surface border-r border-border flex flex-col h-full shrink-0 overflow-hidden`}
+          bg-[#000000] border-r border-white/[0.08] flex flex-col h-full shrink-0 overflow-hidden`}
       >
         {/* Header / brand */}
         <div

@@ -58,9 +58,9 @@ class TestInteractionMemory(unittest.TestCase):
         self.assertIsNone(self.memory.load("b"))
 
     def test_ttl_expiry(self):
-        self.memory.save("short_lived", "value", ttl_seconds=0.05)
+        self.memory.save("short_lived", "value", ttl_seconds=0.2)
         self.assertEqual(self.memory.load("short_lived"), "value")
-        time.sleep(0.1)
+        time.sleep(0.25)
         self.assertIsNone(self.memory.load("short_lived"))
 
     def test_ttl_zero_disables_expiry(self):
@@ -68,9 +68,9 @@ class TestInteractionMemory(unittest.TestCase):
         self.assertEqual(self.memory.load("permanent"), "value")
 
     def test_purge_expired(self):
-        self.memory.save("will_expire", "x", ttl_seconds=0.05)
+        self.memory.save("will_expire", "x", ttl_seconds=0.2)
         self.memory.save("stays", "y")
-        time.sleep(0.1)
+        time.sleep(0.25)
         deleted = self.memory.purge_expired()
         self.assertEqual(deleted, 1)
         self.assertEqual(self.memory.load("stays"), "y")

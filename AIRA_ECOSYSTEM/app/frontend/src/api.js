@@ -164,6 +164,21 @@ export const api = {
         return res.json();
       });
     },
+    uploadMultiple: (sessionId, files, messageId = null) => {
+      const form = new FormData();
+      form.append("session_id", sessionId);
+      if (messageId) form.append("message_id", messageId);
+      for (const f of files) {
+        form.append("files", f);
+      }
+      return fetch(`${BASE}/attachments/batch`, { method: "POST", body: form }).then(async (res) => {
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          throw new Error(detail.detail || `Upload gagal (${res.status})`);
+        }
+        return res.json();
+      });
+    },
     list: (sessionId) => request(`/attachments?session_id=${encodeURIComponent(sessionId)}`),
     remove: (id) => request(`/attachments/${encodeURIComponent(id)}`, { method: "DELETE" }),
   },
@@ -331,5 +346,41 @@ export const api = {
     trashList: () => rawRequest("/files/trash"),
     trashEmpty: () => rawRequest("/files/trash/empty", { method: "POST" }),
     permissions: () => rawRequest("/files/permissions"),
+  },
+
+  intelligence: {
+    createIncident: (body) =>
+      request("/intelligence/incidents", { method: "POST", body: JSON.stringify(body) }),
+    listIncidents: (limit = 50, device = null) =>
+      request(`/intelligence/incidents?limit=${limit}${device ? `&device_identity=${encodeURIComponent(device)}` : ""}`),
+    getIncident: (incidentId) =>
+      request(`/intelligence/incidents/${encodeURIComponent(incidentId)}`),
+    listPlaybooks: () => request("/intelligence/playbooks"),
+    getPlaybook: (playbookId) =>
+      request(`/intelligence/playbooks/${encodeURIComponent(playbookId)}`),
+    startPlaybook: (incidentId, playbookId = null) =>
+      request(
+        `/intelligence/incidents/${encodeURIComponent(incidentId)}/playbook/start${
+          playbookId ? `?playbook_id=${encodeURIComponent(playbookId)}` : ""
+        }`,
+        { method: "POST" }
+      ),
+    advancePlaybook: (runId, body) =>
+      request(`/intelligence/playbooks/runs/${encodeURIComponent(runId)}/advance`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    getPlaybookRun: (runId) =>
+      request(`/intelligence/playbooks/runs/${encodeURIComponent(runId)}`),
+    createPlan: (body) =>
+      request("/intelligence/plans", { method: "POST", body: JSON.stringify(body) }),
+    getPlan: (planId) =>
+      request(`/intelligence/plans/${encodeURIComponent(planId)}`),
+    listPlans: (limit = 50, incidentId = null) =>
+      request(
+        `/intelligence/plans?limit=${limit}${
+          incidentId ? `&incident_id=${encodeURIComponent(incidentId)}` : ""
+        }`
+      ),
   },
 };

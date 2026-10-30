@@ -139,7 +139,7 @@ class Orchestrator:
         if not devices:
             return {
                 "success": False, "tool": tool_name,
-                "error": "Belum ada perangkat di inventory (inventory/router.yaml). Sampaikan ke user.",
+                "error": "Belum ada perangkat di inventory. Tambahkan perangkat lewat tab Devices atau minta AIRA untuk mendaftarkannya.",
             }, arguments
 
         given = str(arguments.get("device_name") or "").strip()

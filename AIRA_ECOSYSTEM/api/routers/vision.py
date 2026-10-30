@@ -25,7 +25,7 @@ async def _upload(
 ):
     content = await file.read()
 
-    if len(content) > MAX_ATTACHMENT_BYTES:
+    if MAX_ATTACHMENT_BYTES > 0 and len(content) > MAX_ATTACHMENT_BYTES:
         raise HTTPException(status_code=413, detail=f"File melebihi batas {MAX_ATTACHMENT_BYTES} byte.")
 
     result = get_image_vision_engine().create_image_attachment(

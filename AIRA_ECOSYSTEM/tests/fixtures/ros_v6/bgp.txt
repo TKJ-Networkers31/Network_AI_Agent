@@ -1,0 +1,1 @@
+ 0 name="peer1" instance=default remote-address=198.51.100.2 remote-as=65002 state=established prefix-count=42 uptime=2w4d

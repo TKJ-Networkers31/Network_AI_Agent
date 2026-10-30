@@ -1,0 +1,6 @@
+Flags: X - disabled, I - invalid; D - dynamic
+ 0  ;;; defconf: accept established,related,untracked
+    chain=input action=accept connection-state=established,related,untracked
+ 1  chain=forward action=fasttrack-connection connection-state=established,related
+ 2  chain=forward action=accept connection-state=established,related,untracked
+ 3  chain=forward action=drop connection-state=invalid

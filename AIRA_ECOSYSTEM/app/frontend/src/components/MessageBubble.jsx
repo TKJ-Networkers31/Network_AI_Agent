@@ -166,7 +166,7 @@ function EditBox({ initial, hasFollowing, onCancel, onSubmit }) {
   }
 
   return (
-    <div className="rounded-xl2 border border-sakura/40 bg-surface/80 p-3 space-y-2.5">
+    <div className="rounded-2xl border border-cyan-400/40 bg-surface/90 p-3 space-y-2.5 shadow-[0_0_20px_rgba(56,189,248,0.25)]">
       <textarea
         ref={areaRef}
         value={value}
@@ -295,13 +295,13 @@ export default function MessageBubble({
           content && (
             <div
               ref={contentRef}
-              className={`rounded-xl2 px-4 py-3 text-sm leading-relaxed break-words
+              className={`rounded-2xl px-4 py-3 text-sm leading-relaxed break-words transition-all duration-200
                 ${
                   isUser
-                    ? "bg-accent-gradient text-white whitespace-pre-wrap"
+                    ? "bg-gradient-to-r from-cyan-600/90 to-purple-600/90 text-white whitespace-pre-wrap border border-cyan-400/35 shadow-[0_0_15px_rgba(56,189,248,0.2)] hover:border-cyan-400/70 hover:shadow-[0_0_24px_rgba(56,189,248,0.35)]"
                     : local
-                    ? "bg-white/[0.03] border border-border text-white/60"
-                    : "bg-card border border-border text-white/90"
+                    ? "bg-black/70 border border-white/10 text-white/60"
+                    : "bg-surface/85 backdrop-blur-md border border-white/10 text-white/90 hover:border-cyan-400/50 hover:shadow-[0_0_22px_rgba(56,189,248,0.2)]"
                 }`}
             >
               {isUser ? (

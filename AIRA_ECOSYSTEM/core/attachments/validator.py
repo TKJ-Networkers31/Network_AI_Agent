@@ -120,7 +120,7 @@ def validate_mime_and_extension(
     return declared
 
 
-def validate_size(size: Any, issues: list[ValidationIssue]) -> Optional[int]:
+def validate_size(size: Any, issues: list[ValidationIssue], max_bytes: Optional[int] = None) -> Optional[int]:
     try:
         value = int(size)
     except (TypeError, ValueError):
@@ -131,12 +131,13 @@ def validate_size(size: Any, issues: list[ValidationIssue]) -> Optional[int]:
         issues.append(ValidationIssue("size", "size harus lebih besar dari 0."))
         return None
 
+    limit = max_bytes if max_bytes is not None else MAX_ATTACHMENT_BYTES
     # 0 = tanpa batas aplikasi. Batas hanya ada kalau administrator mengaturnya.
-    if MAX_ATTACHMENT_BYTES > 0 and value > MAX_ATTACHMENT_BYTES:
+    if limit > 0 and value > limit:
         issues.append(ValidationIssue(
             "size",
             f"size ({value} byte) melebihi batas yang dikonfigurasi administrator "
-            f"({MAX_ATTACHMENT_BYTES} byte).",
+            f"({limit} byte).",
         ))
         return None
 

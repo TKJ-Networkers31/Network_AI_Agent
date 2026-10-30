@@ -47,7 +47,19 @@ export function ToastProvider({ children }) {
   }, []);
 
   const notify = useCallback(
-    ({ type = "info", message, duration = 4000 }) => {
+    (arg, maybeType = "info", maybeDuration = 4000) => {
+      let type = maybeType;
+      let message = "";
+      let duration = maybeDuration;
+
+      if (typeof arg === "string") {
+        message = arg;
+      } else if (arg && typeof arg === "object") {
+        message = arg.message;
+        type = arg.type || "info";
+        duration = arg.duration ?? 4000;
+      }
+
       if (!message) return null;
 
       const id = makeId();
@@ -63,8 +75,13 @@ export function ToastProvider({ children }) {
     [dismiss]
   );
 
+  const pushToast = useCallback(
+    (message, type = "info", duration = 4000) => notify(message, type, duration),
+    [notify]
+  );
+
   return (
-    <ToastContext.Provider value={{ notify, dismiss }}>
+    <ToastContext.Provider value={{ notify, pushToast, dismiss }}>
       {children}
 
       <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 w-[calc(100%-2rem)] max-w-sm pointer-events-none">

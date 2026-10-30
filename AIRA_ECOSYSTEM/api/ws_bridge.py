@@ -74,6 +74,13 @@ STREAM_WS_EVENT_MAP: dict[str, str] = {
     EventNames.STREAM_DELTA: "stream_delta",
 }
 
+# Realtime NMS Events
+NMS_WS_EVENT_MAP: dict[str, str] = {
+    EventNames.NMS_DEVICE_STATUS: "nms_device_status",
+    EventNames.NMS_CYCLE_COMPLETED: "nms_cycle_completed",
+    EventNames.NMS_INCIDENT: "nms_incident",
+}
+
 Sender = Callable[[str, dict], Awaitable[None]]
 
 _FALSE_VALUES = {"0", "false", "off", "no"}
@@ -203,6 +210,20 @@ class WebSocketEventBridge:
         Event bus -> (session_id, payload WebSocket), atau None kalau event
         ini tidak boleh/perlu dikirim ke client.
         """
+        # Forward NMS system events directly to "nms" channel
+        if event.event in NMS_WS_EVENT_MAP:
+            ws_type = NMS_WS_EVENT_MAP[event.event]
+            data = json_safe(dict(event.data))
+            if not isinstance(data, dict):
+                data = {"value": data}
+            return "nms", {
+                "type": ws_type,
+                "data": data,
+                "ts": time.time(),
+                "event_id": event.event_id,
+                "correlation_id": event.correlation_id,
+            }
+
         session_id = event.metadata.get("session_id")
         run_id = event.metadata.get("run_id")
 

@@ -16,6 +16,8 @@ from core.filesystem.models import PermissionLevel
 logger = logging.getLogger("aira.filesystem.permissions")
 
 
+SYSTEM_PROTECTED_PATHS = (".aira_history", "trash")
+
 def _normalize(relative_path: str) -> str:
     return relative_path.replace("\\", "/").strip("/")
 
@@ -73,6 +75,9 @@ class PermissionEngine:
         return level in (PermissionLevel.READ_ONLY, PermissionLevel.READ_WRITE)
 
     def can_write(self, relative_path: str) -> bool:
+        norm = _normalize(relative_path).lower()
+        if any(norm == p or norm.startswith(f"{p}/") for p in SYSTEM_PROTECTED_PATHS):
+            return False
         return self._resolve_level(relative_path) == PermissionLevel.READ_WRITE
 
     def list_rules(self) -> dict[str, str]:

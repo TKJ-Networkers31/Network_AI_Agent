@@ -1,25 +1,34 @@
 import { useCallback, useRef, useState } from "react";
 
 /**
- * Voice Call Mode — mic ditangkap client-side (VAD energi sederhana,
- * mirip agents/yuki/voice_io.py versi server), utterance dikirim
- * PENUH ke WebSocket sebagai {type:"voice_audio", audio_base64}.
- * Transkripsi (faster-whisper) dan sintesis balasan (Kokoro) terjadi
- * di SERVER (lihat api/routers/ws.py) - BUKAN Web Speech API browser,
- * jadi tidak butuh koneksi ke server pihak ketiga (Google) sama sekali.
- *
- * Dipakai bersama wsSend dari ChatRuntimeContext (lihat
- * useChatRuntime().sendVoiceAudio). Hook ini TIDAK tahu apa-apa soal
- * WebSocket - murni mic capture + VAD + audio playback balasan.
+ * Voice Call Mode — mic ditangkap client-side (Adaptive VAD),
+ * utterance dikirim PENUH ke WebSocket sebagai {type:"voice_audio", audio_base64}.
+ * Menyediakan diagnostik pipeline observable: Audio Track, Noise Floor Calibration,
+ * Live Volume Level, dan Silence Timeout.
  */
+
+export const VOICE_DIAGNOSTICS = {
+  IDLE: "idle",
+  REQUESTING_PERMISSION: "requesting_permission",
+  READY: "ready",
+  LISTENING: "listening",
+  SPEECH_DETECTED: "speech_detected",
+  PROCESSING: "processing",
+  TRANSCRIPT_RECEIVED: "transcript_received",
+  PERMISSION_DENIED: "permission_denied",
+  NO_INPUT_DETECTED: "no_input_detected",
+  ERROR: "error",
+};
 
 const SAMPLE_RATE = 16000;
 const FRAME_MS = 30;
 const FRAME_SAMPLES = Math.round((SAMPLE_RATE * FRAME_MS) / 1000);
-const ENERGY_THRESHOLD = 500;
+const DEFAULT_ENERGY_THRESHOLD = 120; // Sensible default for normal conversational mic
 const SILENCE_END_MS = 800;
 const SILENCE_END_FRAMES = Math.round(SILENCE_END_MS / FRAME_MS);
 const MIN_UTTERANCE_FRAMES = 10;
+const CALIBRATION_FRAMES = 10; // ~300ms initial ambient noise sampling
+const SILENCE_TIMEOUT_MS = 10_000; // 10s without any speech triggers no_input_detected
 
 function downsampleTo16k(buffer, inputRate) {
   if (inputRate === SAMPLE_RATE) return buffer;
@@ -60,10 +69,16 @@ function int16ToBase64(int16) {
 
 export function useVoiceCall({ onSendAudio, notify } = {}) {
   const [callActive, setCallActive] = useState(false);
-  const [listening, setListening] = useState(false); // sedang menangkap ucapan (energi > threshold)
-  const [speaking, setSpeaking] = useState(false);    // audio balasan sedang diputar
+  const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const [subtitle, setSubtitle] = useState("");
-  const [waitingReply, setWaitingReply] = useState(false); // sudah kirim utterance, menunggu balasan
+  const [waitingReply, setWaitingReply] = useState(false);
+
+  // Observable Voice Diagnostics
+  const [diagnosticState, setDiagnosticState] = useState(VOICE_DIAGNOSTICS.IDLE);
+  const [audioLevel, setAudioLevel] = useState(0); // 0-100 normalized
+  const [deviceLabel, setDeviceLabel] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
 
   const audioCtxRef = useRef(null);
   const streamRef = useRef(null);
@@ -74,19 +89,26 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
   const speechFramesRef = useRef([]);
   const silenceRunRef = useRef(0);
   const inSpeechRef = useRef(false);
-  const pausedRef = useRef(false); // true saat menunggu balasan / TTS bicara
+  const pausedRef = useRef(false);
   const activeRef = useRef(false);
+
+  // Adaptive VAD refs
+  const thresholdRef = useRef(DEFAULT_ENERGY_THRESHOLD);
+  const calibrationSumRef = useRef(0);
+  const calibrationCountRef = useRef(0);
+  const lastSpeechTimeRef = useRef(0);
+  const lastLevelUpdateRef = useRef(0);
 
   const onSendAudioRef = useRef(onSendAudio);
   onSendAudioRef.current = onSendAudio;
 
   const stopMicOnly = useCallback(() => {
     try {
-      processorRef.current && (processorRef.current.onaudioprocess = null);
+      if (processorRef.current) processorRef.current.onaudioprocess = null;
       processorRef.current?.disconnect();
       sourceRef.current?.disconnect();
     } catch {
-      // abaikan - node mungkin sudah disconnect
+      // ignore
     }
 
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -96,6 +118,7 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
     streamRef.current = null;
 
     setListening(false);
+    setAudioLevel(0);
   }, []);
 
   const _sendUtterance = useCallback((frames) => {
@@ -113,6 +136,7 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
 
     pausedRef.current = true;
     setWaitingReply(true);
+    setDiagnosticState(VOICE_DIAGNOSTICS.PROCESSING);
 
     onSendAudioRef.current?.({
       type: "voice_audio",
@@ -124,9 +148,26 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
   const startMicCapture = useCallback(async () => {
     if (!activeRef.current) return;
 
+    setDiagnosticState(VOICE_DIAGNOSTICS.REQUESTING_PERMISSION);
+    setErrorMessage("");
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       streamRef.current = stream;
+
+      const tracks = stream.getAudioTracks();
+      if (!tracks || tracks.length === 0) {
+        throw new Error("Tidak ada track audio mikrofon aktif.");
+      }
+      const track = tracks[0];
+      setDeviceLabel(track.label || "Mikrofon Perangkat");
+      setDiagnosticState(VOICE_DIAGNOSTICS.READY);
 
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       const audioCtx = audioCtxRef.current || new AudioCtx();
@@ -146,6 +187,13 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
       speechFramesRef.current = [];
       silenceRunRef.current = 0;
       inSpeechRef.current = false;
+      calibrationSumRef.current = 0;
+      calibrationCountRef.current = 0;
+      thresholdRef.current = DEFAULT_ENERGY_THRESHOLD;
+      lastSpeechTimeRef.current = Date.now();
+      lastLevelUpdateRef.current = 0;
+
+      setDiagnosticState(VOICE_DIAGNOSTICS.LISTENING);
 
       processor.onaudioprocess = (e) => {
         if (pausedRef.current || !activeRef.current) return;
@@ -159,14 +207,41 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
           if (frame.length === 0) continue;
 
           const energy = frameRms(frame);
-          const isSpeech = energy >= ENERGY_THRESHOLD;
+
+          // Update live audio meter (throttled ~60ms)
+          const now = Date.now();
+          if (now - lastLevelUpdateRef.current > 60) {
+            lastLevelUpdateRef.current = now;
+            const norm = Math.min(100, Math.round((energy / 300) * 100));
+            setAudioLevel(norm);
+          }
+
+          // Adaptive Noise Calibration (~300ms awal)
+          if (calibrationCountRef.current < CALIBRATION_FRAMES) {
+            calibrationSumRef.current += energy;
+            calibrationCountRef.current += 1;
+            if (calibrationCountRef.current === CALIBRATION_FRAMES) {
+              const ambient = calibrationSumRef.current / CALIBRATION_FRAMES;
+              thresholdRef.current = Math.max(75, Math.min(240, Math.round(ambient * 1.8)));
+            }
+            continue;
+          }
+
+          const isSpeech = energy >= thresholdRef.current;
+
+          // Silence timeout check
+          if (!inSpeechRef.current && (now - lastSpeechTimeRef.current > SILENCE_TIMEOUT_MS)) {
+            setDiagnosticState(VOICE_DIAGNOSTICS.NO_INPUT_DETECTED);
+          }
 
           if (isSpeech) {
+            lastSpeechTimeRef.current = now;
             speechFramesRef.current.push(frame);
             silenceRunRef.current = 0;
             if (!inSpeechRef.current) {
               inSpeechRef.current = true;
               setListening(true);
+              setDiagnosticState(VOICE_DIAGNOSTICS.SPEECH_DETECTED);
             }
           } else if (inSpeechRef.current) {
             silenceRunRef.current += 1;
@@ -181,13 +256,14 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
 
               if (frames.length >= MIN_UTTERANCE_FRAMES) {
                 _sendUtterance(frames);
+              } else {
+                setDiagnosticState(VOICE_DIAGNOSTICS.LISTENING);
               }
             }
           }
         }
       };
 
-      // Node dummy tujuan wajib supaya onaudioprocess jalan di semua browser.
       const silentGain = audioCtx.createGain();
       silentGain.gain.value = 0;
 
@@ -195,31 +271,33 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
       processor.connect(silentGain);
       silentGain.connect(audioCtx.destination);
     } catch (err) {
-      notify?.({
-        type: "error",
-        message: "Tidak bisa mengakses mikrofon: " + (err?.message || err),
-      });
+      const isDenied = err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError";
+      const diagState = isDenied ? VOICE_DIAGNOSTICS.PERMISSION_DENIED : VOICE_DIAGNOSTICS.ERROR;
+      const msg = isDenied
+        ? "Izin akses mikrofon ditolak oleh browser. Silakan izinkan akses mikrofon di pengaturan browser Anda."
+        : "Tidak bisa mengakses mikrofon: " + (err?.message || err);
+
+      setDiagnosticState(diagState);
+      setErrorMessage(msg);
+      notify?.({ type: "error", message: msg });
       activeRef.current = false;
       setCallActive(false);
     }
   }, [notify, _sendUtterance]);
 
-  /**
-   * Dipanggil dari luar (ChatRuntimeContext) setiap kali event WS
-   * "response" masuk untuk giliran suara. base64Wav bisa null (mis.
-   * Kokoro belum ter-setup) - tetap resume mic supaya sesi tidak macet.
-   */
   const playResponseAudio = useCallback((base64Wav, answerText) => {
     setWaitingReply(false);
 
     if (!base64Wav) {
       pausedRef.current = false;
       setSubtitle("");
+      setDiagnosticState(VOICE_DIAGNOSTICS.LISTENING);
       return;
     }
 
     setSubtitle(answerText || "");
     setSpeaking(true);
+    setDiagnosticState(VOICE_DIAGNOSTICS.TRANSCRIPT_RECEIVED);
     pausedRef.current = true;
 
     const src = `data:audio/wav;base64,${base64Wav}`;
@@ -230,6 +308,8 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
       setSpeaking(false);
       setSubtitle("");
       pausedRef.current = false;
+      setDiagnosticState(VOICE_DIAGNOSTICS.LISTENING);
+      lastSpeechTimeRef.current = Date.now();
     };
 
     audioEl.onended = resumeMic;
@@ -237,11 +317,11 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
     audioEl.play().catch(resumeMic);
   }, []);
 
-  /** Dipanggil kalau backend melapor transkrip kosong / error, supaya
-   * sesi tidak macet menunggu balasan yang tidak akan pernah datang. */
   const cancelWaiting = useCallback(() => {
     pausedRef.current = false;
     setWaitingReply(false);
+    setDiagnosticState(VOICE_DIAGNOSTICS.LISTENING);
+    lastSpeechTimeRef.current = Date.now();
   }, []);
 
   const startCall = useCallback(() => {
@@ -260,6 +340,8 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
     setSpeaking(false);
     setWaitingReply(false);
     setSubtitle("");
+    setDiagnosticState(VOICE_DIAGNOSTICS.IDLE);
+    setAudioLevel(0);
 
     audioElRef.current?.pause();
     audioElRef.current = null;
@@ -273,13 +355,16 @@ export function useVoiceCall({ onSendAudio, notify } = {}) {
   }, [callActive, startCall, endCall]);
 
   return {
-    supported:
-      typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia,
+    supported: typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia,
     callActive,
     listening,
     speaking,
     waitingReply,
     subtitle,
+    diagnosticState,
+    audioLevel,
+    deviceLabel,
+    errorMessage,
     startCall,
     endCall,
     toggleCall,

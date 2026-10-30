@@ -83,6 +83,7 @@ import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
 import { CapabilityProvider, useCapabilityContext } from "../context/CapabilityContext.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { useVoiceCall } from "../hooks/useVoiceCall.js";
+import { useVoice } from "../hooks/useVoice.js";
 import { useGlobalSettings } from "../hooks/useGlobalSettings.js";
 import { useCockpitData } from "../hooks/useCockpitData.js";
 import { navigateForTool } from "../utils/cockpitAdapter.js";
@@ -130,16 +131,43 @@ function ChatPageInner({ onOpenMenu }) {
 
   const [tools, setTools] = useState([]);
   const [voiceConnecting, setVoiceConnecting] = useState(false);
-  // SPRINT 2.7.1 P0 FIX: file terakhir yang berhasil dilampirkan ke sesi
-  // aktif (indikator kecil di atas ChatInput) - lihat handleAttachFile().
-  const [attachedFile, setAttachedFile] = useState(null);
-    // Kutipan seleksi untuk "Tanya AIRA" (ditampilkan di composer, BUKAN auto-send).
+  // Multi-file attachments dan status upload
+  const [attachedFiles, setAttachedFiles] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
+  // Kutipan seleksi untuk "Tanya AIRA" (ditampilkan di composer, BUKAN auto-send).
   const [quote, setQuote] = useState(null);
   const bottomRef = useRef(null);
 
   const askRef = useRef(null);
 
   const { notify } = useToast();
+  const [chatVoiceTranscript, setChatVoiceTranscript] = useState("");
+  const voice = useVoice({
+    onTranscript: (t) => {
+      setChatVoiceTranscript(t);
+      setTimeout(() => setChatVoiceTranscript(""), 100);
+    },
+    notify,
+  });
+
+  const lastSpokenMsgRef = useRef(null);
+
+  useEffect(() => {
+    if (!voice.speakEnabled || streaming || loading) return;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg && lastMsg.role === "assistant" && !lastMsg.local && lastMsg.content) {
+      const msgKey = `${lastMsg.turnId || ""}-${lastMsg.content.slice(0, 50)}`;
+      if (lastSpokenMsgRef.current !== msgKey) {
+        lastSpokenMsgRef.current = msgKey;
+        voice.speak(lastMsg.content);
+      }
+    }
+  }, [messages, streaming, loading, voice.speakEnabled, voice.speak]);
+
+  useEffect(() => {
+    voice.stopSpeaking();
+    voice.stopListening();
+  }, [activeId]);
   const { setHasArtifact, setHasLocation, setHasAttachment } = useCapabilityContext();
 
   // ---- Sprint 2.6: settings + cockpit + hero model -------------------------
@@ -260,6 +288,29 @@ function ChatPageInner({ onOpenMenu }) {
     return () => window.removeEventListener("aira:ask", onAsk);
   }, []);
 
+  // Muat lampiran aktif saat sesi aktif berubah (Hook WAJIB dipanggil sebelum return kondisional!)
+  useEffect(() => {
+    if (!activeId) {
+      setAttachedFiles([]);
+      return;
+    }
+    api.attachments
+      .list(activeId)
+      .then((res) => {
+        const items = (res?.attachments || []).filter((a) => a.status === "available" && !a.is_deleted);
+        setAttachedFiles(
+          items.map((a) => ({
+            id: a.id,
+            name: a.name,
+            hasOcr: Boolean(a.metadata?.processing?.ocr?.length),
+            size: a.size,
+          }))
+        );
+        if (items.length > 0) setHasAttachment(true);
+      })
+      .catch(() => {});
+  }, [activeId, setHasAttachment]);
+
   if (!sessionsReady || !personaReady) {
     return <BootScreen />;
   }
@@ -288,12 +339,10 @@ function ChatPageInner({ onOpenMenu }) {
     });
   }
 
-  // SPRINT 2.7.1 P0 FIX (flow A): upload file -> AttachmentEngine ->
-  // ContextBuilder (session-scoped, lihat core/context/builder.py) ->
-  // giliran BERIKUTNYA otomatis membawa ringkasan attachment ini ke system
-  // prompt. Tidak perlu mengirim attachment_id manual per pesan -
-  // ContextBuilder menariknya sendiri lewat session_id tiap giliran.
-  async function handleAttachFile(file) {
+  // Upload satu atau banyak file/gambar untuk reasoning & analisis dokumen
+  async function handleAttachFiles(files) {
+    if (!files || files.length === 0) return;
+    setIsUploading(true);
     try {
       const sid = await ensureSession({
         onNewSession: (newId) => {
@@ -302,12 +351,43 @@ function ChatPageInner({ onOpenMenu }) {
         },
       });
 
-      const result = await api.attachments.upload(sid, file);
-      setAttachedFile({ name: result.attachment.name, id: result.attachment.id });
+      const fileList = Array.isArray(files) ? files : Array.from(files);
+      const result = await api.attachments.uploadMultiple(sid, fileList);
+      const uploaded = (result.attachments || []).map((a) => ({
+        id: a.id,
+        name: a.name,
+        hasOcr: Boolean(a.metadata?.processing?.ocr?.length),
+        size: a.size,
+      }));
+
+      setAttachedFiles((prev) => {
+        const existingIds = new Set(prev.map((p) => p.id));
+        const combined = [...prev];
+        for (const up of uploaded) {
+          if (!existingIds.has(up.id)) combined.push(up);
+        }
+        return combined;
+      });
+
       setHasAttachment(true);
-      notify({ type: "success", message: `Terlampir: ${result.attachment.name}` });
+      notify({
+        type: "success",
+        message: `${uploaded.length} file berhasil diunggah & dianalisis.`,
+      });
     } catch (err) {
       notify({ type: "error", message: `Gagal mengunggah file: ${err.message || err}` });
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function handleRemoveAttachment(id) {
+    try {
+      await api.attachments.remove(id);
+      setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
+      notify({ type: "success", message: "File lampiran dihapus." });
+    } catch (err) {
+      notify({ type: "error", message: `Gagal menghapus file: ${err.message || err}` });
     }
   }
 
@@ -426,36 +506,8 @@ function ChatPageInner({ onOpenMenu }) {
     );
   }
 
-  async function handleToggleVoiceCall() {
-    if (voiceCall.callActive) {
-      voiceCall.endCall();
-      return;
-    }
-
-    // Klik beruntun saat masih menyambung diabaikan (cegah sesi ganda).
-    if (voiceConnecting) return;
-
-    setVoiceConnecting(true);
-
-    try {
-      await ensureSession({
-        onNewSession: (newId) => {
-          setActiveId(newId);
-          loadSessions?.();
-        },
-      });
-
-      await waitForConnection(8000);
-
-      voiceCall.startCall();
-    } catch (err) {
-      notify({
-        type: "error",
-        message: `Gagal memulai sesi suara: ${err.message || err}`,
-      });
-    } finally {
-      setVoiceConnecting(false);
-    }
+  function handleToggleVoiceCall() {
+    window.dispatchEvent(new CustomEvent("aira:voice-activate"));
   }
 
   const activeTitle =
@@ -470,6 +522,10 @@ function ChatPageInner({ onOpenMenu }) {
           subtitle={voiceCall.subtitle}
           speaking={voiceCall.speaking}
           waitingReply={voiceCall.waitingReply}
+          diagnosticState={voiceCall.diagnosticState}
+          audioLevel={voiceCall.audioLevel}
+          deviceLabel={voiceCall.deviceLabel}
+          errorMessage={voiceCall.errorMessage}
           onCancel={() => {
             voiceCall.endCall();
             setVoiceConnecting(false);
@@ -487,16 +543,15 @@ function ChatPageInner({ onOpenMenu }) {
 
       {/* Area pesan: full-width (scrollbar di tepi kanan), konten di tengah */}
       <div className="flex-1 overflow-y-auto min-h-0 -mx-3 sm:-mx-5 lg:-mx-6 px-3 sm:px-5 lg:px-6">
-        <div className="max-w-4xl mx-auto w-full space-y-3 sm:space-y-4 pb-3">
+        <div className="max-w-5xl xl:max-w-6xl mx-auto w-full space-y-2.5 pb-2">
           {switching && (
             <p className="text-white/30 text-sm text-center mt-10">
               Memuat percakapan...
             </p>
           )}
 
-          {/* Sapaan tetap di area percakapan (bukan di composer) */}
-          {heroVisible && heroReady && <DynamicHero heroModel={heroModel} />}
-          {heroVisible && <Hero onQuickPrompt={(text) => handleSend(text)} />}
+          {/* Sapaan Claude-Style Terpusat dengan Dynamic Tool Trends */}
+          {heroVisible && <Hero heroModel={heroModel} onQuickPrompt={(text) => handleSend(text)} />}
           {heroVisible && <CapabilityHeroRow onInvoke={handleCapabilityInvoke} />}
 
           {!switching &&
@@ -554,25 +609,35 @@ function ChatPageInner({ onOpenMenu }) {
       />
 
       {/* Input menempel ke bawah (full-bleed diatur di dalam ChatInput) */}
-           <ChatInput
+      <ChatInput
         onSend={handleComposerSend}
         quote={quote}
         onClearQuote={() => setQuote(null)}
         disabled={loading || switching}
         isRunning={loading}
-        onStop={() => stopRun()}
+        onStop={() => {
+          stopRun();
+          voice.stopSpeaking();
+        }}
         tools={tools}
         onCapabilityInvoke={handleCapabilityInvoke}
-        onAttachFile={handleAttachFile}
-        attachedFileName={attachedFile?.name}
+        onAttachFile={(file) => handleAttachFiles([file])}
+        onAttachFiles={handleAttachFiles}
+        attachedFiles={attachedFiles}
+        onRemoveAttachment={handleRemoveAttachment}
+        isUploading={isUploading}
+        voiceTranscript={chatVoiceTranscript}
+        interimVoiceText={voice.interimText}
         voiceControls={
           <VoiceControls
-            supported={voiceCall.supported}
-            listening={voiceCall.callActive || voiceConnecting}
-            speaking={voiceCall.speaking}
-            speakEnabled={voiceCall.callActive}
-            onToggleListen={handleToggleVoiceCall}
-            onToggleSpeak={handleToggleVoiceCall}
+            supported={voice.supported}
+            listening={voice.listening}
+            speaking={voice.speaking}
+            speakEnabled={voice.speakEnabled}
+            micState={voice.micState}
+            errorMessage={voice.errorMessage}
+            onToggleListen={voice.toggleListening}
+            onToggleSpeak={voice.toggleSpeak}
           />
         }
       />

@@ -252,5 +252,46 @@ class TestLifecycle(unittest.IsolatedAsyncioTestCase):
         await bridge.stop()
 
 
+    def test_nms_event_translated_to_nms_channel(self):
+        bus, _, bridge = make_bridge()
+        event = bus.publish(
+            EventNames.NMS_DEVICE_STATUS,
+            data={"device_id": "d1", "status": "UP", "latency_ms": 4.2},
+        )
+        channel, payload = bridge.translate(event)
+        self.assertEqual(channel, "nms")
+        self.assertEqual(payload["type"], "nms_device_status")
+        self.assertEqual(payload["data"]["device_id"], "d1")
+        self.assertEqual(payload["data"]["status"], "UP")
+
+    def test_nms_cycle_completed_translated_to_nms_channel(self):
+        bus, _, bridge = make_bridge()
+        event = bus.publish(
+            EventNames.NMS_CYCLE_COMPLETED,
+            data={"overview": {"total_devices": 5, "up": 5}},
+        )
+        channel, payload = bridge.translate(event)
+        self.assertEqual(channel, "nms")
+        self.assertEqual(payload["type"], "nms_cycle_completed")
+        self.assertEqual(payload["data"]["overview"]["total_devices"], 5)
+
+    async def test_nms_event_delivery_to_sender(self):
+        bus, sender, bridge = make_bridge()
+        bridge.start(asyncio.get_running_loop())
+
+        bus.publish(
+            EventNames.NMS_DEVICE_STATUS,
+            data={"device_id": "r1", "status": "DEGRADED", "latency_ms": 120.0},
+        )
+        self.assertTrue(await bridge.flush())
+
+        self.assertEqual(len(sender.sent), 1)
+        channel, payload = sender.sent[0]
+        self.assertEqual(channel, "nms")
+        self.assertEqual(payload["type"], "nms_device_status")
+        self.assertEqual(payload["data"]["device_id"], "r1")
+
+        await bridge.stop()
+
 if __name__ == "__main__":
     unittest.main()

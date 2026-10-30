@@ -219,7 +219,7 @@ function SvgBlock({ code }) {
         </div>
       </div>
 
-      <div className="bg-[#F8FAFC] p-3 flex justify-center">
+      <div className="bg-[#050814] border border-white/10 rounded-2xl p-4 flex justify-center">
         <img
           src={built.uri}
           alt="Ilustrasi SVG"
@@ -242,7 +242,7 @@ function SvgBlock({ code }) {
           <img
             src={built.uri}
             alt="Ilustrasi SVG (diperbesar)"
-            className="h-auto max-h-[88vh] bg-[#F8FAFC] rounded-xl2 p-3"
+            className="h-auto max-h-[88vh] bg-[#050814] border border-white/10 rounded-2xl p-4"
             style={{ width: "min(92vw, 1100px)" }}
           />
         </ZoomOverlay>

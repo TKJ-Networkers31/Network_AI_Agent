@@ -34,25 +34,33 @@ def _tag(result: dict, tool: str) -> dict:
 def add_device(
     name: str, host: str, port: Any = 22, username: Optional[str] = "admin",
     device_type: str = "mikrotik", note: str = "", password: Any = None,
-    no_password: Any = False, ssh_key: Optional[str] = None,
-    credential_name: Optional[str] = None, snmp_community: Optional[str] = None, **_ignored,
+    no_password: Any = False, ssh_key: Optional[str] = None, public_key: Optional[str] = None,
+    api_key: Optional[str] = None, credential_name: Optional[str] = None,
+    credential_names: Optional[list] = None, snmp_community: Optional[str] = None,
+    credentials: Optional[list] = None, **_ignored,
 ) -> dict:
-    new_credential = None
-    credential_names = None
+    creds_list = list(credentials or [])
+    linked_names = list(credential_names or [])
+    if credential_name and str(credential_name) not in linked_names:
+        linked_names.append(str(credential_name))
 
-    if credential_name:
-        credential_names = [str(credential_name)]
-    elif ssh_key:
-        new_credential = {"name": f"{name}-ssh-key", "type": "ssh_key", "username": username, "secret": ssh_key}
-    elif _as_bool(no_password):
-        new_credential = {"name": f"{name}-ssh", "type": "ssh_password", "username": username, "secret": ""}
+    key_material = ssh_key or public_key
+    if key_material:
+        creds_list.append({"name": f"{name}-ssh-key", "type": "ssh_key", "username": username, "secret": str(key_material)})
+
+    if _as_bool(no_password):
+        creds_list.append({"name": f"{name}-ssh", "type": "ssh_password", "username": username, "secret": ""})
     elif password is not None:
-        new_credential = {"name": f"{name}-ssh", "type": "ssh_password", "username": username, "secret": str(password)}
+        creds_list.append({"name": f"{name}-ssh", "type": "ssh_password", "username": username, "secret": str(password)})
+
+    if api_key is not None:
+        creds_list.append({"name": f"{name}-api-key", "type": "api_key", "username": username, "secret": str(api_key)})
 
     result = _store().create_device(
         name=name, host=host, port=port, username=username, device_type=device_type,
         note=note, snmp_community=snmp_community,
-        credential_names=credential_names, new_credential=new_credential,
+        credential_names=linked_names if linked_names else None,
+        new_credentials=creds_list if creds_list else None,
     )
 
     if result.get("success"):
@@ -160,10 +168,13 @@ INVENTORY_TOOL_SCHEMAS = [
             "port": {"type": "integer", "description": "Port SSH (default 22).", "default": 22},
             "username": {"type": "string", "description": "Username SSH (default admin).", "default": "admin"},
             "device_type": {"type": "string", "description": "mikrotik | linux | switch | olt | server | lainnya.", "default": "mikrotik"},
-            "password": {"type": "string", "description": "Password SSH."},
+            "password": {"type": "string", "description": "Password SSH (bisa dikombinasikan dengan api_key/key lain)."},
             "no_password": {"type": "boolean", "description": "True kalau login TANPA password.", "default": False},
-            "ssh_key": {"type": "string", "description": "Isi private key (alternatif password)."},
+            "ssh_key": {"type": "string", "description": "Isi SSH private key."},
+            "public_key": {"type": "string", "description": "SSH key (alias ssh_key)."},
+            "api_key": {"type": "string", "description": "API Key / Token untuk REST API RouterOS atau perangkat."},
             "credential_name": {"type": "string", "description": "Pakai credential yang sudah ada (lihat list_credentials)."},
+            "credential_names": {"type": "array", "items": {"type": "string"}, "description": "Daftar nama credential yang sudah ada."},
             "snmp_community": {"type": "string", "description": "SNMP community (opsional)."},
             "note": {"type": "string", "description": "Catatan bebas (lokasi, fungsi, dst)."},
         }, "required": ["name", "host"]},

@@ -23,14 +23,15 @@ permanent (see [`constitution.md`](constitution.md)):
 - `api/` never imports `tools/*` directly. It only calls `core.brain` /
   `core.orchestrator` and per-agent `registry.py` modules.
 - `tools/*` contains **only** low-level clients (SSH, SNMP, HTTP, camera).
-  No reasoning, no decision logic. Each subfolder has exactly one legal
-  caller:
+  No reasoning, no decision logic. Low-level networking tools are encapsulated
+  within the dedicated Network MCP Server (`mcp_servers/network/`) and accessed
+  via the MCP client layer (`core/mcp/`):
 
-  | `tools/` subfolder | Only called by |
-  |---|---|
-  | `ssh/`, `snmp/`, `mikrotik/`, `network/`, `inventory.py` | `agents/akane/network_tools.py` |
-  | `vision/` | `agents/hikari/vision.py` |
-  | `web/` | `agents/rei/research_tools.py` |
+  | Subsystem | Managed by | Only called by |
+  |---|---|---|
+  | `ssh/`, `snmp/`, `mikrotik/`, `network/`, `inventory.py` | Network MCP Server (`mcp_servers/network/`) | `core/mcp/client.py` & `agents/akane/` |
+  | `vision/` | HIKARI specialist | `agents/hikari/vision.py` |
+  | `web/` | REI specialist | `agents/rei/research_tools.py` |
 
 - `agents/rei/provider_client.py` is the **only** file allowed to call an
   LLM provider (Ollama or OpenRouter). No other module may issue HTTP

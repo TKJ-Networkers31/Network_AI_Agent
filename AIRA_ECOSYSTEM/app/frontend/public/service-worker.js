@@ -39,8 +39,14 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
 
-  // Panggilan API selalu butuh data terbaru - jangan pernah di-cache
-  if (url.pathname.startsWith("/api/")) {
+  // Panggilan API, files, dan host selalu butuh data terbaru - jangan pernah di-cache
+  if (
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/files/") ||
+    url.pathname === "/files" ||
+    url.pathname.startsWith("/host/") ||
+    url.pathname === "/host"
+  ) {
     return;
   }
 

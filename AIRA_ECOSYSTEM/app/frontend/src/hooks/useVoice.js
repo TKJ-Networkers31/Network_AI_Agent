@@ -1,28 +1,22 @@
-import { useCallback, useRef, useState } from "react";
+// src/hooks/useVoice.js
+//
+// Chat Speech & Listen Hook untuk Chat Interface AIRA OS
+// Mengelola input ucapan (SpeechRecognition) dan keluaran suara (SpeechSynthesis)
+// secara independen dari Background Voice Service, dengan arbitrase mikrofon eksplisit.
 
-/**
- * Voice I/O untuk web UI, sepenuhnya client-side lewat Web Speech API
- * bawaan browser (dukungan terbaik di Chrome/Edge, butuh izin mic dan
- * koneksi https/localhost). Ini terpisah dari pipeline suara agent
- * terminal (faster-whisper + Kokoro) - di web tidak ada roundtrip
- * audio ke backend sama sekali, supaya tidak perlu endpoint baru.
- *
- * - "Dengar": merekam ucapan. Selama bicara, teks sementara (interim)
- *   dipublish lewat interimText supaya UI bisa nunjukin live caption.
- *   Begitu terdeteksi diam (browser yang mendeteksi, otomatis), hasil
- *   final dikirim ke onTranscript lalu recognition berhenti sendiri -
- *   tidak perlu klik lagi.
- * - "Bicara": kalau aktif, setiap jawaban assistant baru dibacakan
- *   otomatis lewat speechSynthesis.
- */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { cleanTextForSpeech } from "./useVoiceCompanion.js";
+
+export const MIC_STATES = {
+  UNAVAILABLE: "unavailable",
+  IDLE: "idle",
+  REQUESTING_PERMISSION: "requesting_permission",
+  LISTENING: "listening",
+  PERMISSION_DENIED: "permission_denied",
+  ERROR: "error",
+};
+
 export function useVoice({ onTranscript, notify } = {}) {
-  const [listening, setListening] = useState(false);
-  const [interimText, setInterimText] = useState("");
-  const [speakEnabled, setSpeakEnabled] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
-
-  const recognitionRef = useRef(null);
-
   const SpeechRecognitionImpl =
     typeof window !== "undefined"
       ? window.SpeechRecognition || window.webkitSpeechRecognition
@@ -32,79 +26,192 @@ export function useVoice({ onTranscript, notify } = {}) {
   const synthesisSupported =
     typeof window !== "undefined" && "speechSynthesis" in window;
 
+  const [micState, setMicState] = useState(
+    speechSupported ? MIC_STATES.IDLE : MIC_STATES.UNAVAILABLE
+  );
+  const [listening, setListening] = useState(false);
+  const [interimText, setInterimText] = useState("");
+  const [speakEnabled, setSpeakEnabled] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const recognitionRef = useRef(null);
+  const onTranscriptRef = useRef(onTranscript);
+  onTranscriptRef.current = onTranscript;
+
+  const notifyRef = useRef(notify);
+  notifyRef.current = notify;
+
+  // -------------------------------------------------------------
+  // Arbitrase Mikrofon: Handoff ke Background Service & Companion
+  // -------------------------------------------------------------
+  const claimMic = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("aira:mic-claimed", { detail: { source: "chat_speech" } })
+      );
+      fetch("/api/voice/service/pause", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "chat_speech_active" }),
+      }).catch(() => {});
+    }
+  }, []);
+
+  const releaseMic = useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("aira:mic-released", { detail: { source: "chat_speech" } })
+      );
+      fetch("/api/voice/service/resume", {
+        method: "POST",
+      }).catch(() => {});
+    }
+  }, []);
+
+  // -------------------------------------------------------------
+  // Speech Recognition (Dengar Ucapan untuk Chat Composer)
+  // -------------------------------------------------------------
+  const stopListening = useCallback(() => {
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      // Abaikan jika sudah berhenti
+    }
+    setListening(false);
+    setMicState(MIC_STATES.IDLE);
+    setInterimText("");
+    releaseMic();
+  }, [releaseMic]);
+
   const startListening = useCallback(() => {
     if (!speechSupported) {
-      notify?.({
+      setMicState(MIC_STATES.UNAVAILABLE);
+      setErrorMessage("Browser ini belum mendukung pengenalan suara.");
+      notifyRef.current?.({
         type: "warning",
         message:
-          "Browser ini belum mendukung pengenalan suara. Coba buka lewat Chrome atau Edge.",
+          "Browser ini belum mendukung Web Speech API. Gunakan Chrome, Edge, atau browser berbasis Chromium.",
       });
       return;
     }
 
+    // Jika sedang berbicara TTS, hentikan dulu sebelum merekam
+    if (synthesisSupported && window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+    }
+
+    setErrorMessage("");
     setInterimText("");
+    setMicState(MIC_STATES.REQUESTING_PERMISSION);
 
-    const recognition = new SpeechRecognitionImpl();
-    recognition.lang = "id-ID";
-    recognition.interimResults = true;
-    recognition.continuous = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => {
-      setListening(true);
-    };
-
-    recognition.onresult = (event) => {
-      let finalText = "";
-      let interim = "";
-
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalText += transcript;
-        } else {
-          interim += transcript;
-        }
-      }
-
-      if (interim) setInterimText(interim);
-
-      if (finalText.trim()) {
-        setInterimText("");
-        onTranscript?.(finalText.trim());
-      }
-    };
-
-    recognition.onerror = (event) => {
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        notify?.({
-          type: "error",
-          message: "Akses mikrofon ditolak. Izinkan mic di pengaturan browser untuk pakai fitur ini.",
-        });
-      } else if (event.error !== "aborted" && event.error !== "no-speech") {
-        notify?.({ type: "error", message: `Gagal mengenali suara (${event.error}).` });
-      }
-    };
-
-    recognition.onend = () => {
-      setListening(false);
-      setInterimText("");
-    };
-
-    recognitionRef.current = recognition;
+    // Klaim kepemilikan mic
+    claimMic();
 
     try {
-      recognition.start();
-    } catch {
-      // start() melempar kalau dipanggil dua kali beruntun - abaikan.
-    }
-  }, [SpeechRecognitionImpl, speechSupported, onTranscript, notify]);
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {}
+      }
 
-  const stopListening = useCallback(() => {
-    recognitionRef.current?.stop();
-    setListening(false);
-    setInterimText("");
-  }, []);
+      const recognition = new SpeechRecognitionImpl();
+      recognition.lang = "id-ID";
+      recognition.interimResults = true;
+      recognition.continuous = false; // Satu giliran input ucapan
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        setListening(true);
+        setMicState(MIC_STATES.LISTENING);
+      };
+
+      recognition.onresult = (event) => {
+        let finalText = "";
+        let interim = "";
+
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const item = event.results[i];
+          const transcript = item[0]?.transcript || "";
+          if (item.isFinal) {
+            finalText += transcript;
+          } else {
+            interim += transcript;
+          }
+        }
+
+        if (interim) {
+          setInterimText(interim);
+        }
+
+        if (finalText.trim()) {
+          setInterimText("");
+          onTranscriptRef.current?.(finalText.trim());
+        }
+      };
+
+      recognition.onerror = (event) => {
+        const err = event.error;
+        if (err === "no-speech" || err === "aborted") {
+          setMicState(MIC_STATES.IDLE);
+          setListening(false);
+          setInterimText("");
+          releaseMic();
+          return;
+        }
+
+        if (err === "not-allowed" || err === "service-not-allowed") {
+          setMicState(MIC_STATES.PERMISSION_DENIED);
+          setErrorMessage("Izin akses mikrofon ditolak oleh browser.");
+          notifyRef.current?.({
+            type: "error",
+            message:
+              "Akses mikrofon ditolak. Izinkan mikrofon di pengaturan browser untuk mendikte pesan.",
+          });
+        } else if (err === "audio-capture") {
+          setMicState(MIC_STATES.ERROR);
+          setErrorMessage("Perangkat mikrofon tidak terdeteksi atau sedang sibuk.");
+          notifyRef.current?.({
+            type: "error",
+            message: "Mikrofon tidak terdeteksi atau sedang dipakai aplikasi lain.",
+          });
+        } else if (err === "network") {
+          setMicState(MIC_STATES.ERROR);
+          setErrorMessage("Koneksi jaringan pengenalan suara terputus.");
+          notifyRef.current?.({
+            type: "error",
+            message: "Layanan pengenalan suara browser butuh koneksi internet aktif.",
+          });
+        } else {
+          setMicState(MIC_STATES.ERROR);
+          setErrorMessage(`Kendala pengenalan suara: ${err}`);
+          notifyRef.current?.({
+            type: "error",
+            message: `Kendala pengenalan suara (${err}).`,
+          });
+        }
+
+        setListening(false);
+        releaseMic();
+      };
+
+      recognition.onend = () => {
+        setListening(false);
+        setMicState(MIC_STATES.IDLE);
+        setInterimText("");
+        releaseMic();
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (exc) {
+      setMicState(MIC_STATES.ERROR);
+      setErrorMessage(`Gagal memulai rekaman suara: ${exc?.message || exc}`);
+      setListening(false);
+      releaseMic();
+    }
+  }, [speechSupported, synthesisSupported, SpeechRecognitionImpl, claimMic, releaseMic]);
 
   const toggleListening = useCallback(() => {
     if (listening) {
@@ -114,32 +221,67 @@ export function useVoice({ onTranscript, notify } = {}) {
     }
   }, [listening, startListening, stopListening]);
 
+  // -------------------------------------------------------------
+  // Speech Synthesis (Bicara Jawaban Assistant)
+  // -------------------------------------------------------------
   const stopSpeaking = useCallback(() => {
     if (synthesisSupported) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
     }
     setSpeaking(false);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("aira:tts-end"));
+    }
   }, [synthesisSupported]);
 
   const speak = useCallback(
     (text) => {
       if (!speakEnabled || !text || !synthesisSupported) return;
 
-      window.speechSynthesis.cancel();
+      const cleaned = cleanTextForSpeech(text);
+      if (!cleaned) return;
 
-      const utterance = new SpeechSynthesisUtterance(text);
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+
+      const utterance = new SpeechSynthesisUtterance(cleaned);
       utterance.lang = "id-ID";
-      utterance.rate = 1;
+      utterance.rate = 1.0;
 
-      const idVoice = window.speechSynthesis
-        .getVoices()
-        .find((v) => v.lang?.toLowerCase().startsWith("id"));
+      // Cari voice bahasa Indonesia jika tersedia
+      const voices = window.speechSynthesis.getVoices();
+      const idVoice = voices.find(
+        (v) =>
+          v.lang?.toLowerCase().startsWith("id") ||
+          v.name?.toLowerCase().includes("indonesia")
+      );
+      if (idVoice) {
+        utterance.voice = idVoice;
+      }
 
-      if (idVoice) utterance.voice = idVoice;
+      utterance.onstart = () => {
+        setSpeaking(true);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("aira:tts-start"));
+        }
+      };
 
-      utterance.onstart = () => setSpeaking(true);
-      utterance.onend = () => setSpeaking(false);
-      utterance.onerror = () => setSpeaking(false);
+      utterance.onend = () => {
+        setSpeaking(false);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("aira:tts-end"));
+        }
+      };
+
+      utterance.onerror = () => {
+        setSpeaking(false);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("aira:tts-end"));
+        }
+      };
 
       window.speechSynthesis.speak(utterance);
     },
@@ -150,22 +292,42 @@ export function useVoice({ onTranscript, notify } = {}) {
     const next = !speakEnabled;
     setSpeakEnabled(next);
 
-    if (!next) stopSpeaking();
+    if (!next) {
+      stopSpeaking();
+    }
 
-    notify?.({
+    notifyRef.current?.({
       type: "info",
-      message: next ? "Mode bicara diaktifkan." : "Mode bicara dimatikan.",
+      message: next
+        ? "Mode bicara aktif — jawaban assistant akan dibacakan otomatis."
+        : "Mode bicara dinonaktifkan.",
       duration: 2500,
     });
-  }, [speakEnabled, stopSpeaking, notify]);
+  }, [speakEnabled, stopSpeaking]);
+
+  // Cleanup saat unmount
+  useEffect(() => {
+    return () => {
+      try {
+        recognitionRef.current?.abort();
+      } catch {}
+      if (synthesisSupported) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch {}
+      }
+    };
+  }, [synthesisSupported]);
 
   return {
     supported: speechSupported,
     synthesisSupported,
+    micState,
     listening,
     interimText,
     speaking,
     speakEnabled,
+    errorMessage,
     startListening,
     stopListening,
     toggleListening,
