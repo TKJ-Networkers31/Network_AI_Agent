@@ -207,11 +207,7 @@ function AppShell() {
     function onNavigate(e) {
       const id = e.detail;
       if (typeof id === "string" && PAGES[id]) {
-        if (networkingPages.includes(id) && !hasNetworkingPlus) {
-          setActive("workspace");
-        } else {
-          setActive(id);
-        }
+        setActive(id);
       }
     }
 

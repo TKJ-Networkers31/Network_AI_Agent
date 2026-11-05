@@ -1,10 +1,11 @@
 import time
 from typing import Optional
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from core.tenant.auth_deps import require_permission
 
 from core import log_store
 
-router = APIRouter(prefix="/api/logs", tags=["logs"])
+router = APIRouter(prefix="/api/logs", tags=["logs"], dependencies=[Depends(require_permission("audit.read"))])
 
 
 @router.get("")

@@ -151,13 +151,16 @@ export default function Sidebar({
     useSessionsContext();
   const { unreadSessionIds, runningSessionIds } = useChatRuntime();
   const { notify } = useToast();
-  const { user, isGuest, subscription, openLogin, isAdmin, hasNetworkingPlus } = useAuth();
+  const { user, isGuest, subscription, openLogin, isAdmin, hasNetworkingPlus, hasPermission } = useAuth();
 
   const visibleNavGroups = NAV_GROUPS.map((group) => {
     if (group.id === "admin" && !isAdmin) return null;
     const filteredItems = group.items.filter((item) => {
+      if (item.adminOnly && !isAdmin) return false;
       if (item.id === "admin" && !isAdmin) return false;
-      if (["infrastructure", "automations"].includes(item.id) && !hasNetworkingPlus) return false;
+      if (item.requiredPermission && !isAdmin && hasPermission && !hasPermission(item.requiredPermission)) {
+        return false;
+      }
       return true;
     });
     if (filteredItems.length === 0) return null;

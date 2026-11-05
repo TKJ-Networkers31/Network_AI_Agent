@@ -1,12 +1,19 @@
-// API klien untuk Model Router (Sprint 1). Dipisah dari api.js supaya api.js
-// tidak disentuh; boleh digabung ke api.js kapan saja (isinya murni fetch).
+// src/modelRouterApi.js
+// API klien untuk Model Router (Sprint 1) dengan token autentikasi RBAC.
+
+import { getAuthHeaders } from "./api.js";
 
 const BASE = "/api/models";
 
 async function request(path, options = {}) {
+  const authHeaders = getAuthHeaders();
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders,
+      ...(options.headers || {}),
+    },
   });
 
   if (!res.ok) {

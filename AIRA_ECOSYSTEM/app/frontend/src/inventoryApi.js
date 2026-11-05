@@ -1,13 +1,20 @@
-// Klien API Inventory (device + credential). Dipisah dari api.js (pola sama
-// dengan modelRouterApi.js) supaya api.js tidak disentuh.
+// src/inventoryApi.js
+// Klien API Inventory (device + credential) dengan token autentikasi RBAC.
+
+import { getAuthHeaders } from "./api.js";
 
 const BASE = "/api";
 const enc = encodeURIComponent;
 
 async function request(path, options = {}) {
+  const authHeaders = getAuthHeaders();
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders,
+      ...(options.headers || {}),
+    },
   });
 
   if (!res.ok) {

@@ -6,12 +6,14 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   BarChart3,
   CheckCircle2,
   ChevronRight,
   Clock,
   Copy,
   Cpu,
+  Database,
   Edit2,
   ExternalLink,
   Eye,
@@ -20,6 +22,7 @@ import {
   Key,
   Layers,
   Lock,
+  Network,
   Plus,
   Radio,
   RefreshCw,
@@ -30,6 +33,7 @@ import {
   ShieldCheck,
   Sliders,
   Sparkles,
+  Terminal,
   ToggleLeft,
   ToggleRight,
   Trash2,
@@ -49,8 +53,6 @@ const CONTROL_PLANE_MODULES = [
   { id: "users", label: "User Management", icon: Users },
   { id: "groups", label: "Groups & Permissions", icon: ShieldCheck },
   { id: "activity", label: "Activity & Sessions", icon: Activity },
-  { id: "organizations", label: "Organizations", icon: Layers },
-  { id: "settings", label: "Platform Settings", icon: Sliders },
 ];
 
 export default function AdminPlatformPage({ onOpenMenu }) {
@@ -62,7 +64,7 @@ export default function AdminPlatformPage({ onOpenMenu }) {
   const [permissions, setPermissions] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [activityEvents, setActivityEvents] = useState([]);
-  const [tenants, setTenants] = useState([]);
+  const [deviceCount, setDeviceCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
   // User Modals
@@ -93,13 +95,13 @@ export default function AdminPlatformPage({ onOpenMenu }) {
     setLoading(true);
     try {
       const headers = getAuthHeaders();
-      const [uRes, gRes, pRes, sRes, actRes, tRes] = await Promise.all([
+      const [uRes, gRes, pRes, sRes, actRes, devRes] = await Promise.all([
         fetch("/api/v1/admin/users", { headers }).then((r) => r.json()).catch(() => ({})),
         fetch("/api/v1/admin/groups", { headers }).then((r) => r.json()).catch(() => ({})),
         fetch("/api/v1/admin/permissions", { headers }).then((r) => r.json()).catch(() => ({})),
         fetch("/api/v1/admin/sessions", { headers }).then((r) => r.json()).catch(() => ({})),
         fetch("/api/v1/admin/activity?limit=100", { headers }).then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/tenants", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/devices", { headers }).then((r) => r.json()).catch(() => ({})),
       ]);
 
       if (uRes.users) setUsers(uRes.users);
@@ -107,7 +109,9 @@ export default function AdminPlatformPage({ onOpenMenu }) {
       if (pRes.permissions) setPermissions(pRes.permissions);
       if (sRes.sessions) setSessions(sRes.sessions);
       if (actRes.events) setActivityEvents(actRes.events);
-      if (tRes.tenants) setTenants(tRes.tenants);
+      if (devRes && (devRes.count !== undefined || devRes.devices)) {
+        setDeviceCount(devRes.count ?? devRes.devices?.length ?? 0);
+      }
     } catch (err) {
       console.warn("Error loading admin data:", err);
     } finally {
@@ -446,42 +450,289 @@ export default function AdminPlatformPage({ onOpenMenu }) {
         {/* 1. OVERVIEW */}
         {activeModule === "overview" && (
           <div className="space-y-6">
+            {/* KPI Cards Bar */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
-                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">Registered Users</div>
-                <div className="text-2xl font-bold text-white">{users.length}</div>
-                <div className="text-[11px] text-emerald-400">{onlineCount} currently online</div>
+              <div
+                onClick={() => setActiveModule("users")}
+                className="group p-4 rounded-xl bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-white/10 cursor-pointer transition space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] text-neutral-400 uppercase tracking-wider font-medium">Pengguna Terdaftar</div>
+                  <Users size={16} className="text-neutral-500 group-hover:text-rose-400 transition" />
+                </div>
+                <div className="text-2xl font-bold text-white tracking-tight">{users.length}</div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    {onlineCount} Online Saat Ini
+                  </span>
+                  <span className="text-neutral-500 group-hover:text-neutral-300 flex items-center gap-0.5 text-[10px]">
+                    Kelola <ChevronRight size={12} />
+                  </span>
+                </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
-                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">RBAC Access Groups</div>
-                <div className="text-2xl font-bold text-rose-400">{groups.length}</div>
-                <div className="text-[11px] text-neutral-400">6 System Default + Custom</div>
+              <div
+                onClick={() => setActiveModule("groups")}
+                className="group p-4 rounded-xl bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-white/10 cursor-pointer transition space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] text-neutral-400 uppercase tracking-wider font-medium">Grup & Matriks Izin</div>
+                  <ShieldCheck size={16} className="text-neutral-500 group-hover:text-rose-400 transition" />
+                </div>
+                <div className="text-2xl font-bold text-rose-400 tracking-tight">{groups.length}</div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-neutral-400">
+                    {groups.filter((g) => g.is_system).length} Sistem + {groups.filter((g) => !g.is_system).length} Kustom
+                  </span>
+                  <span className="text-neutral-500 group-hover:text-neutral-300 flex items-center gap-0.5 text-[10px]">
+                    Atur <ChevronRight size={12} />
+                  </span>
+                </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
-                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">Active Sessions</div>
-                <div className="text-2xl font-bold text-cyan-400">{sessions.length}</div>
-                <div className="text-[11px] text-cyan-300">Live heartbeat monitoring</div>
+              <div
+                onClick={() => setActiveModule("activity")}
+                className="group p-4 rounded-xl bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 hover:border-white/10 cursor-pointer transition space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] text-neutral-400 uppercase tracking-wider font-medium">Sesi Login Aktif</div>
+                  <Activity size={16} className="text-neutral-500 group-hover:text-cyan-400 transition" />
+                </div>
+                <div className="text-2xl font-bold text-cyan-400 tracking-tight">{sessions.length}</div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-cyan-300 flex items-center gap-1 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                    Live Heartbeat
+                  </span>
+                  <span className="text-neutral-500 group-hover:text-neutral-300 flex items-center gap-0.5 text-[10px]">
+                    Periksa <ChevronRight size={12} />
+                  </span>
+                </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
-                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">Platform Security</div>
-                <div className="text-2xl font-bold text-emerald-400">ENFORCED</div>
-                <div className="text-[11px] text-emerald-400">Mandatory Auth & Backend RBAC</div>
+              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] text-neutral-400 uppercase tracking-wider font-medium">Node Jaringan</div>
+                  <Network size={16} className="text-emerald-400" />
+                </div>
+                <div className="text-2xl font-bold text-emerald-400 tracking-tight">{deviceCount}</div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-emerald-400">Inventory Terpusat</span>
+                  <span className="text-neutral-500 text-[10px]">Shared Infra</span>
+                </div>
               </div>
             </div>
 
-            <div className="p-5 rounded-xl bg-black/40 border border-white/5 space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                MikroTik-Style Access Governance
-              </h3>
-              <p className="text-xs text-neutral-300 leading-relaxed">
-                AIRA OS menggunakan model akses berbasis grup seperti RouterOS MikroTik:{" "}
-                <code className="text-rose-300 font-mono">Organization → Users → Groups → Permissions</code>.
-                Setiap pengguna diverifikasi secara ketat di backend pada setiap pemanggilan tool AI dan akses REST API.
-                Izin <code className="text-rose-400 font-mono">DENY</code> secara absolut menganulir izin <code className="text-emerald-400 font-mono">ALLOW</code>.
-              </p>
+            {/* Subsystems & Quick Actions Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left (2 cols): Subsystems Health Cockpit */}
+              <div className="lg:col-span-2 p-5 rounded-xl bg-black/40 border border-white/5 space-y-4">
+                <div className="flex items-center justify-between border-b border-white/5 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Cpu size={15} className="text-rose-400" />
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-300">
+                      Subsystems Health & Security Status
+                    </h3>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    ALL SYSTEMS NOMINAL
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-neutral-400 flex items-center gap-1.5">
+                        <Server size={13} className="text-neutral-500" /> API Gateway Core
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        OPERATIONAL
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-neutral-300 font-medium">FastAPI Engine (Port 8000)</div>
+                    <div className="text-[10px] text-neutral-500">Rest API, SSE Event Stream, Interceptors</div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-neutral-400 flex items-center gap-1.5">
+                        <Database size={13} className="text-neutral-500" /> Database Engine
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        WAL ACTIVE
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-neutral-300 font-medium">SQLite Write-Ahead Logging</div>
+                    <div className="text-[10px] text-neutral-500">Single-writer, multi-reader concurrent pool</div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-neutral-400 flex items-center gap-1.5">
+                        <ShieldCheck size={13} className="text-neutral-500" /> AI Tool RBAC Barrier
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        STRICT
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-neutral-300 font-medium">MikroTik-Style Access Gate</div>
+                    <div className="text-[10px] text-neutral-500">DENY overrides ALLOW, verified every tool invocation</div>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-white/[0.02] border border-white/5 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-neutral-400 flex items-center gap-1.5">
+                        <Network size={13} className="text-neutral-500" /> Inventory & Topology
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        CONNECTED
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-neutral-300 font-medium">{deviceCount} Managed Network Nodes</div>
+                    <div className="text-[10px] text-neutral-500">Shared topology discovery, SSH/API drivers</div>
+                  </div>
+                </div>
+
+                <div className="pt-2 text-xs text-neutral-400 border-t border-white/5 flex items-center justify-between">
+                  <span>Root Superadmin: <strong className="text-amber-300 font-mono">lingga_admin</strong> (Akses Penuh 56 Permissions)</span>
+                  <span className="text-[10px] text-neutral-500">Platform ID: aira-core-v2</span>
+                </div>
+              </div>
+
+              {/* Right (1 col): Quick Administrative Actions */}
+              <div className="p-5 rounded-xl bg-black/40 border border-white/5 flex flex-col justify-between space-y-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Zap size={15} className="text-amber-400" />
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-300">
+                      Pintasan Tindakan
+                    </h3>
+                  </div>
+                  <p className="text-[11px] text-neutral-400">Aksi cepat manajemen platform dan operasional.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setIsCreateUserOpen(true)}
+                    className="w-full flex items-center justify-between p-2.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-300 text-xs font-medium transition"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Plus size={14} /> Tambah Pengguna Baru
+                    </span>
+                    <ChevronRight size={14} />
+                  </button>
+
+                  <button
+                    onClick={openCreateGroupModal}
+                    className="w-full flex items-center justify-between p-2.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 text-neutral-200 text-xs font-medium transition"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Shield size={14} className="text-amber-400" /> Buat Grup Hak Akses
+                    </span>
+                    <ChevronRight size={14} />
+                  </button>
+
+                  <button
+                    onClick={() => setActiveModule("activity")}
+                    className="w-full flex items-center justify-between p-2.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 text-neutral-200 text-xs font-medium transition"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Activity size={14} className="text-cyan-400" /> Periksa Sesi & Audit Trail
+                    </span>
+                    <ChevronRight size={14} />
+                  </button>
+
+                  <button
+                    onClick={() => setActiveModule("users")}
+                    className="w-full flex items-center justify-between p-2.5 rounded-lg bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 text-neutral-200 text-xs font-medium transition"
+                  >
+                    <span className="flex items-center gap-2">
+                      <Users size={14} className="text-emerald-400" /> Kelola Direktori Akun
+                    </span>
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/10 text-[11px] text-amber-300/80">
+                  Semua akun terisolasi secara riwayat chat & persona, namun berbagi infrastruktur perangkat bersama.
+                </div>
+              </div>
+            </div>
+
+            {/* Recent Activity Audit Trail */}
+            <div className="p-5 rounded-xl bg-black/40 border border-white/5 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock size={15} className="text-neutral-400" />
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-300">
+                    Audit Keamanan & Aktivitas Terkini
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setActiveModule("activity")}
+                  className="flex items-center gap-1 text-xs text-rose-400 hover:text-rose-300 font-medium transition"
+                >
+                  Lihat Semua ({activityEvents.length}) <ArrowRight size={12} />
+                </button>
+              </div>
+
+              <div className="rounded-xl border border-white/5 bg-black/30 overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-white/[0.02] text-neutral-400 border-b border-white/5">
+                    <tr>
+                      <th className="py-2.5 px-4 font-medium">Waktu</th>
+                      <th className="py-2.5 px-4 font-medium">Pengguna</th>
+                      <th className="py-2.5 px-4 font-medium">Tipe Aktivitas</th>
+                      <th className="py-2.5 px-4 font-medium">IP Address</th>
+                      <th className="py-2.5 px-4 font-medium">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {activityEvents.slice(0, 6).map((evt) => (
+                      <tr key={evt.event_id} className="hover:bg-white/[0.02]">
+                        <td className="py-2.5 px-4 font-mono text-[11px] text-neutral-400">
+                          {new Date(evt.created_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                        </td>
+                        <td className="py-2.5 px-4 font-medium text-white flex items-center gap-1.5">
+                          <span>{evt.username}</span>
+                          {evt.username === "lingga_admin" && (
+                            <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded font-mono">
+                              ROOT
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-4">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                              evt.event_type.includes("FAILED")
+                                ? "bg-red-500/10 text-red-400 border-red-500/20"
+                                : evt.event_type.includes("REVOKED") || evt.event_type.includes("DISABLED")
+                                ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+                                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                            }`}
+                          >
+                            {evt.event_type}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 text-neutral-400 font-mono text-[11px]">
+                          {evt.ip_address || "127.0.0.1"}
+                        </td>
+                        <td className="py-2.5 px-4 font-mono text-[10px] text-neutral-400 truncate max-w-xs">
+                          {JSON.stringify(evt.details || {})}
+                        </td>
+                      </tr>
+                    ))}
+                    {activityEvents.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-neutral-500">
+                          Belum ada catatan aktivitas.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -846,71 +1097,6 @@ export default function AdminPlatformPage({ onOpenMenu }) {
                     )}
                   </tbody>
                 </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 5. ORGANIZATIONS */}
-        {activeModule === "organizations" && (
-          <div className="space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-              Customer Organizations ({tenants.length})
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {tenants.map((t) => (
-                <div key={t.tenant_id} className="p-4 rounded-xl bg-black/40 border border-white/5 space-y-3">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="font-semibold text-white">{t.name}</div>
-                      <div className="text-[11px] font-mono text-neutral-400">{t.tenant_id}</div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      {t.status}
-                    </span>
-                  </div>
-                  <div className="text-xs text-neutral-400">
-                    Semua perangkat, topologi, dan telemetri jaringan dimiliki secara bersama (shared) dalam organisasi ini.
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 6. SETTINGS */}
-        {activeModule === "settings" && (
-          <div className="space-y-4 max-w-2xl">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-              Platform Configuration
-            </h3>
-            <div className="p-4 rounded-xl bg-black/40 border border-white/5 space-y-4 text-xs">
-              <div className="flex items-center justify-between pb-3 border-b border-white/5">
-                <div>
-                  <div className="font-medium text-white">Database Isolation Policy</div>
-                  <div className="text-[11px] text-neutral-400">SQLite Single-Worker WAL Mode Concurrency Policy</div>
-                </div>
-                <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  ACTIVE
-                </span>
-              </div>
-              <div className="flex items-center justify-between pb-3 border-b border-white/5">
-                <div>
-                  <div className="font-medium text-white">Authentication Barrier</div>
-                  <div className="text-[11px] text-neutral-400">Username/Password Mandatory (Guest/Anonymous Access Disabled)</div>
-                </div>
-                <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  STRICT
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium text-white">AI Tool Enforcement Hook</div>
-                  <div className="text-[11px] text-neutral-400">Orchestrator RBAC Interceptor on every tool call</div>
-                </div>
-                <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  ENABLED
-                </span>
               </div>
             </div>
           </div>

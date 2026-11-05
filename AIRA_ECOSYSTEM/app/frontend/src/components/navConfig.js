@@ -1,13 +1,12 @@
 // src/components/navConfig.js
 // Struktur menu navigasi terpadu AIRA OS (dipakai Sidebar.jsx & MobileNav.jsx).
-// Minimalist AI Workspace: 5 tujuan utama pelanggan + 1 area administrasi platform terpisah.
 
 import {
-  Activity,
+  Cpu,
+  FileText,
   FolderOpen,
   MessageSquare,
   Network,
-  Settings,
   ShieldCheck,
   Zap,
 } from "lucide-react";
@@ -18,16 +17,18 @@ export const NAV_GROUPS = [
     label: "Workspace",
     items: [
       { id: "workspace", label: "Workspace", icon: MessageSquare },
-      { id: "infrastructure", label: "Infrastructure", icon: Network },
-      { id: "automations", label: "Automations", icon: Zap },
+      { id: "infrastructure", label: "Infrastructure", icon: Network, requiredPermission: "inventory.read" },
+      { id: "automations", label: "Automations", icon: Zap, requiredPermission: "playbooks.read" },
       { id: "files", label: "Files", icon: FolderOpen },
+      { id: "models", label: "Models", icon: Cpu, requiredPermission: "settings.read" },
+      { id: "logs", label: "Logs", icon: FileText, requiredPermission: "audit.read" },
     ],
   },
   {
     id: "admin",
     label: "Control Plane",
     items: [
-      { id: "admin", label: "AIRA Control Plane", icon: ShieldCheck },
+      { id: "admin", label: "AIRA Control Plane", icon: ShieldCheck, adminOnly: true },
     ],
   },
 ];

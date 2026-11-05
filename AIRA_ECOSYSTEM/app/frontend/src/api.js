@@ -1,3 +1,41 @@
+// Global fetch interceptor: guarantees all /api/* requests automatically carry Authorization Bearer token
+if (typeof window !== "undefined" && !window.__aira_auth_interceptor_installed__) {
+  window.__aira_auth_interceptor_installed__ = true;
+  const _origFetch = window.fetch;
+  window.fetch = async function (resource, init = {}) {
+    try {
+      const url = typeof resource === "string" ? resource : resource?.url || "";
+      if (url.startsWith("/api") || url.includes("/api/")) {
+        const token = localStorage.getItem("aira_auth_token");
+        if (token) {
+          const config = init || {};
+          let headers = config.headers;
+          if (!headers) {
+            headers = {};
+          }
+          if (headers instanceof Headers) {
+            if (!headers.has("Authorization")) {
+              headers.set("Authorization", `Bearer ${token}`);
+            }
+          } else if (Array.isArray(headers)) {
+            const hasAuth = headers.some(([k]) => k.toLowerCase() === "authorization");
+            if (!hasAuth) {
+              headers.push(["Authorization", `Bearer ${token}`]);
+            }
+          } else if (typeof headers === "object") {
+            if (!headers["Authorization"] && !headers["authorization"]) {
+              headers["Authorization"] = `Bearer ${token}`;
+            }
+          }
+          config.headers = headers;
+          return _origFetch(resource, config);
+        }
+      }
+    } catch {}
+    return _origFetch(resource, init);
+  };
+}
+
 const BASE = "/api";
 
 export function getAuthHeaders() {
