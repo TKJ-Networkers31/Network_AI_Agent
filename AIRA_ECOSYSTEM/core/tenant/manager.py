@@ -942,6 +942,12 @@ class IdentityManager:
                 except ValueError:
                     pass
 
+            # Enforce 1 active session per account: displace any previous active session
+            conn.execute(
+                "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE user_id = ? AND status = 'ACTIVE'",
+                (user_id,),
+            )
+
             conn.execute(
                 """
                 INSERT INTO operational_user_sessions

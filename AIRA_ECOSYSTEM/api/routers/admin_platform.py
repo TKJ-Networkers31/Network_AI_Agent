@@ -284,28 +284,6 @@ def list_all_transactions(limit: int = Query(50), admin: TenantContext = Depends
     return {"success": True, "transactions": txns}
 
 
-@router.get("/users")
-def list_platform_users(limit: int = Query(100), admin: TenantContext = Depends(require_platform_admin)):
-    """Lists registered users across the platform."""
-    from core.topology_db import topology_transaction
-    import sqlite3
-    with topology_transaction(_identity_mgr.db_path, write=False) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT u.user_id, u.username, u.email, u.is_internal, u.tenant_id, u.is_active,
-                   u.must_change_password, u.mfa_enabled, u.last_login_at, t.name as tenant_name,
-                   s.plan_id, s.subscription_status, s.networking_addon_status
-            FROM operational_users u
-            LEFT JOIN operational_tenants t ON u.tenant_id = t.tenant_id
-            LEFT JOIN operational_user_subscriptions s ON u.user_id = s.user_id
-            ORDER BY u.created_at DESC LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        return {"success": True, "users": [dict(r) for r in rows]}
-
-
 class AdjustUserQuotaInput(BaseModel):
     target_user_id: str
     new_quota: int = Field(..., ge=0)

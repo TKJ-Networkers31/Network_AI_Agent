@@ -43,7 +43,7 @@ export default function SettingsPage({ onOpenMenu }) {
   const { user, role, plan, hasNetworkingPlus, isAdmin, isGuest } = useAuth();
   const { notify } = useToast();
 
-  const [activeTab, setActiveTab] = useState("personalization");
+  const [activeTab, setActiveTab] = useState("general");
 
   // General & Quota State
   const [usage, setUsage] = useState(null);
@@ -408,11 +408,12 @@ export default function SettingsPage({ onOpenMenu }) {
   const usedPercent = Math.min(100, Math.round((usedTokens / Math.max(1, monthlyAllow)) * 100));
 
   const TABS = [
-    { id: "personalization", label: "Personalization", icon: Sparkles },
-    { id: "privacy", label: "Privacy & Data", icon: Shield },
-    { id: "account", label: "Account", icon: User },
-    { id: "security", label: "Security", icon: Key },
     { id: "general", label: "General & Autonomy", icon: Settings },
+    { id: "memory", label: "Memory Settings", icon: Brain },
+    { id: "persona", label: "Persona Settings", icon: Sparkles },
+    { id: "security", label: "Security & Sessions", icon: Key },
+    { id: "account", label: "Account Profile", icon: User },
+    { id: "privacy", label: "Privacy & Data", icon: Shield },
   ];
 
   return (
@@ -446,9 +447,9 @@ export default function SettingsPage({ onOpenMenu }) {
       </div>
 
       {/* ============================================================== */}
-      {/* TAB 1: PERSONALIZATION (MEMORY, PERSONA, INSTRUCTIONS)        */}
+      {/* TAB: MEMORY SETTINGS (USER-ISOLATED)                           */}
       {/* ============================================================== */}
-      {activeTab === "personalization" && (
+      {activeTab === "memory" && (
         <div className="space-y-6">
           {/* Section: AI Memory Management */}
           <div className="bg-gradient-to-br from-neutral-900/90 to-neutral-950/80 border border-white/[0.08] rounded-2xl p-5 shadow-xl space-y-5">
@@ -594,7 +595,14 @@ export default function SettingsPage({ onOpenMenu }) {
               </div>
             )}
           </div>
+        </div>
+      )}
 
+      {/* ============================================================== */}
+      {/* TAB: PERSONA SETTINGS (AI BEHAVIOR & PRESETS)                 */}
+      {/* ============================================================== */}
+      {activeTab === "persona" && (
+        <div className="space-y-6">
           {/* Section: AI Persona Management */}
           <div className="bg-gradient-to-br from-neutral-900/90 to-neutral-950/80 border border-white/[0.08] rounded-2xl p-5 shadow-xl space-y-5">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b border-white/[0.08]">

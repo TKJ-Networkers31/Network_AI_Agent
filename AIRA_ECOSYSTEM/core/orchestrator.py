@@ -42,6 +42,7 @@ from agents.akane.registry import (
 from agents.hikari.registry import (
     HIKARI_TOOLS, HIKARI_DANGEROUS_TOOLS, HIKARI_TOOL_CATEGORY, HIKARI_TOOL_SCHEMAS,
 )
+from core.dio.parameter_resolver import DIOParameterResolver, ParameterStatus
 
 logger = logging.getLogger("aira.orchestrator")
 
@@ -137,6 +138,7 @@ class Orchestrator:
             tool_category=AGENT_TOOL_CATEGORY,
             dangerous_tools=DANGEROUS_TOOLS,
         )
+        self.parameter_resolver = DIOParameterResolver(AGENT_TOOL_SCHEMAS)
 
     def route(
         self, user_input: str, memory, cancel_event=None, selected_model=None,
@@ -181,14 +183,28 @@ class Orchestrator:
                     "error": f"Izin Ditolak (Permission Denied): Akun Anda tidak memiliki izin '{required_perm}' yang diperlukan untuk menjalankan tool '{name}'. Silakan hubungi administrator jika Anda memerlukan akses ini.",
                 }
 
+        # Universal DIO Parameter Resolution & Schema Validation Barrier
+        inventory_devices = None
         try:
-            if name in DEVICE_TOOLS:
-                early_result, arguments = self._prepare_device_args(name, arguments)
+            inv_res = AKANE_TOOLS["list_devices"]()
+            if inv_res.get("success"):
+                inventory_devices = inv_res.get("devices") or []
+        except Exception:
+            pass
 
-                if early_result is not None:
-                    return early_result
+        resolution = self.parameter_resolver.resolve(
+            tool_name=name,
+            arguments=arguments,
+            inventory_devices=inventory_devices,
+        )
 
-            return AGENT_TOOL_MAP[name](**arguments)
+        if not resolution.can_execute:
+            return resolution.to_early_tool_result()
+
+        exec_args = resolution.resolved_arguments
+
+        try:
+            return AGENT_TOOL_MAP[name](**exec_args)
         except Exception as exc:
             logger.exception("Tool '%s' gagal", name)
             return {"success": False, "tool": name, "error": str(exc)}
