@@ -37,8 +37,14 @@ export function SessionsProvider({ children }) {
       if (!cancelled) setSessionsReady(true);
     });
 
+    function handleAuthSuccess() {
+      loadSessions();
+    }
+    window.addEventListener("aira:auth_success", handleAuthSuccess);
+
     return () => {
       cancelled = true;
+      window.removeEventListener("aira:auth_success", handleAuthSuccess);
     };
   }, [loadSessions]);
 

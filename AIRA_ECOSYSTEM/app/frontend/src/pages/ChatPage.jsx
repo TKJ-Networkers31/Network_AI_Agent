@@ -91,6 +91,7 @@ import { resolveGreetingModel } from "../utils/greetingResolver.js";
 import { shouldShowLiveSteps } from "../utils/runLifecycle.js";
 import { invokeCapability } from "../utils/capabilityInvoke.js";
 import { formatQuotedMessage } from "../utils/quotedMessage.js";
+import { useAuth } from "../context/AuthContext.jsx";
 import Hero from "../Hero.jsx";
 
 export default function ChatPage({ onOpenMenu }) {
@@ -173,6 +174,19 @@ function ChatPageInner({ onOpenMenu }) {
   // ---- Sprint 2.6: settings + cockpit + hero model -------------------------
   const settings = useGlobalSettings(); // null = belum dimuat, {} = gagal, {...} = snapshot
   const cockpit = useCockpitData();
+  const { user } = useAuth();
+
+  const effectiveSettings = useMemo(() => {
+    const rawName = user?.display_name || user?.username;
+    if (!rawName) return settings;
+    const clean = rawName.trim();
+    const nickname = clean.split(/[ _]/)[0] || clean;
+    return {
+      ...(settings || {}),
+      display_name: clean,
+      nickname: nickname.charAt(0).toUpperCase() + nickname.slice(1),
+    };
+  }, [settings, user]);
 
   const heroVisible = !switching && messages.length === 0 && !loading;
   const heroReady = settings !== null;
@@ -182,14 +196,14 @@ function ChatPageInner({ onOpenMenu }) {
   const heroModel = useMemo(
     () =>
       resolveGreetingModel({
-        settings,
+        settings: effectiveSettings,
         persona,
         workspace: null, // belum ada konsep "workspace aktif" di sistem (FSE selalu aktif)
         connections: cockpit.activeConnectionCount,
         activity: cockpit.activity,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings, persona, cockpit.activeConnectionCount, cockpit.activity, heroVisible]
+    [effectiveSettings, persona, cockpit.activeConnectionCount, cockpit.activity, heroVisible]
   );
 
   // Posisi pesan non-lokal terakhir, dan pesan assistant yang boleh

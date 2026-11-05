@@ -26,10 +26,10 @@ import { ToastProvider } from "./components/Toast.jsx";
 import BootGate from "./components/boot/BootGate.jsx";
 import AccessLocationReporter from "./components/location/AccessLocationReporter.jsx";
 import VoiceCompanionHost from "./components/voice/VoiceCompanionHost.jsx";
-import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
+import { AuthProvider, useAuth, AuthState } from "./context/AuthContext.jsx";
 import LoginModal from "./components/auth/LoginModal.jsx";
-import RegisterModal from "./components/auth/RegisterModal.jsx";
-import LoginRequiredModal from "./components/auth/LoginRequiredModal.jsx";
+import LoginPage from "./pages/LoginPage.jsx";
+
 import AdminLoginPage from "./pages/AdminLoginPage.jsx";
 
 
@@ -254,16 +254,31 @@ function AppShell() {
 
               {/* Authentication & Guest Quota Modals */}
               <LoginModal />
-              <RegisterModal />
-              <LoginRequiredModal />
+
+
             </div>
   );
+}
+
+function AuthenticatedGate({ children }) {
+  const { status, user } = useAuth();
+
+  if (status === AuthState.INITIALIZING) {
+    return <PageLoadingFallback label="Memeriksa sesi pengguna..." />;
+  }
+
+  if (status !== AuthState.AUTHENTICATED || !user) {
+    return <LoginPage />;
+  }
+
+  return children;
 }
 
 export default function App() {
   return (
     <ToastProvider>
       <AuthProvider>
+        <AuthenticatedGate>
         <SessionsProvider>
           <ChatRuntimeProvider isOnChatPage={true}>
             <AccessLocationReporter />
@@ -273,6 +288,7 @@ export default function App() {
             </BootGate>
           </ChatRuntimeProvider>
         </SessionsProvider>
+        </AuthenticatedGate>
       </AuthProvider>
     </ToastProvider>
   );

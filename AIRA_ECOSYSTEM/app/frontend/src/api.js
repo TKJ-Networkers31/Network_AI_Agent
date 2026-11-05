@@ -33,7 +33,9 @@ async function request(path, options = {}) {
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     if (res.status === 401 && typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("aira:session_expired"));
+      if (authHeaders.Authorization && !path.includes("/auth/login") && !path.includes("/auth/me")) {
+        window.dispatchEvent(new CustomEvent("aira:session_expired"));
+      }
     }
     const err = new Error(
       typeof detail.detail === "string"
@@ -101,7 +103,9 @@ async function rawRequest(path, options = {}) {
 
     if (!res.ok) {
       if (res.status === 401 && typeof window !== "undefined") {
+        if (authHeaders.Authorization && !path.includes("/auth/login") && !path.includes("/auth/me")) {
         window.dispatchEvent(new CustomEvent("aira:session_expired"));
+      }
       }
       const err = new Error(
         typeof body.detail === "string" ? body.detail : `Request gagal (${res.status})`

@@ -908,8 +908,8 @@ class IdentityManager:
             )
         return session
 
-    def create_session(self, user_id: str, duration_hours: int = 24) -> UserSession:
-        """Issues an active session token for an authenticated user."""
+    def create_session(self, user_id: str, duration_hours: int = 720) -> UserSession:
+        """Issues an active session token for an authenticated user (default: 30 days persistent)."""
         session_id = f"sess_{uuid.uuid4().hex[:16]}"
         raw_token = f"aira_tok_{secrets.token_urlsafe(32)}"
         token_hash = _hash_token(raw_token)

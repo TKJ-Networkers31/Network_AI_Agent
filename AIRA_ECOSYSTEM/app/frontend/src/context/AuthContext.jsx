@@ -75,6 +75,7 @@ export function AuthProvider({ children }) {
         if (data.success && data.user) {
           setUser(data.user);
           setStatus(AuthState.AUTHENTICATED);
+          window.dispatchEvent(new CustomEvent("aira:auth_success", { detail: data.user }));
           return;
         }
       }
@@ -161,6 +162,7 @@ export function AuthProvider({ children }) {
 
         setUser(data.user);
         setStatus(AuthState.AUTHENTICATED);
+        window.dispatchEvent(new CustomEvent("aira:auth_success", { detail: data.user }));
 
         // Close auth modals
         setIsLoginModalOpen(false);
@@ -200,6 +202,7 @@ export function AuthProvider({ children }) {
 
         setUser(data.user);
         setStatus(AuthState.AUTHENTICATED);
+        window.dispatchEvent(new CustomEvent("aira:auth_success", { detail: data.user }));
 
         setIsLoginModalOpen(false);
         setIsRegisterModalOpen(false);

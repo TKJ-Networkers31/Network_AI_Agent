@@ -108,8 +108,8 @@ def _validate_short_text(value: str) -> Optional[str]:
 # validator  : Optional[Callable[[str], Optional[str]]] - hanya untuk
 #              type == "string"; return pesan error atau None kalau valid
 SETTINGS_SCHEMA: dict[str, dict[str, Any]] = {
-    "display_name": {"type": "string", "default": "Lingga", "validator": _validate_short_text},
-    "nickname": {"type": "string", "default": "Lingga", "validator": _validate_short_text},
+    "display_name": {"type": "string", "default": "Engineer", "validator": _validate_short_text},
+    "nickname": {"type": "string", "default": "Engineer", "validator": _validate_short_text},
     "assistant_name": {"type": "string", "default": "AIRA", "validator": _validate_short_text},
     "timezone": {"type": "string", "default": "Asia/Jakarta", "validator": _validate_timezone},
     "language": {"type": "string", "default": "id", "validator": _validate_language},
