@@ -1,20 +1,17 @@
 // src/pages/AdminPlatformPage.jsx
 // AIRA OS — AIRA Control Plane (Admin Site)
-// Implements 10 authoritative platform modules as required by Directive Section 2.B
+// Phase F.1: Architecture Simplification, MikroTik-Style Group RBAC & User Activity Monitoring
 
 import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   AlertTriangle,
-  Award,
   BarChart3,
   CheckCircle2,
   ChevronRight,
   Clock,
-  Coins,
+  Copy,
   Cpu,
-  CreditCard,
-  Database,
   Edit2,
   ExternalLink,
   Eye,
@@ -23,8 +20,7 @@ import {
   Key,
   Layers,
   Lock,
-  Mail,
-  Play,
+  Plus,
   Radio,
   RefreshCw,
   Search,
@@ -36,7 +32,9 @@ import {
   Sparkles,
   ToggleLeft,
   ToggleRight,
+  Trash2,
   UserCheck,
+  UserMinus,
   Users,
   X,
   XCircle,
@@ -49,13 +47,9 @@ import { getAuthHeaders } from "../api.js";
 const CONTROL_PLANE_MODULES = [
   { id: "overview", label: "Overview", icon: BarChart3 },
   { id: "users", label: "User Management", icon: Users },
+  { id: "groups", label: "Groups & Permissions", icon: ShieldCheck },
+  { id: "activity", label: "Activity & Sessions", icon: Activity },
   { id: "organizations", label: "Organizations", icon: Layers },
-  { id: "plans", label: "Plans & Entitlements", icon: Award },
-  { id: "subscriptions", label: "Subscription Management", icon: CreditCard },
-  { id: "billing", label: "Billing Management", icon: Coins },
-  { id: "infrastructure", label: "Infrastructure & NOC", icon: Server },
-  { id: "ai_config", label: "AI & Platform Configuration", icon: Cpu },
-  { id: "security", label: "Security & AAA", icon: ShieldCheck },
   { id: "settings", label: "Platform Settings", icon: Sliders },
 ];
 
@@ -64,32 +58,34 @@ export default function AdminPlatformPage({ onOpenMenu }) {
 
   // Data states
   const [users, setUsers] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [permissions, setPermissions] = useState([]);
+  const [sessions, setSessions] = useState([]);
+  const [activityEvents, setActivityEvents] = useState([]);
   const [tenants, setTenants] = useState([]);
-  const [subscriptions, setSubscriptions] = useState([]);
-  const [invoices, setInvoices] = useState([]);
-  const [transactions, setTransactions] = useState([]);
-  const [approvals, setApprovals] = useState([]);
-  const [tokenPolicy, setTokenPolicy] = useState(null);
-  const [tokenAdjustments, setTokenAdjustments] = useState([]);
-  const [planPolicies, setPlanPolicies] = useState([]);
-  const [quotaModalUser, setQuotaModalUser] = useState(null);
-  const [newQuotaValue, setNewQuotaValue] = useState(100000);
-  const [quotaReason, setQuotaReason] = useState("");
-  const [quotaAdjType, setQuotaAdjType] = useState("MANUAL_OVERRIDE");
-  const [savingQuota, setSavingQuota] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Impersonation modal state
-  const [impersonateTarget, setImpersonateTarget] = useState(null);
-  const [impersonateReason, setImpersonateReason] = useState("");
-  const [impersonating, setImpersonating] = useState(false);
+  // User Modals
+  const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
+  const [createUsername, setCreateUsername] = useState("");
+  const [createDisplayName, setCreateDisplayName] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [createGroup, setCreateGroup] = useState("NETWORK_ENGINEER");
+  const [savingUser, setSavingUser] = useState(false);
 
-  // Subscription Assignment modal state
-  const [assignSubUser, setAssignSubUser] = useState(null);
-  const [selectedPlanTier, setSelectedPlanTier] = useState("PRO");
-  const [assignNetplus, setAssignNetplus] = useState(true);
-  const [assignDuration, setAssignDuration] = useState(30);
-  const [savingSub, setSavingSub] = useState(false);
+  const [editUserTarget, setEditUserTarget] = useState(null);
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editGroup, setEditGroup] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [savingEditUser, setSavingEditUser] = useState(false);
+
+  // Group Modals
+  const [groupModalMode, setGroupModalMode] = useState(null); // 'create' | 'edit'
+  const [activeGroupTarget, setActiveGroupTarget] = useState(null);
+  const [groupName, setGroupName] = useState("");
+  const [groupDesc, setGroupDesc] = useState("");
+  const [groupPermMatrix, setGroupPermMatrix] = useState({}); // { permId: 'ALLOW' | 'DENY' }
+  const [savingGroup, setSavingGroup] = useState(false);
 
   const { notify } = useToast();
 
@@ -97,27 +93,21 @@ export default function AdminPlatformPage({ onOpenMenu }) {
     setLoading(true);
     try {
       const headers = getAuthHeaders();
-      const [uRes, tRes, sRes, iRes, txRes, aRes, polRes, adjRes, polsRes] = await Promise.all([
-        fetch("/api/v1/admin/users?limit=50", { headers }).then((r) => r.json()).catch(() => ({})),
+      const [uRes, gRes, pRes, sRes, actRes, tRes] = await Promise.all([
+        fetch("/api/v1/admin/users", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/groups", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/permissions", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/sessions", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/activity?limit=100", { headers }).then((r) => r.json()).catch(() => ({})),
         fetch("/api/v1/admin/tenants", { headers }).then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/subscriptions?limit=50", { headers }).then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/billing/invoices?limit=50", { headers }).then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/billing/transactions?limit=50", { headers }).then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/approvals?status=PENDING", { headers }).then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/token-policy?tier=PRO", { headers }).then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/tokens/adjustments?limit=50", { headers }).then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/tokens/policies", { headers }).then((r) => r.json()).catch(() => ({})),
       ]);
 
-      if (uRes.success) setUsers(uRes.users || []);
-      if (tRes.success) setTenants(tRes.tenants || []);
-      if (sRes.success) setSubscriptions(sRes.subscriptions || []);
-      if (iRes.success) setInvoices(iRes.invoices || []);
-      if (txRes.success) setTransactions(txRes.transactions || []);
-      if (aRes.success) setApprovals(aRes.approvals || []);
-      if (polRes.success) setTokenPolicy(polRes.policy);
-      if (adjRes.success) setTokenAdjustments(adjRes.adjustments || []);
-      if (polsRes.success) setPlanPolicies(polsRes.policies || []);
+      if (uRes.users) setUsers(uRes.users);
+      if (gRes.groups) setGroups(gRes.groups);
+      if (pRes.permissions) setPermissions(pRes.permissions);
+      if (sRes.sessions) setSessions(sRes.sessions);
+      if (actRes.events) setActivityEvents(actRes.events);
+      if (tRes.tenants) setTenants(tRes.tenants);
     } catch (err) {
       console.warn("Error loading admin data:", err);
     } finally {
@@ -129,161 +119,292 @@ export default function AdminPlatformPage({ onOpenMenu }) {
     loadData();
   }, [loadData]);
 
-  // Impersonate action
-  async function handleConfirmImpersonate() {
-    if (!impersonateTarget || !impersonateReason.trim()) {
-      notify({ type: "error", message: "Alasan impersonation wajib diisi untuk audit." });
+  // Periodic heartbeat / session refresh
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (activeModule === "activity" || activeModule === "users") {
+        loadData();
+      }
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [activeModule, loadData]);
+
+  // --------------------------------------------------------------------------
+  // User Actions
+  // --------------------------------------------------------------------------
+  async function handleCreateUser(e) {
+    e.preventDefault();
+    if (!createUsername.trim() || !createPassword.trim()) {
+      notify({ type: "error", message: "Username dan password wajib diisi." });
       return;
     }
-    setImpersonating(true);
+    setSavingUser(true);
     try {
-      const res = await fetch("/api/v1/admin/impersonate", {
+      const res = await fetch("/api/v1/admin/users", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
-          target_user_id: impersonateTarget.user_id,
-          reason: impersonateReason.trim(),
+          username: createUsername.trim(),
+          display_name: createDisplayName.trim() || createUsername.trim(),
+          password: createPassword,
+          group_name: createGroup,
         }),
       });
       const data = await res.json();
-      if (res.ok && data.success) {
-        notify({
-          type: "success",
-          message: `Sesi impersonasi aktif sebagai ${impersonateTarget.username}. Tindakan dicatat di audit log.`,
-        });
-        setImpersonateTarget(null);
-        setImpersonateReason("");
+      if (res.ok) {
+        notify({ type: "success", message: `Pengguna '${data.username}' berhasil dibuat.` });
+        setIsCreateUserOpen(false);
+        setCreateUsername("");
+        setCreateDisplayName("");
+        setCreatePassword("");
+        loadData();
       } else {
-        notify({ type: "error", message: data.detail || "Gagal melakukan impersonasi." });
+        notify({ type: "error", message: data.detail || "Gagal membuat pengguna." });
       }
     } catch (err) {
       notify({ type: "error", message: err.message });
     } finally {
-      setImpersonating(false);
+      setSavingUser(false);
     }
   }
 
-  async function handleAdjustQuota() {
-    if (!quotaModalUser || !quotaReason.trim()) {
-      notify({ type: "error", message: "Alasan perubahan kuota wajib diisi untuk audit." });
+  async function handleUpdateUser(e) {
+    e.preventDefault();
+    if (!editUserTarget) return;
+    setSavingEditUser(true);
+    try {
+      const body = {
+        display_name: editDisplayName.trim(),
+        group: editGroup,
+      };
+      if (editPassword.trim()) {
+        body.password = editPassword.trim();
+      }
+      const res = await fetch(`/api/v1/admin/users/${editUserTarget.user_id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        notify({ type: "success", message: `Profil '${data.username}' berhasil diperbarui.` });
+        setEditUserTarget(null);
+        loadData();
+      } else {
+        notify({ type: "error", message: data.detail || "Gagal memperbarui pengguna." });
+      }
+    } catch (err) {
+      notify({ type: "error", message: err.message });
+    } finally {
+      setSavingEditUser(false);
+    }
+  }
+
+  async function handleToggleUserStatus(user) {
+    const nextStatus = !user.account_enabled;
+    const actionLabel = nextStatus ? "mengaktifkan" : "menonaktifkan";
+    if (!nextStatus && !confirm(`Yakin ingin ${actionLabel} akun ${user.username}? Semua sesi aktif akan langsung dicabut.`)) {
       return;
     }
-    setSavingQuota(true);
     try {
-      const res = await fetch("/api/v1/admin/tokens/adjust", {
+      const res = await fetch(`/api/v1/admin/users/${user.user_id}/toggle-status`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({
-          target_user_id: quotaModalUser.user_id,
-          new_quota: parseInt(newQuotaValue) || 0,
-          reason: quotaReason.trim(),
-          adjustment_type: quotaAdjType,
-        }),
+        body: JSON.stringify({ enabled: nextStatus }),
       });
       const data = await res.json();
-      if (res.ok && data.success) {
-        notify({ type: "success", message: `Kuota token user ${quotaModalUser.username} berhasil diperbarui.` });
-        setQuotaModalUser(null);
-        setQuotaReason("");
+      if (res.ok) {
+        notify({ type: "success", message: data.message });
         loadData();
       } else {
-        notify({ type: "error", message: data.detail || "Gagal memperbarui kuota." });
-      }
-    } catch (err) {
-      notify({ type: "error", message: err.message });
-    } finally {
-      setSavingQuota(false);
-    }
-  }
-
-  async function handleResetUserQuota(userId, username) {
-    if (!confirm(`Reset token terpakai user ${username} menjadi 0?`)) return;
-    try {
-      const res = await fetch("/api/v1/admin/tokens/reset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({
-          target_user_id: userId,
-          reason: "Superadmin manual cycle reset",
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        notify({ type: "success", message: `Token terpakai ${username} direset ke 0.` });
-        loadData();
-      } else {
-        notify({ type: "error", message: data.detail || "Gagal reset token." });
+        notify({ type: "error", message: data.detail || "Gagal mengubah status akun." });
       }
     } catch (err) {
       notify({ type: "error", message: err.message });
     }
   }
 
-    // Assign subscription action
-  async function handleAssignSubscription() {
-    if (!assignSubUser) return;
-    setSavingSub(true);
+  async function handleRevokeUserSessions(userId, username) {
+    if (!confirm(`Cabut seluruh sesi login aktif untuk user '${username}'?`)) return;
     try {
-      const res = await fetch("/api/v1/admin/subscriptions/assign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({
-          user_id: assignSubUser.user_id,
-          plan_id: selectedPlanTier,
-          duration_days: assignDuration,
-          networking_addon: assignNetplus,
-          renewal_status: "MANUAL",
-        }),
+      const res = await fetch(`/api/v1/admin/users/${userId}/sessions`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
-      if (res.ok && data.success) {
-        notify({ type: "success", message: `Langganan user ${assignSubUser.username} berhasil diatur ke ${selectedPlanTier}.` });
-        setAssignSubUser(null);
+      if (res.ok) {
+        notify({ type: "success", message: `${data.revoked_count} sesi untuk '${username}' berhasil dicabut.` });
         loadData();
       } else {
-        notify({ type: "error", message: data.detail || "Gagal mengatur langganan." });
+        notify({ type: "error", message: data.detail || "Gagal mencabut sesi." });
       }
     } catch (err) {
       notify({ type: "error", message: err.message });
-    } finally {
-      setSavingSub(false);
     }
   }
 
-  // Check expirations manually
-  async function handleSweepExpirations() {
+  async function handleRevokeSingleSession(sessionId) {
+    if (!confirm("Cabut sesi ini sekarang?")) return;
     try {
-      const res = await fetch("/api/v1/admin/subscriptions/check-expirations", { method: "POST", headers: getAuthHeaders() });
+      const res = await fetch(`/api/v1/admin/sessions/${sessionId}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
-      if (data.success) {
-        notify({
-          type: "success",
-          message: `Pemeriksaan selesai: ${data.report.expired_count} akun kadaluarsa telah diturunkan ke Free tanpa menghapus data.`,
+      if (res.ok) {
+        notify({ type: "success", message: "Sesi berhasil dicabut." });
+        loadData();
+      } else {
+        notify({ type: "error", message: data.detail || "Gagal mencabut sesi." });
+      }
+    } catch (err) {
+      notify({ type: "error", message: err.message });
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Group Actions (MikroTik Style)
+  // --------------------------------------------------------------------------
+  function openCreateGroupModal() {
+    setGroupModalMode("create");
+    setActiveGroupTarget(null);
+    setGroupName("");
+    setGroupDesc("");
+    setGroupPermMatrix({});
+  }
+
+  async function openEditGroupModal(group) {
+    setGroupModalMode("edit");
+    setActiveGroupTarget(group);
+    setGroupName(group.name);
+    setGroupDesc(group.description || "");
+
+    // Fetch full permission matrix for this group
+    try {
+      const res = await fetch(`/api/v1/admin/groups/${group.group_id}`, { headers: getAuthHeaders() });
+      const data = await res.json();
+      if (res.ok) {
+        setGroupPermMatrix(data.permissions || {});
+      }
+    } catch {
+      setGroupPermMatrix({});
+    }
+  }
+
+  function handleSetPermEffect(permId, effect) {
+    // effect: 'ALLOW' | 'DENY' | 'NONE'
+    setGroupPermMatrix((prev) => {
+      const copy = { ...prev };
+      if (!effect || effect === "NONE") {
+        delete copy[permId];
+      } else {
+        copy[permId] = effect;
+      }
+      return copy;
+    });
+  }
+
+  async function handleSaveGroup(e) {
+    e.preventDefault();
+    if (!groupName.trim()) {
+      notify({ type: "error", message: "Nama grup wajib diisi." });
+      return;
+    }
+    setSavingGroup(true);
+    try {
+      const permList = Object.entries(groupPermMatrix).map(([pid, eff]) => ({
+        permission_id: pid,
+        effect: eff,
+      }));
+
+      let res;
+      if (groupModalMode === "create") {
+        res = await fetch("/api/v1/admin/groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+          body: JSON.stringify({
+            name: groupName.trim(),
+            description: groupDesc.trim(),
+            permissions: permList,
+          }),
         });
+      } else {
+        res = await fetch(`/api/v1/admin/groups/${activeGroupTarget.group_id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+          body: JSON.stringify({
+            name: groupName.trim(),
+            description: groupDesc.trim(),
+            permissions: permList,
+          }),
+        });
+      }
+      const data = await res.json();
+      if (res.ok) {
+        notify({ type: "success", message: `Grup '${data.name}' berhasil disimpan.` });
+        setGroupModalMode(null);
         loadData();
+      } else {
+        notify({ type: "error", message: data.detail || "Gagal menyimpan grup." });
+      }
+    } catch (err) {
+      notify({ type: "error", message: err.message });
+    } finally {
+      setSavingGroup(false);
+    }
+  }
+
+  async function handleDuplicateGroup(group) {
+    const newName = prompt(`Masukkan nama untuk duplikasi grup '${group.name}':`, `${group.name}_Copy`);
+    if (!newName || !newName.trim()) return;
+
+    try {
+      const res = await fetch(`/api/v1/admin/groups/${group.group_id}/duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ new_name: newName.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        notify({ type: "success", message: `Grup duplikat '${data.name}' berhasil dibuat.` });
+        loadData();
+      } else {
+        notify({ type: "error", message: data.detail || "Gagal menduplikasi grup." });
       }
     } catch (err) {
       notify({ type: "error", message: err.message });
     }
   }
 
-  // Resolve pending approval
-  async function handleResolveApproval(approvalId, approved) {
+  async function handleDeleteGroup(group) {
+    if (!confirm(`Hapus grup '${group.name}'? Anggota grup akan kehilangan akses dari grup ini.`)) return;
     try {
-      const res = await fetch(`/api/v1/admin/approvals/${encodeURIComponent(approvalId)}/resolve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ approved, review_notes: approved ? "Approved by Superadmin" : "Rejected" }),
+      const res = await fetch(`/api/v1/admin/groups/${group.group_id}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
       });
       const data = await res.json();
-      if (data.success) {
-        notify({ type: "success", message: `Persetujuan berhasil di-${approved ? "setujui" : "tolak"}.` });
+      if (res.ok) {
+        notify({ type: "success", message: `Grup '${group.name}' telah dihapus.` });
         loadData();
+      } else {
+        notify({ type: "error", message: data.detail || "Gagal menghapus grup." });
       }
     } catch (err) {
       notify({ type: "error", message: err.message });
     }
   }
+
+  // Group permissions by module
+  const permissionsByModule = permissions.reduce((acc, p) => {
+    const mod = p.module || "General";
+    if (!acc[mod]) acc[mod] = [];
+    acc[mod].push(p);
+    return acc;
+  }, {});
+
+  // Online count
+  const onlineCount = users.filter((u) => u.is_online).length;
 
   return (
     <div className="flex flex-col h-full bg-[#0d0d10] text-neutral-200">
@@ -298,14 +419,14 @@ export default function AdminPlatformPage({ onOpenMenu }) {
             <button
               key={m.id}
               onClick={() => setActiveModule(m.id)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg whitespace-nowrap font-medium transition ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium transition shrink-0 ${
                 active
-                  ? "bg-pink-500/15 text-pink-400 border border-pink-500/30"
-                  : "text-neutral-400 hover:text-neutral-200 hover:bg-white/[0.04]"
+                  ? "bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-sm shadow-rose-950/30"
+                  : "text-neutral-400 hover:text-white hover:bg-white/[0.04]"
               }`}
             >
-              <Icon size={14} />
-              {m.label}
+              <Icon size={14} className={active ? "text-rose-400" : "text-neutral-400"} />
+              <span>{m.label}</span>
             </button>
           );
         })}
@@ -325,69 +446,42 @@ export default function AdminPlatformPage({ onOpenMenu }) {
         {/* 1. OVERVIEW */}
         {activeModule === "overview" && (
           <div className="space-y-6">
-            {/* Metric Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
-                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">Total Registered Users</div>
+                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">Registered Users</div>
                 <div className="text-2xl font-bold text-white">{users.length}</div>
-                <div className="text-[11px] text-emerald-400">100% active identity accounts</div>
+                <div className="text-[11px] text-emerald-400">{onlineCount} currently online</div>
               </div>
 
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
-                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">Active Subscriptions</div>
-                <div className="text-2xl font-bold text-pink-400">
-                  {subscriptions.filter((s) => s.subscription_status === "ACTIVE").length}
-                </div>
-                <div className="text-[11px] text-neutral-400">Free, Pro, & Enterprise</div>
+                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">RBAC Access Groups</div>
+                <div className="text-2xl font-bold text-rose-400">{groups.length}</div>
+                <div className="text-[11px] text-neutral-400">6 System Default + Custom</div>
               </div>
 
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
-                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">Networking++ Subscribers</div>
-                <div className="text-2xl font-bold text-purple-400">
-                  {subscriptions.filter((s) => s.networking_addon_status === 1).length}
-                </div>
-                <div className="text-[11px] text-purple-300">Advanced topology & NMS enabled</div>
+                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">Active Sessions</div>
+                <div className="text-2xl font-bold text-cyan-400">{sessions.length}</div>
+                <div className="text-[11px] text-cyan-300">Live heartbeat monitoring</div>
               </div>
 
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-1">
-                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">Platform Health</div>
-                <div className="text-2xl font-bold text-emerald-400">100%</div>
-                <div className="text-[11px] text-emerald-400">WAL DB + Automation Loop Healthy</div>
+                <div className="text-[11px] text-neutral-400 uppercase tracking-wider">Platform Security</div>
+                <div className="text-2xl font-bold text-emerald-400">ENFORCED</div>
+                <div className="text-[11px] text-emerald-400">Mandatory Auth & Backend RBAC</div>
               </div>
             </div>
 
-            {/* Core Services Health Grid */}
-            <div className="space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">Platform Backend Services</h3>
-              <div className="grid grid-cols-3 gap-3 text-xs">
-                <div className="p-3 rounded-lg bg-black/40 border border-white/5 flex items-center justify-between">
-                  <div>
-                    <div className="font-medium text-white">FastAPI Core Router</div>
-                    <div className="text-[10px] text-neutral-400">Bearer Auth + RBAC Guards</div>
-                  </div>
-                  <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    ONLINE
-                  </span>
-                </div>
-                <div className="p-3 rounded-lg bg-black/40 border border-white/5 flex items-center justify-between">
-                  <div>
-                    <div className="font-medium text-white">Automation Engine & Expiration</div>
-                    <div className="text-[10px] text-neutral-400">Background 10s Timer Loop</div>
-                  </div>
-                  <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    ACTIVE
-                  </span>
-                </div>
-                <div className="p-3 rounded-lg bg-black/40 border border-white/5 flex items-center justify-between">
-                  <div>
-                    <div className="font-medium text-white">Ansible Playbook Sandbox</div>
-                    <div className="text-[10px] text-neutral-400">Isolated runner & redaction</div>
-                  </div>
-                  <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    READY
-                  </span>
-                </div>
-              </div>
+            <div className="p-5 rounded-xl bg-black/40 border border-white/5 space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
+                MikroTik-Style Access Governance
+              </h3>
+              <p className="text-xs text-neutral-300 leading-relaxed">
+                AIRA OS menggunakan model akses berbasis grup seperti RouterOS MikroTik:{" "}
+                <code className="text-rose-300 font-mono">Organization → Users → Groups → Permissions</code>.
+                Setiap pengguna diverifikasi secara ketat di backend pada setiap pemanggilan tool AI dan akses REST API.
+                Izin <code className="text-rose-400 font-mono">DENY</code> secara absolut menganulir izin <code className="text-emerald-400 font-mono">ALLOW</code>.
+              </p>
             </div>
           </div>
         )}
@@ -399,97 +493,231 @@ export default function AdminPlatformPage({ onOpenMenu }) {
               <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
                 User Directory ({users.length})
               </h3>
+              <button
+                onClick={() => setIsCreateUserOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 text-xs font-medium border border-rose-500/30 transition"
+              >
+                <Plus size={13} />
+                <span>Tambah Pengguna</span>
+              </button>
             </div>
 
             <div className="rounded-xl border border-white/5 bg-black/30 overflow-hidden">
               <table className="w-full text-left text-xs">
                 <thead className="bg-white/[0.02] text-neutral-400 border-b border-white/5">
                   <tr>
-                    <th className="py-2.5 px-4 font-medium">Username</th>
-                    <th className="py-2.5 px-4 font-medium">Email</th>
-                    <th className="py-2.5 px-4 font-medium">Organization</th>
-                    <th className="py-2.5 px-4 font-medium">Plan Tier</th>
-                    <th className="py-2.5 px-4 font-medium">Net++</th>
-                    <th className="py-2.5 px-4 font-medium">Status</th>
-                    <th className="py-2.5 px-4 font-medium text-right">Actions</th>
+                    <th className="py-2.5 px-4 font-medium">Pengguna</th>
+                    <th className="py-2.5 px-4 font-medium">Status Akun</th>
+                    <th className="py-2.5 px-4 font-medium">Grup Akses</th>
+                    <th className="py-2.5 px-4 font-medium">Aktivitas Terakhir</th>
+                    <th className="py-2.5 px-4 font-medium">Login Terakhir</th>
+                    <th className="py-2.5 px-4 font-medium text-right">Tindakan</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {users.map((u) => (
-                    <tr key={u.user_id} className="hover:bg-white/[0.02]">
-                      <td className="py-3 px-4 font-medium text-white flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-pink-500/20 text-pink-400 flex items-center justify-center text-[10px] font-bold">
-                          {u.username.charAt(0).toUpperCase()}
-                        </div>
-                        {u.username}
-                        {u.is_internal ? (
-                          <span className="text-[9px] px-1.5 py-0.5 bg-rose-500/20 text-rose-300 rounded font-mono">STAFF</span>
-                        ) : null}
-                      </td>
-                      <td className="py-3 px-4 text-neutral-400">{u.email}</td>
-                      <td className="py-3 px-4 text-neutral-300">{u.tenant_name || "Default Org"}</td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-pink-500/10 text-pink-400 border border-pink-500/20">
-                          {u.plan_id || "FREE"}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        {u.networking_addon_status ? (
-                          <span className="text-purple-400 flex items-center gap-1 font-semibold text-[11px]">
-                            <Zap size={12} /> Yes
-                          </span>
-                        ) : (
-                          <span className="text-neutral-500 text-[11px]">No</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="text-emerald-400 flex items-center gap-1 text-[11px]">
-                          <CheckCircle2 size={12} /> Active
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-right space-x-2">
-                        <button
-                          onClick={() => setAssignSubUser(u)}
-                          className="px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-200 text-[11px] transition"
-                        >
-                          Plan
-                        </button>
-                        <button
-                          onClick={() => setImpersonateTarget(u)}
-                          className="px-2.5 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-[11px] transition"
-                        >
-                          Impersonate
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {users.map((u) => {
+                    const isOnline = u.is_online;
+                    const isDisabled = !u.account_enabled;
+
+                    return (
+                      <tr key={u.user_id} className="hover:bg-white/[0.02]">
+                        <td className="py-3 px-4 font-medium text-white flex items-center gap-2">
+                          <div
+                            className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                              isDisabled
+                                ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                                : isOnline
+                                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                : "bg-neutral-800 text-neutral-400 border border-neutral-700"
+                            }`}
+                          >
+                            {u.username.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span>{u.username}</span>
+                              {u.username === "lingga_admin" && (
+                                <span className="text-[9px] px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded font-mono">
+                                  SUPERADMIN
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-neutral-400">{u.display_name}</div>
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-4">
+                          {isDisabled ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-red-500/10 text-red-400 border border-red-500/20">
+                              <XCircle size={10} /> Disabled
+                            </span>
+                          ) : isOnline ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 animate-pulse">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Online
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-neutral-800 text-neutral-400 border border-neutral-700">
+                              Offline
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="py-3 px-4">
+                          <div className="flex flex-wrap gap-1">
+                            {(u.groups || []).map((g) => (
+                              <span
+                                key={g}
+                                className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                                  g === "SUPER_ADMIN"
+                                    ? "bg-amber-500/10 text-amber-300 border-amber-500/30"
+                                    : g === "ADMIN"
+                                    ? "bg-rose-500/10 text-rose-300 border-rose-500/30"
+                                    : g === "NOC"
+                                    ? "bg-blue-500/10 text-blue-300 border-blue-500/30"
+                                    : g === "SOC"
+                                    ? "bg-purple-500/10 text-purple-300 border-purple-500/30"
+                                    : g === "NETWORK_ENGINEER"
+                                    ? "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"
+                                    : "bg-white/5 text-neutral-400 border-white/10"
+                                }`}
+                              >
+                                {g}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+
+                        <td className="py-3 px-4 text-neutral-400 text-[11px]">
+                          {u.last_activity_at ? new Date(u.last_activity_at).toLocaleString("id-ID") : "-"}
+                        </td>
+
+                        <td className="py-3 px-4 text-neutral-400 text-[11px]">
+                          {u.last_login_at ? new Date(u.last_login_at).toLocaleString("id-ID") : "-"}
+                        </td>
+
+                        <td className="py-3 px-4 text-right space-x-2">
+                          <button
+                            onClick={() => {
+                              setEditUserTarget(u);
+                              setEditDisplayName(u.display_name || "");
+                              setEditGroup(u.groups?.[0] || "READ_ONLY");
+                              setEditPassword("");
+                            }}
+                            className="px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 text-neutral-200 text-[11px] transition"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            onClick={() => handleRevokeUserSessions(u.user_id, u.username)}
+                            title="Cabut seluruh sesi login user ini"
+                            className="px-2.5 py-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 text-[11px] transition"
+                          >
+                            Revoke Sesi
+                          </button>
+
+                          {u.username !== "lingga_admin" && (
+                            <button
+                              onClick={() => handleToggleUserStatus(u)}
+                              className={`px-2.5 py-1 rounded text-[11px] border transition ${
+                                u.account_enabled
+                                  ? "bg-neutral-800 text-neutral-300 hover:bg-neutral-700 border-neutral-700"
+                                  : "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border-emerald-500/30"
+                              }`}
+                            >
+                              {u.account_enabled ? "Nonaktifkan" : "Aktifkan"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
         )}
 
-        {/* 3. ORGANIZATIONS */}
-        {activeModule === "organizations" && (
+        {/* 3. GROUPS & PERMISSIONS (MikroTik Style) */}
+        {activeModule === "groups" && (
           <div className="space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-              Customer Organizations ({tenants.length})
-            </h3>
-            <div className="grid grid-cols-2 gap-4">
-              {tenants.map((t) => (
-                <div key={t.tenant_id} className="p-4 rounded-xl bg-black/40 border border-white/5 space-y-3">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="text-sm font-semibold text-white">{t.name}</div>
-                      <div className="text-[11px] font-mono text-neutral-400">{t.slug} • {t.tenant_id}</div>
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
+                  Access Groups & Permission Matrix ({groups.length})
+                </h3>
+                <p className="text-[11px] text-neutral-400">
+                  Manajemen izin modular seperti User Groups MikroTik RouterOS.
+                </p>
+              </div>
+              <button
+                onClick={openCreateGroupModal}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 text-xs font-medium border border-rose-500/30 transition"
+              >
+                <Plus size={13} />
+                <span>Buat Grup Baru</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {groups.map((g) => (
+                <div
+                  key={g.group_id}
+                  className="p-4 rounded-xl bg-black/40 border border-white/5 space-y-3 flex flex-col justify-between"
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-white text-sm flex items-center gap-1.5">
+                        <Shield size={14} className={g.is_system ? "text-amber-400" : "text-rose-400"} />
+                        {g.name}
+                      </span>
+                      {g.is_system ? (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                          SYSTEM
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/5 text-neutral-400 border border-white/10">
+                          CUSTOM
+                        </span>
+                      )}
                     </div>
-                    <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      {t.status}
-                    </span>
+                    <p className="text-xs text-neutral-400 line-clamp-2">{g.description || "Grup otorisasi sistem AIRA OS."}</p>
                   </div>
-                  <div className="pt-2 border-t border-white/5 flex justify-between text-xs text-neutral-400">
-                    <span>Sisa Token: {t.token_balance?.remaining_tokens?.toLocaleString() || "10,000"}</span>
-                    <span>Networking++: {t.entitlements?.networking_plus ? "Enabled" : "Disabled"}</span>
+
+                  <div className="space-y-3 pt-2 border-t border-white/5 text-xs">
+                    <div className="flex items-center justify-between text-neutral-400">
+                      <span>Jumlah Anggota:</span>
+                      <span className="font-semibold text-white">{g.member_count || 0} user</span>
+                    </div>
+                    <div className="flex items-center justify-between text-neutral-400">
+                      <span>Izin Aktif:</span>
+                      <span className="font-semibold text-emerald-400">{g.permission_count || 0} izin</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        onClick={() => openEditGroupModal(g)}
+                        className="flex-1 py-1.5 rounded bg-white/5 hover:bg-white/10 text-neutral-200 text-center text-xs font-medium transition"
+                      >
+                        Edit Izin
+                      </button>
+                      <button
+                        onClick={() => handleDuplicateGroup(g)}
+                        title="Duplikasi Grup"
+                        className="p-1.5 rounded bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition"
+                      >
+                        <Copy size={13} />
+                      </button>
+                      {!g.is_system && (
+                        <button
+                          onClick={() => handleDeleteGroup(g)}
+                          title="Hapus Grup"
+                          className="p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 transition"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -497,464 +725,482 @@ export default function AdminPlatformPage({ onOpenMenu }) {
           </div>
         )}
 
-        {/* 4. PLANS & ENTITLEMENTS */}
-        {activeModule === "plans" && (
+        {/* 4. ACTIVITY & SESSIONS */}
+        {activeModule === "activity" && (
           <div className="space-y-6">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-              Feature Access & Plan Matrix
-            </h3>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="p-5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-neutral-400">Free Tier</div>
-                <div className="text-2xl font-bold text-white">Rp 0</div>
-                <ul className="text-xs text-neutral-300 space-y-2 list-disc list-inside">
-                  <li>Single site workspace</li>
-                  <li>10,000 monthly tokens</li>
-                  <li>Standard topology map</li>
-                  <li>Manual diagnostics</li>
-                </ul>
+            {/* Live Sessions */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
+                  Live Active Sessions ({sessions.length})
+                </h3>
               </div>
 
-              <div className="p-5 rounded-2xl bg-pink-500/5 border border-pink-500/20 space-y-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-pink-400">Pro Tier</div>
-                <div className="text-2xl font-bold text-pink-400">Rp 250.000 <span className="text-xs text-neutral-400">/ bln</span></div>
-                <ul className="text-xs text-neutral-300 space-y-2 list-disc list-inside">
-                  <li>Multi-site support</li>
-                  <li>2,000,000 monthly tokens</li>
-                  <li>Config audit & template synthesis</li>
-                  <li>Standard automation runner</li>
-                </ul>
-              </div>
-
-              <div className="p-5 rounded-2xl bg-purple-500/5 border border-purple-500/20 space-y-3">
-                <div className="text-xs font-semibold uppercase tracking-wider text-purple-400">Networking++ (Enterprise)</div>
-                <div className="text-2xl font-bold text-purple-400">Rp 1.500.000 <span className="text-xs text-neutral-400">/ bln</span></div>
-                <ul className="text-xs text-neutral-300 space-y-2 list-disc list-inside">
-                  <li>10,000,000 monthly tokens</li>
-                  <li>Live NMS telemetry stream</li>
-                  <li>Ansible playbook engine</li>
-                  <li>Blast radius & what-if analysis</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 5. SUBSCRIPTION MANAGEMENT */}
-        {activeModule === "subscriptions" && (
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                User Subscriptions ({subscriptions.length})
-              </h3>
-              <button
-                onClick={handleSweepExpirations}
-                className="px-3 py-1.5 rounded-lg bg-pink-500/10 text-pink-400 border border-pink-500/20 hover:bg-pink-500/20 text-xs font-medium transition"
-              >
-                Run Expiration Sweep
-              </button>
-            </div>
-
-            <div className="rounded-xl border border-white/5 bg-black/30 overflow-hidden">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-white/[0.02] text-neutral-400 border-b border-white/5">
-                  <tr>
-                    <th className="py-2.5 px-4 font-medium">User</th>
-                    <th className="py-2.5 px-4 font-medium">Plan</th>
-                    <th className="py-2.5 px-4 font-medium">Networking++</th>
-                    <th className="py-2.5 px-4 font-medium">Starts At</th>
-                    <th className="py-2.5 px-4 font-medium">Expires At</th>
-                    <th className="py-2.5 px-4 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {subscriptions.map((s) => (
-                    <tr key={s.subscription_id} className="hover:bg-white/[0.02]">
-                      <td className="py-3 px-4 font-medium text-white">{s.username}</td>
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-pink-500/10 text-pink-400 border border-pink-500/20">
-                          {s.plan_id}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        {s.networking_addon_status ? (
-                          <span className="text-purple-400 font-semibold text-[11px]">ACTIVE</span>
-                        ) : (
-                          <span className="text-neutral-500 text-[11px]">NONE</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 text-neutral-400 font-mono text-[11px]">
-                        {s.starts_at ? new Date(s.starts_at).toLocaleDateString() : "-"}
-                      </td>
-                      <td className="py-3 px-4 text-neutral-400 font-mono text-[11px]">
-                        {s.expires_at ? new Date(s.expires_at).toLocaleDateString() : "Never (Lifetime)"}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-medium ${
-                            s.subscription_status === "ACTIVE"
-                              ? "bg-emerald-500/10 text-emerald-400"
-                              : "bg-rose-500/10 text-rose-400"
-                          }`}
-                        >
-                          {s.subscription_status}
-                        </span>
-                      </td>
+              <div className="rounded-xl border border-white/5 bg-black/30 overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-white/[0.02] text-neutral-400 border-b border-white/5">
+                    <tr>
+                      <th className="py-2.5 px-4 font-medium">Session ID (Masked)</th>
+                      <th className="py-2.5 px-4 font-medium">User</th>
+                      <th className="py-2.5 px-4 font-medium">IP & User Agent</th>
+                      <th className="py-2.5 px-4 font-medium">Aktivitas Terakhir</th>
+                      <th className="py-2.5 px-4 font-medium">Status</th>
+                      <th className="py-2.5 px-4 font-medium text-right">Aksi</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* 6. BILLING MANAGEMENT */}
-        {activeModule === "billing" && (
-          <div className="space-y-6">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-              Billing Ledger & Invoices
-            </h3>
-            <div className="grid grid-cols-2 gap-4">
-              {/* Invoices */}
-              <div className="space-y-3">
-                <div className="text-xs font-semibold text-white">Recent Invoices ({invoices.length})</div>
-                <div className="rounded-xl border border-white/5 bg-black/30 divide-y divide-white/5 text-xs">
-                  {invoices.length === 0 ? (
-                    <div className="p-4 text-neutral-500 text-center">Belum ada invoice.</div>
-                  ) : (
-                    invoices.map((inv) => (
-                      <div key={inv.invoice_id} className="p-3 flex justify-between items-center">
-                        <div>
-                          <div className="font-medium text-white">{inv.invoice_id} ({inv.username})</div>
-                          <div className="text-[10px] text-neutral-400 font-mono">{inv.currency} {inv.amount_cents?.toLocaleString()}</div>
-                        </div>
-                        <span className={`px-2 py-0.5 rounded text-[10px] ${inv.status === "PAID" ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-400"}`}>
-                          {inv.status}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Transactions */}
-              <div className="space-y-3">
-                <div className="text-xs font-semibold text-white">Payment Transactions ({transactions.length})</div>
-                <div className="rounded-xl border border-white/5 bg-black/30 divide-y divide-white/5 text-xs">
-                  {transactions.length === 0 ? (
-                    <div className="p-4 text-neutral-500 text-center">Belum ada transaksi pembayaran.</div>
-                  ) : (
-                    transactions.map((tx) => (
-                      <div key={tx.transaction_id} className="p-3 flex justify-between items-center">
-                        <div>
-                          <div className="font-medium text-white">{tx.transaction_id}</div>
-                          <div className="text-[10px] text-neutral-400">{tx.provider_name} • {tx.currency} {tx.amount_cents?.toLocaleString()}</div>
-                        </div>
-                        <span className={`px-2 py-0.5 rounded text-[10px] ${tx.status === "SUCCESS" ? "bg-emerald-500/10 text-emerald-400" : "bg-neutral-500/10 text-neutral-400"}`}>
-                          {tx.status}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {sessions.map((s) => (
+                      <tr key={s.session_id} className="hover:bg-white/[0.02]">
+                        <td className="py-3 px-4 font-mono text-[11px] text-cyan-300">{s.masked_session_id}</td>
+                        <td className="py-3 px-4 font-medium text-white">{s.username}</td>
+                        <td className="py-3 px-4 text-neutral-400 text-[11px]">
+                          <div>{s.ip_address || "127.0.0.1"}</div>
+                          <div className="text-[10px] text-neutral-500 truncate max-w-xs">{s.user_agent || "Client Browser"}</div>
+                        </td>
+                        <td className="py-3 px-4 text-neutral-400 text-[11px]">
+                          {s.last_activity_at ? new Date(s.last_activity_at).toLocaleString("id-ID") : "-"}
+                        </td>
+                        <td className="py-3 px-4">
+                          {s.is_online ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 animate-pulse">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> ONLINE
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-neutral-800 text-neutral-400 border border-neutral-700">
+                              IDLE / TIMEOUT
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            onClick={() => handleRevokeSingleSession(s.session_id)}
+                            className="px-2.5 py-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 text-[11px] transition"
+                          >
+                            Cabut Sesi
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {sessions.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-6 text-center text-neutral-500">
+                          Tidak ada sesi aktif saat ini.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* 7. INFRASTRUCTURE & NOC */}
-        {activeModule === "infrastructure" && (
-          <div className="space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-              Platform Infrastructure & NOC centre
-            </h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 rounded-xl bg-black/40 border border-white/5 space-y-2">
-                <div className="text-xs font-semibold text-white">SQLite WAL Topology Engine</div>
-                <p className="text-xs text-neutral-400">Status: Read/Write Transactional Pool Active</p>
-                <div className="text-[11px] font-mono text-emerald-400">database/topology.db (67 tables verified)</div>
-              </div>
-              <div className="p-4 rounded-xl bg-black/40 border border-white/5 space-y-2">
-                <div className="text-xs font-semibold text-white">Edge Gateways Connectivity</div>
-                <p className="text-xs text-neutral-400">Status: Hybrid Gateway Coordinator Running</p>
-                <div className="text-[11px] font-mono text-emerald-400">Localhost + Remote Edge Nodes Synchronized</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 8. AI CONFIG */}
-        {activeModule === "ai_config" && (
-          <div className="space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-              AI & Platform Configuration
-            </h3>
-            <div className="p-4 rounded-xl bg-black/40 border border-white/5 space-y-3">
-              <div className="text-xs font-semibold text-white">Pro Tier Token Allocation Policy</div>
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                <div>
-                  <span className="text-neutral-400">Monthly Tokens: </span>
-                  <span className="text-white font-mono">{tokenPolicy?.monthly_token_allocation?.toLocaleString() || "2,000,000"}</span>
-                </div>
-                <div>
-                  <span className="text-neutral-400">Rate Limit: </span>
-                  <span className="text-white font-mono">{tokenPolicy?.rate_limit_rpm || 120} RPM</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 9. SECURITY & AAA */}
-        {activeModule === "security" && (
-          <div className="space-y-6">
+            {/* Audit Log */}
             <div className="space-y-3">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                Centralized Operational Approval Queue ({approvals.length})
+                Security & Activity Audit Log ({activityEvents.length})
               </h3>
-              {approvals.length === 0 ? (
-                <div className="p-6 rounded-xl border border-white/5 bg-black/30 text-center text-xs text-neutral-500">
-                  Tidak ada permohonan eksekusi yang memerlukan persetujuan saat ini.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {approvals.map((app) => (
-                    <div key={app.request_id} className="p-4 rounded-xl bg-black/40 border border-amber-500/20 flex items-center justify-between">
-                      <div>
-                        <div className="font-semibold text-white text-xs">{app.action_type} on {app.resource_id}</div>
-                        <div className="text-[11px] text-neutral-400 mt-1">{app.reason}</div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleResolveApproval(app.request_id, true)}
-                          className="px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => handleResolveApproval(app.request_id, false)}
-                          className="px-3 py-1 text-xs rounded bg-rose-600 hover:bg-rose-500 text-white font-medium"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="rounded-xl border border-white/5 bg-black/30 overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-white/[0.02] text-neutral-400 border-b border-white/5">
+                    <tr>
+                      <th className="py-2.5 px-4 font-medium">Waktu (UTC/WIB)</th>
+                      <th className="py-2.5 px-4 font-medium">Username</th>
+                      <th className="py-2.5 px-4 font-medium">Tipe Aktivitas</th>
+                      <th className="py-2.5 px-4 font-medium">IP Address</th>
+                      <th className="py-2.5 px-4 font-medium">Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {activityEvents.map((evt) => (
+                      <tr key={evt.event_id} className="hover:bg-white/[0.02]">
+                        <td className="py-2.5 px-4 font-mono text-[11px] text-neutral-400">
+                          {new Date(evt.created_at).toLocaleString("id-ID")}
+                        </td>
+                        <td className="py-2.5 px-4 font-medium text-white">{evt.username}</td>
+                        <td className="py-2.5 px-4">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                              evt.event_type.includes("FAILED")
+                                ? "bg-red-500/10 text-red-400 border-red-500/20"
+                                : evt.event_type.includes("REVOKED") || evt.event_type.includes("DISABLED")
+                                ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
+                                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                            }`}
+                          >
+                            {evt.event_type}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 text-neutral-400 font-mono text-[11px]">
+                          {evt.ip_address || "-"}
+                        </td>
+                        <td className="py-2.5 px-4 font-mono text-[10px] text-neutral-400 truncate max-w-xs">
+                          {JSON.stringify(evt.details || {})}
+                        </td>
+                      </tr>
+                    ))}
+                    {activityEvents.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-neutral-500">
+                          Belum ada catatan aktivitas.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
 
-        {/* 10. PLATFORM SETTINGS */}
-        {activeModule === "settings" && (
+        {/* 5. ORGANIZATIONS */}
+        {activeModule === "organizations" && (
           <div className="space-y-4">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-              Platform & Global Settings
+              Customer Organizations ({tenants.length})
             </h3>
-            <div className="p-4 rounded-xl bg-black/40 border border-white/5 space-y-3 text-xs">
-              <div className="flex justify-between items-center">
-                <div>
-                  <div className="font-medium text-white">Google OAuth Authentication</div>
-                  <div className="text-[11px] text-neutral-400">Integrasi login Google OAuth 2.0</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {tenants.map((t) => (
+                <div key={t.tenant_id} className="p-4 rounded-xl bg-black/40 border border-white/5 space-y-3">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-semibold text-white">{t.name}</div>
+                      <div className="text-[11px] font-mono text-neutral-400">{t.tenant_id}</div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      {t.status}
+                    </span>
+                  </div>
+                  <div className="text-xs text-neutral-400">
+                    Semua perangkat, topologi, dan telemetri jaringan dimiliki secara bersama (shared) dalam organisasi ini.
+                  </div>
                 </div>
-                <span className="px-2 py-0.5 rounded bg-white/10 text-neutral-300 font-mono text-[10px]">Configured via ENV</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 6. SETTINGS */}
+        {activeModule === "settings" && (
+          <div className="space-y-4 max-w-2xl">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
+              Platform Configuration
+            </h3>
+            <div className="p-4 rounded-xl bg-black/40 border border-white/5 space-y-4 text-xs">
+              <div className="flex items-center justify-between pb-3 border-b border-white/5">
+                <div>
+                  <div className="font-medium text-white">Database Isolation Policy</div>
+                  <div className="text-[11px] text-neutral-400">SQLite Single-Worker WAL Mode Concurrency Policy</div>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  ACTIVE
+                </span>
               </div>
-              <div className="flex justify-between items-center pt-2 border-t border-white/5">
+              <div className="flex items-center justify-between pb-3 border-b border-white/5">
                 <div>
-                  <div className="font-medium text-white">SMTP Email Gateway</div>
-                  <div className="text-[11px] text-neutral-400">Pengiriman notifikasi reset password & invoice</div>
+                  <div className="font-medium text-white">Authentication Barrier</div>
+                  <div className="text-[11px] text-neutral-400">Username/Password Mandatory (Guest/Anonymous Access Disabled)</div>
                 </div>
-                <span className="px-2 py-0.5 rounded bg-white/10 text-neutral-300 font-mono text-[10px]">Ready</span>
+                <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  STRICT
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium text-white">AI Tool Enforcement Hook</div>
+                  <div className="text-[11px] text-neutral-400">Orchestrator RBAC Interceptor on every tool call</div>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  ENABLED
+                </span>
               </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* Impersonation Modal */}
-      {impersonateTarget && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#18181b] border border-rose-500/30 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
-            <div className="flex justify-between items-start">
+      {/* CREATE USER MODAL */}
+      {isCreateUserOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-neutral-900 border border-white/10 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">Tambah Pengguna Baru</h3>
+              <button onClick={() => setIsCreateUserOpen(false)} className="text-neutral-400 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleCreateUser} className="space-y-3 text-xs">
               <div>
-                <h3 className="text-sm font-semibold text-rose-400 flex items-center gap-2">
-                  <ShieldAlert size={16} /> Superadmin Impersonation
+                <label className="block text-neutral-400 mb-1">Username *</label>
+                <input
+                  type="text"
+                  required
+                  value={createUsername}
+                  onChange={(e) => setCreateUsername(e.target.value)}
+                  placeholder="e.g. budi_noc"
+                  className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white placeholder-neutral-600 focus:outline-none focus:border-rose-500"
+                />
+              </div>
+              <div>
+                <label className="block text-neutral-400 mb-1">Nama Tampilan</label>
+                <input
+                  type="text"
+                  value={createDisplayName}
+                  onChange={(e) => setCreateDisplayName(e.target.value)}
+                  placeholder="e.g. Budi Network Ops"
+                  className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white placeholder-neutral-600 focus:outline-none focus:border-rose-500"
+                />
+              </div>
+              <div>
+                <label className="block text-neutral-400 mb-1">Password *</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={createPassword}
+                  onChange={(e) => setCreatePassword(e.target.value)}
+                  placeholder="Min. 6 karakter"
+                  className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white placeholder-neutral-600 focus:outline-none focus:border-rose-500"
+                />
+              </div>
+              <div>
+                <label className="block text-neutral-400 mb-1">Grup Akses Awal</label>
+                <select
+                  value={createGroup}
+                  onChange={(e) => setCreateGroup(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white focus:outline-none focus:border-rose-500"
+                >
+                  {groups.map((g) => (
+                    <option key={g.name} value={g.name}>
+                      {g.name} — {g.description || "Grup Akses"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateUserOpen(false)}
+                  className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingUser}
+                  className="px-4 py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-medium disabled:opacity-50"
+                >
+                  {savingUser ? "Menyimpan..." : "Buat Pengguna"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT USER MODAL */}
+      {editUserTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-neutral-900 border border-white/10 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">Edit Pengguna: {editUserTarget.username}</h3>
+              <button onClick={() => setEditUserTarget(null)} className="text-neutral-400 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateUser} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-neutral-400 mb-1">Nama Tampilan</label>
+                <input
+                  type="text"
+                  value={editDisplayName}
+                  onChange={(e) => setEditDisplayName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white focus:outline-none focus:border-rose-500"
+                />
+              </div>
+              <div>
+                <label className="block text-neutral-400 mb-1">Grup Akses</label>
+                <select
+                  value={editGroup}
+                  onChange={(e) => setEditGroup(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white focus:outline-none focus:border-rose-500"
+                >
+                  {groups.map((g) => (
+                    <option key={g.name} value={g.name}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-neutral-400 mb-1">Reset Password (opsional)</label>
+                <input
+                  type="password"
+                  value={editPassword}
+                  onChange={(e) => setEditPassword(e.target.value)}
+                  placeholder="Kosongkan jika tidak ingin mengubah password"
+                  className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white placeholder-neutral-600 focus:outline-none focus:border-rose-500"
+                />
+              </div>
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditUserTarget(null)}
+                  className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEditUser}
+                  className="px-4 py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-medium disabled:opacity-50"
+                >
+                  {savingEditUser ? "Menyimpan..." : "Simpan Perubahan"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* CREATE / EDIT GROUP PERMISSION MATRIX MODAL (MikroTik Style) */}
+      {groupModalMode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-4xl max-h-[90vh] rounded-2xl bg-neutral-900 border border-white/10 p-6 flex flex-col shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-white/5 shrink-0">
+              <div>
+                <h3 className="text-sm font-semibold text-white">
+                  {groupModalMode === "create" ? "Buat Grup Otorisasi Baru" : `Edit Izin Grup: ${activeGroupTarget?.name}`}
                 </h3>
-                <p className="text-xs text-neutral-400 mt-1">
-                  Anda akan masuk sebagai akun <strong>{impersonateTarget.username}</strong> untuk keperluan troubleshooting.
+                <p className="text-[11px] text-neutral-400">
+                  Matriks izin modular: ALLOW (izinkan), DENY (blokir mutlak), NONE (tidak diatur).
                 </p>
               </div>
-              <button onClick={() => setImpersonateTarget(null)} className="text-neutral-400 hover:text-white">
-                <X size={16} />
-              </button>
-            </div>
-            <div>
-              <label className="text-xs text-neutral-300 block mb-1">
-                Alasan / Justifikasi Investigasi <span className="text-rose-400">*</span>
-              </label>
-              <textarea
-                rows={3}
-                value={impersonateReason}
-                onChange={(e) => setImpersonateReason(e.target.value)}
-                placeholder="Misal: Investigasi kendala sinkronisasi topologi tiket #INC-892"
-                className="w-full p-2.5 text-xs bg-black/40 border border-white/10 rounded-lg text-white focus:outline-none focus:border-rose-500"
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setImpersonateTarget(null)}
-                className="px-3 py-1.5 text-xs rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 transition"
-              >
-                Batal
-              </button>
-              <button
-                onClick={handleConfirmImpersonate}
-                disabled={impersonating || !impersonateReason.trim()}
-                className="px-4 py-1.5 text-xs rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-medium transition disabled:opacity-50"
-              >
-                {impersonating ? "Memulai Sesi..." : "Konfirmasi Masuk"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* User Token Quota Adjustment Modal */}
-      {quotaModalUser && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#18181b] border border-white/10 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
-            <div className="flex justify-between items-start">
-              <div>
-                <h3 className="text-sm font-semibold text-white">Sesuaikan Kuota Token: {quotaModalUser.username}</h3>
-                <p className="text-xs text-neutral-400 mt-0.5">Penetapan kuota token manual dengan jejak audit mandatori</p>
-              </div>
-              <button onClick={() => setQuotaModalUser(null)} className="text-neutral-400 hover:text-white">
+              <button onClick={() => setGroupModalMode(null)} className="text-neutral-400 hover:text-white">
                 <X size={16} />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="text-neutral-300 block mb-1">Tipe Penyesuaian</label>
-                <select
-                  value={quotaAdjType}
-                  onChange={(e) => setQuotaAdjType(e.target.value)}
-                  className="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-white"
-                >
-                  <option value="MANUAL_OVERRIDE">MANUAL_OVERRIDE (Ganti Total Kuota)</option>
-                  <option value="BONUS_GRANT">BONUS_GRANT (Alokasi Bonus Tambahan)</option>
-                </select>
+            <form onSubmit={handleSaveGroup} className="flex-1 flex flex-col overflow-hidden space-y-4">
+              <div className="grid grid-cols-2 gap-3 shrink-0 text-xs">
+                <div>
+                  <label className="block text-neutral-400 mb-1">Nama Grup *</label>
+                  <input
+                    type="text"
+                    required
+                    disabled={activeGroupTarget?.name === "SUPER_ADMIN"}
+                    value={groupName}
+                    onChange={(e) => setGroupName(e.target.value)}
+                    placeholder="e.g. TIER2_SUPPORT"
+                    className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white placeholder-neutral-600 focus:outline-none focus:border-rose-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-neutral-400 mb-1">Deskripsi</label>
+                  <input
+                    type="text"
+                    value={groupDesc}
+                    onChange={(e) => setGroupDesc(e.target.value)}
+                    placeholder="Deskripsi tugas dan tanggung jawab grup"
+                    className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white placeholder-neutral-600 focus:outline-none focus:border-rose-500"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="text-neutral-300 block mb-1">Nilai Kuota Token Baru</label>
-                <input
-                  type="number"
-                  value={newQuotaValue}
-                  onChange={(e) => setNewQuotaValue(parseInt(e.target.value) || 0)}
-                  className="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-white font-mono"
-                />
+              {/* Permission Matrix Accordion / Table */}
+              <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+                {Object.entries(permissionsByModule).map(([mod, perms]) => (
+                  <div key={mod} className="rounded-xl border border-white/5 bg-black/30 overflow-hidden">
+                    <div className="px-4 py-2 bg-white/[0.03] text-xs font-semibold text-neutral-300 border-b border-white/5 flex items-center justify-between">
+                      <span>{mod}</span>
+                      <span className="text-[10px] text-neutral-500 font-normal">{perms.length} izin</span>
+                    </div>
+                    <div className="divide-y divide-white/5 text-xs">
+                      {perms.map((p) => {
+                        const currentEffect = groupPermMatrix[p.permission_id] || "NONE";
+
+                        return (
+                          <div
+                            key={p.permission_id}
+                            className="px-4 py-2.5 flex items-center justify-between hover:bg-white/[0.01]"
+                          >
+                            <div className="pr-4">
+                              <div className="font-mono text-[11px] text-white flex items-center gap-1.5">
+                                <span>{p.permission_id}</span>
+                              </div>
+                              <div className="text-[10px] text-neutral-400">{p.description}</div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleSetPermEffect(p.permission_id, "ALLOW")}
+                                className={`px-2 py-0.5 rounded text-[10px] font-medium transition ${
+                                  currentEffect === "ALLOW"
+                                    ? "bg-emerald-500 text-white font-bold"
+                                    : "bg-white/5 text-neutral-400 hover:text-emerald-300"
+                                }`}
+                              >
+                                ALLOW
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSetPermEffect(p.permission_id, "DENY")}
+                                className={`px-2 py-0.5 rounded text-[10px] font-medium transition ${
+                                  currentEffect === "DENY"
+                                    ? "bg-red-500 text-white font-bold"
+                                    : "bg-white/5 text-neutral-400 hover:text-red-300"
+                                }`}
+                              >
+                                DENY
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSetPermEffect(p.permission_id, "NONE")}
+                                className={`px-2 py-0.5 rounded text-[10px] font-medium transition ${
+                                  currentEffect === "NONE"
+                                    ? "bg-neutral-700 text-white font-bold"
+                                    : "bg-white/5 text-neutral-500 hover:text-neutral-300"
+                                }`}
+                              >
+                                NONE
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
 
-              <div>
-                <label className="text-neutral-300 block mb-1">Alasan Penyesuaian (Wajib Diisi untuk Audit)</label>
-                <textarea
-                  rows={2}
-                  value={quotaReason}
-                  onChange={(e) => setQuotaReason(e.target.value)}
-                  placeholder="mis. Ekstensi kuota khusus proyek PoC Bank Central"
-                  className="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-white resize-none"
-                />
+              <div className="pt-2 border-t border-white/5 flex items-center justify-between shrink-0">
+                <div className="text-xs text-neutral-400">
+                  Total izin ALLOW:{" "}
+                  <strong className="text-emerald-400">
+                    {Object.values(groupPermMatrix).filter((e) => e === "ALLOW").length}
+                  </strong>{" "}
+                  | DENY:{" "}
+                  <strong className="text-red-400">
+                    {Object.values(groupPermMatrix).filter((e) => e === "DENY").length}
+                  </strong>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setGroupModalMode(null)}
+                    className="px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 text-xs"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingGroup}
+                    className="px-4 py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-medium text-xs disabled:opacity-50"
+                  >
+                    {savingGroup ? "Menyimpan..." : "Simpan Matriks Izin"}
+                  </button>
+                </div>
               </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setQuotaModalUser(null)}
-                className="px-3 py-1.5 text-xs rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 transition"
-              >
-                Batal
-              </button>
-              <button
-                onClick={handleAdjustQuota}
-                disabled={savingQuota}
-                className="px-4 py-1.5 text-xs rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium transition"
-              >
-                {savingQuota ? "Menyimpan..." : "Simpan Penyesuaian"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-            {/* Subscription Assignment Modal */}
-      {assignSubUser && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="bg-[#18181b] border border-white/10 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
-            <div className="flex justify-between items-start">
-              <div>
-                <h3 className="text-sm font-semibold text-white">Atur Langganan: {assignSubUser.username}</h3>
-                <p className="text-xs text-neutral-400 mt-0.5">Penetapan tier dan add-on langsung oleh Superadmin</p>
-              </div>
-              <button onClick={() => setAssignSubUser(null)} className="text-neutral-400 hover:text-white">
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="text-neutral-300 block mb-1">Plan Tier</label>
-                <select
-                  value={selectedPlanTier}
-                  onChange={(e) => setSelectedPlanTier(e.target.value)}
-                  className="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-white"
-                >
-                  <option value="FREE">FREE</option>
-                  <option value="PRO">PRO</option>
-                  <option value="ENTERPRISE">ENTERPRISE</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-neutral-300 block mb-1">Durasi (Hari)</label>
-                <input
-                  type="number"
-                  value={assignDuration}
-                  onChange={(e) => setAssignDuration(parseInt(e.target.value) || 30)}
-                  className="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-white"
-                />
-              </div>
-
-              <div className="flex items-center gap-2 pt-2">
-                <input
-                  type="checkbox"
-                  id="netplus_check"
-                  checked={assignNetplus}
-                  onChange={(e) => setAssignNetplus(e.target.checked)}
-                  className="accent-pink-500"
-                />
-                <label htmlFor="netplus_check" className="text-white cursor-pointer">
-                  Aktifkan Networking++ Add-on
-                </label>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                onClick={() => setAssignSubUser(null)}
-                className="px-3 py-1.5 text-xs rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 transition"
-              >
-                Batal
-              </button>
-              <button
-                onClick={handleAssignSubscription}
-                disabled={savingSub}
-                className="px-4 py-1.5 text-xs rounded-lg bg-pink-500 hover:bg-pink-600 text-white font-medium transition"
-              >
-                {savingSub ? "Menyimpan..." : "Simpan Langganan"}
-              </button>
-            </div>
+            </form>
           </div>
         </div>
       )}

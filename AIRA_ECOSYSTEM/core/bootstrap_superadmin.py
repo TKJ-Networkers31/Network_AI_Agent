@@ -72,7 +72,15 @@ def bootstrap_superadmin(
 
         if existing and not force_reset:
             user_id = existing["user_id"]
-            # Ensure roles and active status
+            # Ensure roles, group membership and active status
+            conn.execute("UPDATE operational_users SET account_enabled = 1, is_active = 1 WHERE user_id = ?", (user_id,))
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO operational_user_group_memberships (user_id, group_id, assigned_at)
+                VALUES (?, 'grp_super_admin', ?)
+                """,
+                (user_id, now_iso),
+            )
             for r in (UserRoleType.PLATFORM_OWNER.value, UserRoleType.PLATFORM_SUPER_ADMIN.value):
                 conn.execute(
                     """
@@ -128,7 +136,14 @@ def bootstrap_superadmin(
             )
             action_name = "SUPERADMIN_BOOTSTRAPPED"
 
-        # 3. Assign Roles: PLATFORM_OWNER & PLATFORM_SUPER_ADMIN
+        # 3. Assign Groups & Roles: SUPER_ADMIN, PLATFORM_OWNER & PLATFORM_SUPER_ADMIN
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO operational_user_group_memberships (user_id, group_id, assigned_at)
+            VALUES (?, 'grp_super_admin', ?)
+            """,
+            (user_id, now_iso),
+        )
         for r in (UserRoleType.PLATFORM_OWNER.value, UserRoleType.PLATFORM_SUPER_ADMIN.value):
             conn.execute(
                 """

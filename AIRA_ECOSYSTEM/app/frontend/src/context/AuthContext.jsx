@@ -1,13 +1,13 @@
 // src/context/AuthContext.jsx
-// AIRA OS — Identity, Authentication & Guest Session Context
-// Manages 5 core states: INITIALIZING, GUEST, AUTHENTICATED, SESSION_EXPIRED, LOGGING_OUT
+// AIRA OS — Identity, Authentication & Group RBAC Context (Phase F.1)
+// Mandatory Authentication: No anonymous or guest access.
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { getAuthHeaders } from "../api.js";
 
 export const AuthState = {
   INITIALIZING: "INITIALIZING",
-  GUEST: "GUEST",
+  UNAUTHENTICATED: "UNAUTHENTICATED",
   AUTHENTICATED: "AUTHENTICATED",
   SESSION_EXPIRED: "SESSION_EXPIRED",
   LOGGING_OUT: "LOGGING_OUT",
@@ -16,15 +16,11 @@ export const AuthState = {
 const AuthContext = createContext(null);
 
 const TOKEN_KEY = "aira_auth_token";
-const GUEST_KEY = "aira_guest_id";
 const DRAFT_PROMPT_KEY = "aira_draft_prompt";
 
 export function AuthProvider({ children }) {
   const [status, setStatus] = useState(AuthState.INITIALIZING);
   const [user, setUser] = useState(null);
-  const [subscription, setSubscription] = useState(null);
-  const [quota, setQuota] = useState(null);
-  const [entitlements, setEntitlements] = useState(null);
 
   // Modals
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -52,34 +48,6 @@ export function AuthProvider({ children }) {
     } catch {}
   }, []);
 
-  // Ensure Guest ID exists
-  const getOrCreateGuestId = useCallback(() => {
-    try {
-      let gid = localStorage.getItem(GUEST_KEY);
-      if (!gid) {
-        gid = "gst_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-        localStorage.setItem(GUEST_KEY, gid);
-      }
-      return gid;
-    } catch {
-      return "guest_fallback";
-    }
-  }, []);
-
-  // Load guest quota
-  const loadGuestQuota = useCallback(async () => {
-    try {
-      const gid = getOrCreateGuestId();
-      const res = await fetch(`/api/v1/auth/guest-quota?guest_id=${encodeURIComponent(gid)}`);
-      const data = await res.json();
-      if (data.success && data.quota) {
-        setQuota(data.quota);
-      }
-    } catch (err) {
-      console.warn("Failed to fetch guest quota:", err);
-    }
-  }, [getOrCreateGuestId]);
-
   // Session restoration logic on app mount
   const restoreSession = useCallback(async () => {
     let token = null;
@@ -88,11 +56,9 @@ export function AuthProvider({ children }) {
     } catch {}
 
     if (!token) {
-      // Clean Guest Mode — NEVER inject lingga_admin or default identity
       setUser(null);
-      setSubscription(null);
-      setStatus(AuthState.GUEST);
-      await loadGuestQuota();
+      setStatus(AuthState.UNAUTHENTICATED);
+      setIsLoginModalOpen(true);
       return;
     }
 
@@ -108,9 +74,6 @@ export function AuthProvider({ children }) {
         const data = await res.json();
         if (data.success && data.user) {
           setUser(data.user);
-          setSubscription(data.subscription);
-          setEntitlements(data.entitlements);
-          setQuota(data.quota);
           setStatus(AuthState.AUTHENTICATED);
           return;
         }
@@ -121,20 +84,40 @@ export function AuthProvider({ children }) {
         localStorage.removeItem(TOKEN_KEY);
       } catch {}
       setUser(null);
-      setSubscription(null);
-      setStatus(AuthState.GUEST);
-      await loadGuestQuota();
+      setStatus(AuthState.UNAUTHENTICATED);
+      setIsLoginModalOpen(true);
     } catch (err) {
       console.warn("Error restoring user session:", err);
       setUser(null);
-      setStatus(AuthState.GUEST);
-      await loadGuestQuota();
+      setStatus(AuthState.UNAUTHENTICATED);
+      setIsLoginModalOpen(true);
     }
-  }, [loadGuestQuota]);
+  }, []);
 
   useEffect(() => {
     restoreSession();
   }, [restoreSession]);
+
+  // Periodic heartbeat reporting when authenticated (every 30 seconds)
+  useEffect(() => {
+    if (status !== AuthState.AUTHENTICATED) return;
+
+    const heartbeatTimer = setInterval(async () => {
+      try {
+        const headers = getAuthHeaders();
+        if (headers.Authorization) {
+          await fetch("/api/v1/auth/heartbeat", {
+            method: "POST",
+            headers,
+          });
+        }
+      } catch {
+        // Heartbeat failure ignored gracefully
+      }
+    }, 30000);
+
+    return () => clearInterval(heartbeatTimer);
+  }, [status]);
 
   // Listen for global session expiration event
   useEffect(() => {
@@ -143,14 +126,13 @@ export function AuthProvider({ children }) {
         localStorage.removeItem(TOKEN_KEY);
       } catch {}
       setUser(null);
-      setSubscription(null);
       setStatus(AuthState.SESSION_EXPIRED);
-      loadGuestQuota();
+      setIsLoginModalOpen(true);
     }
 
     window.addEventListener("aira:session_expired", handleSessionExpired);
     return () => window.removeEventListener("aira:session_expired", handleSessionExpired);
-  }, [loadGuestQuota]);
+  }, []);
 
   // Login handler
   const login = useCallback(
@@ -172,19 +154,12 @@ export function AuthProvider({ children }) {
         throw new Error(data.detail || data.message || "Gagal masuk. Periksa kembali kredensial Anda.");
       }
 
-      if (data.mfa_required) {
-        return { mfa_required: true, username: data.username };
-      }
-
       if (data.token) {
         try {
           localStorage.setItem(TOKEN_KEY, data.token);
         } catch {}
 
         setUser(data.user);
-        setSubscription(data.subscription);
-        setEntitlements(data.entitlements);
-        setQuota(data.quota);
         setStatus(AuthState.AUTHENTICATED);
 
         // Close auth modals
@@ -224,7 +199,6 @@ export function AuthProvider({ children }) {
         } catch {}
 
         setUser(data.user);
-        setQuota(data.quota);
         setStatus(AuthState.AUTHENTICATED);
 
         setIsLoginModalOpen(false);
@@ -258,34 +232,10 @@ export function AuthProvider({ children }) {
         localStorage.removeItem(TOKEN_KEY);
       } catch {}
       setUser(null);
-      setSubscription(null);
-      setEntitlements(null);
-      setStatus(AuthState.GUEST);
-      await loadGuestQuota();
+      setStatus(AuthState.UNAUTHENTICATED);
+      setIsLoginModalOpen(true);
     }
-  }, [loadGuestQuota]);
-
-  // Continue as guest
-  const continueAsGuest = useCallback(() => {
-    setIsLoginModalOpen(false);
-    setIsRegisterModalOpen(false);
-    setIsLoginRequiredModalOpen(false);
-    if (status !== AuthState.AUTHENTICATED) {
-      setStatus(AuthState.GUEST);
-    }
-  }, [status]);
-
-  // Open login required modal preserving draft prompt
-  const requireLogin = useCallback(
-    (reason = "Silakan masuk untuk melanjutkan penggunaan AIRA Workspace.", promptToPreserve = "") => {
-      if (promptToPreserve) {
-        setDraftPrompt(promptToPreserve);
-      }
-      setLoginRequiredReason(reason);
-      setIsLoginRequiredModalOpen(true);
-    },
-    [setDraftPrompt]
-  );
+  }, []);
 
   const openLogin = useCallback(() => {
     setIsRegisterModalOpen(false);
@@ -299,29 +249,30 @@ export function AuthProvider({ children }) {
     setIsRegisterModalOpen(true);
   }, []);
 
-  const isGuest = status === AuthState.GUEST || status === AuthState.INITIALIZING || !user;
+  const isGuest = false; // Guest Mode completely eliminated in Phase F.1
   const isAdmin =
     Boolean(user?.is_internal) ||
-    Boolean(
-      user?.roles?.some((r) =>
-        ["PLATFORM_OWNER", "SUPERADMIN", "PLATFORM_SUPER_ADMIN", "NOC_ADMIN", "ADMIN"].includes(r)
-      )
-    );
+    Boolean(user?.groups?.includes("SUPER_ADMIN")) ||
+    Boolean(user?.groups?.includes("ADMIN")) ||
+    Boolean(user?.roles?.some((r) => ["PLATFORM_OWNER", "SUPERADMIN", "PLATFORM_SUPER_ADMIN"].includes(r)));
 
-  const hasNetworkingPlus =
-    Boolean(isAdmin) ||
-    Boolean(entitlements?.networking_plus) ||
-    Boolean(subscription?.has_networking_plus) ||
-    subscription?.plan_id === "ENTERPRISE";
+  const hasPermission = useCallback(
+    (permissionId) => {
+      if (!user) return false;
+      if (user.groups?.includes("SUPER_ADMIN")) return true;
+      return Array.isArray(user.permissions) && user.permissions.includes(permissionId);
+    },
+    [user]
+  );
+
+  const hasNetworkingPlus = true; // All authenticated users can access networking features based on RBAC permissions
 
   const value = {
     status,
     user,
-    subscription,
-    quota,
-    entitlements,
     isGuest,
     isAdmin,
+    hasPermission,
     hasNetworkingPlus,
     draftPrompt,
     setDraftPrompt,
@@ -335,8 +286,6 @@ export function AuthProvider({ children }) {
     login,
     register,
     logout,
-    continueAsGuest,
-    requireLogin,
     openLogin,
     openRegister,
     refreshProfile: restoreSession,

@@ -412,8 +412,6 @@ export default function SettingsPage({ onOpenMenu }) {
     { id: "privacy", label: "Privacy & Data", icon: Shield },
     { id: "account", label: "Account", icon: User },
     { id: "security", label: "Security", icon: Key },
-    { id: "subscription", label: "Subscription", icon: CreditCard },
-    { id: "token_usage", label: "Token Metering", icon: Coins },
     { id: "general", label: "General & Autonomy", icon: Settings },
   ];
 
@@ -421,7 +419,7 @@ export default function SettingsPage({ onOpenMenu }) {
     <div className="space-y-6 pb-16">
       <TopBar
         title="Settings & Personalization Center"
-        subtitle="Kelola identitas, memori AI, persona personal, privasi data, paket langganan, dan kebijakan otonomi"
+        subtitle="Kelola identitas, memori AI, persona personal, privasi data, dan kebijakan otonomi"
         onMenuClick={onOpenMenu}
       />
 

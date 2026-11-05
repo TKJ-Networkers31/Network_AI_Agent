@@ -1,44 +1,24 @@
 """
-AIRA OS — Identity, Authentication & Session Router.
+AIRA OS — Identity, Authentication & Session Router (Phase F.1).
 
-Handles:
-- Email/password user registration & email verification
-- Credential authentication, lockout protection, and bearer session tokens
-- Password reset workflows
-- Google OAuth 2.0 configuration and callback
-- User profile & token balance inspection
+Username and Password only. Mandatory authentication across all endpoints.
+No Guest Mode, no Google OAuth, no email verification dependencies.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, Optional
-import urllib.parse
-import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
-from core.tenant.entitlements import EntitlementManager
-from core.tenant.manager import IdentityManager, TenantManager
-from core.tenant.models import TenantContext, UserRoleType
-from core.tenant.user_subscription import UserSubscriptionService
-from core.tenant.token_quota_service import TokenQuotaService
+from core.tenant.manager import IdentityManager
+from core.tenant.models import TenantContext
+from core.tenant.rbac_service import get_rbac_service
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 _identity_mgr = IdentityManager()
-_tenant_mgr = TenantManager()
-_entitlement_mgr = EntitlementManager()
-_sub_service = UserSubscriptionService()
-_quota_service = TokenQuotaService()
-
-
-class RegisterRequest(BaseModel):
-    username: str = Field(..., min_length=3, max_length=50)
-    email: str = Field(..., min_length=5, max_length=100)
-    password: str = Field(..., min_length=8)
-    organization_name: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -57,96 +37,33 @@ class MfaVerifyRequest(BaseModel):
     code: str
 
 
-class VerifyEmailRequest(BaseModel):
-    token: str
-
-
-class ForgotPasswordRequest(BaseModel):
-    email: str
-
-
-class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str = Field(..., min_length=8)
-
-
-class GoogleCallbackRequest(BaseModel):
-    code: str
-    state: Optional[str] = None
-
-
 def get_current_user_context(authorization: Optional[str] = Header(None)) -> TenantContext:
     """Dependency resolving authenticated user and tenant context from Bearer token."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required. Please provide a valid Bearer token.",
+            detail="Autentikasi wajib. Akses tanpa login ditolak.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token = authorization.split(" ", 1)[1]
+    token = authorization.split(" ", 1)[1].strip()
     ctx = _identity_mgr.validate_session_token(token)
     if not ctx:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session token is invalid or has expired.",
+            detail="Sesi tidak valid atau telah kedaluwarsa.",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not ctx.account_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akun ini telah dinonaktifkan oleh administrator.",
         )
     return ctx
 
 
-@router.post("/register")
-def register(payload: RegisterRequest):
-    """Registers a new user account, provisions an organization, and initiates verification."""
-    org_name = payload.organization_name or f"{payload.username.capitalize()}'s Network"
-    slug = payload.username.lower().replace(" ", "-")[:40]
-
-    # Create customer organization
-    try:
-        tenant = _tenant_mgr.create_tenant(name=org_name, slug=slug)
-    except Exception:
-        # If slug exists, add random suffix
-        slug = f"{slug}-{uuid.uuid4().hex[:6]}"
-        tenant = _tenant_mgr.create_tenant(name=org_name, slug=slug)
-
-    # Create organization owner user
-    try:
-        user = _identity_mgr.create_user(
-            username=payload.username,
-            email=payload.email,
-            password=payload.password,
-            role_type=UserRoleType.CUSTOMER_OWNER.value,
-            is_internal=False,
-            tenant_id=tenant.tenant_id,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    # Initialize Free tier token balance & quota
-    _entitlement_mgr.get_or_create_balance(tenant_id=tenant.tenant_id, user_id=user.user_id)
-    quota = _quota_service.get_or_create_user_quota(user_id=user.user_id, tenant_id=tenant.tenant_id, tier="FREE")
-
-    # Establish initial session
-    session = _identity_mgr.authenticate_user(payload.username, payload.password)
-
-    return {
-        "success": True,
-        "message": "Pendaftaran berhasil.",
-        "token": session.token if session else None,
-        "user": {
-            "user_id": user.user_id,
-            "username": user.username,
-            "email": user.email,
-            "tenant_id": tenant.tenant_id,
-            "organization_name": tenant.name,
-            "role": UserRoleType.CUSTOMER_OWNER.value,
-        },
-        "quota": quota.to_dict(),
-    }
-
-
 @router.post("/login")
 def login(payload: LoginRequest):
-    """Authenticates credentials and issues an active session token."""
+    """Authenticates credentials using username and password, issuing an active session token."""
     res = _identity_mgr.authenticate_user_detailed(
         username_or_email=payload.username_or_email,
         password=payload.password,
@@ -169,23 +86,10 @@ def login(payload: LoginRequest):
         )
 
     session = res["session"]
-
-    # Ensure user has subscription and fetch subscription data
-    sub = None
-    if session.tenant_id:
-        sub = _sub_service.ensure_user_subscription(session.user_id, session.tenant_id)
-
-    # Fetch token balance and entitlements
-    balance = None
-    has_net = False
-    quota = None
-    if session.tenant_id:
-        bal_obj = _entitlement_mgr.get_or_create_balance(session.tenant_id, session.user_id)
-        balance = bal_obj.to_dict()
-        from core.tenant.entitlement_service import get_entitlement_service
-        has_net = get_entitlement_service().has_entitlement(session, "NETWORK_PLUS")
-        quota_state = _quota_service.get_or_create_user_quota(session.user_id, session.tenant_id, tier=sub.plan_id if sub else "FREE")
-        quota = quota_state.to_dict()
+    rbac_svc = get_rbac_service()
+    user_obj = _identity_mgr.get_user_by_id(session.user_id)
+    groups = [g["name"] for g in rbac_svc.get_user_groups(session.user_id)]
+    effective_perms = sorted(list(rbac_svc.get_effective_permissions(session.user_id)))
 
     return {
         "success": True,
@@ -195,18 +99,72 @@ def login(payload: LoginRequest):
         "user": {
             "user_id": session.user_id,
             "username": session.username,
+            "display_name": user_obj.display_name if user_obj else session.username,
+            "account_enabled": user_obj.account_enabled if user_obj else True,
             "is_internal": session.is_internal,
             "tenant_id": session.tenant_id,
             "roles": session.roles,
-            "permissions": session.permissions,
+            "groups": groups,
+            "permissions": effective_perms,
         },
-        "subscription": sub.to_dict() if sub else None,
-        "entitlements": {
-            "networking_plus": has_net,
-            "tier": sub.plan_id if sub else "FREE",
+    }
+
+
+@router.post("/heartbeat")
+def heartbeat(ctx: TenantContext = Depends(get_current_user_context)):
+    """
+    Heartbeat ping from client to maintain online status and update last activity.
+    """
+    rbac_svc = get_rbac_service()
+    if ctx.session_id:
+        rbac_svc.record_heartbeat(ctx.session_id, ctx.user_id)
+    return {
+        "success": True,
+        "status": "ONLINE",
+        "user_id": ctx.user_id,
+        "username": ctx.username,
+    }
+
+
+@router.post("/logout")
+def logout(authorization: Optional[str] = Header(None)):
+    """Revokes active session token and records LOGOUT activity event."""
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        ctx = _identity_mgr.validate_session_token(token)
+        _identity_mgr.revoke_token(token)
+        if ctx:
+            rbac_svc = get_rbac_service()
+            rbac_svc.log_activity_event(
+                username=ctx.username,
+                event_type="LOGOUT",
+                user_id=ctx.user_id,
+                details={"session_id": ctx.session_id},
+            )
+    return {"success": True, "message": "Sesi berhasil ditutup."}
+
+
+@router.get("/me")
+def get_current_user_profile(ctx: TenantContext = Depends(get_current_user_context)):
+    """Returns profile, groups, and effective permissions of current user."""
+    rbac_svc = get_rbac_service()
+    user_obj = _identity_mgr.get_user_by_id(ctx.user_id)
+    groups = [g["name"] for g in rbac_svc.get_user_groups(ctx.user_id)]
+    effective_perms = sorted(list(rbac_svc.get_effective_permissions(ctx.user_id)))
+
+    return {
+        "success": True,
+        "user": {
+            "user_id": ctx.user_id,
+            "username": ctx.username,
+            "display_name": user_obj.display_name if user_obj else ctx.username,
+            "account_enabled": user_obj.account_enabled if user_obj else True,
+            "is_internal": ctx.is_internal,
+            "tenant_id": ctx.tenant_id,
+            "roles": ctx.roles,
+            "groups": groups,
+            "permissions": effective_perms,
         },
-        "token_balance": balance,
-        "quota": quota,
     }
 
 
@@ -248,120 +206,3 @@ def disable_mfa(ctx: TenantContext = Depends(get_current_user_context)):
         return {"success": True, "message": "Autentikasi dua faktor dinonaktifkan."}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
-
-@router.post("/logout")
-def logout(authorization: Optional[str] = Header(None)):
-    """Revokes active session token."""
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        _identity_mgr.revoke_token(token)
-    return {"success": True, "message": "Sesi berhasil ditutup."}
-
-
-@router.get("/me")
-def get_current_user_profile(ctx: TenantContext = Depends(get_current_user_context)):
-    """Returns profile, roles, active entitlements, and token quota of current user."""
-    balance = None
-    has_net = False
-    sub = None
-    quota = None
-    if ctx.tenant_id:
-        sub = _sub_service.ensure_user_subscription(ctx.user_id, ctx.tenant_id)
-        bal_obj = _entitlement_mgr.get_or_create_balance(ctx.tenant_id, ctx.user_id)
-        balance = bal_obj.to_dict()
-        from core.tenant.entitlement_service import get_entitlement_service
-        has_net = get_entitlement_service().has_entitlement(ctx, "NETWORK_PLUS")
-        quota_state = _quota_service.get_or_create_user_quota(ctx.user_id, ctx.tenant_id, tier=sub.plan_id if sub else "FREE")
-        quota = quota_state.to_dict()
-
-    return {
-        "success": True,
-        "user": {
-            "user_id": ctx.user_id,
-            "username": ctx.username,
-            "is_internal": ctx.is_internal,
-            "tenant_id": ctx.tenant_id,
-            "roles": ctx.roles,
-            "permissions": ctx.permissions,
-        },
-        "subscription": sub.to_dict() if sub else None,
-        "entitlements": {
-            "networking_plus": has_net,
-            "tier": sub.plan_id if sub else "FREE",
-        },
-        "token_balance": balance,
-        "quota": quota,
-    }
-
-
-@router.get("/guest-quota")
-def get_guest_quota(guest_id: Optional[str] = Query(None)):
-    """Returns quota information for unauthenticated guest session."""
-    gid = guest_id or "guest_anonymous"
-    quota = _quota_service.get_guest_quota(gid)
-    return {"success": True, "quota": quota.to_dict()}
-
-
-
-@router.get("/google/url")
-def get_google_oauth_url():
-    """Generates Google OAuth 2.0 consent URL based on configured environment variables."""
-    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
-    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:5173/auth/callback").strip()
-
-    if not client_id:
-        return {
-            "configured": False,
-            "message": "Google OAuth is not configured (GOOGLE_CLIENT_ID not set in environment).",
-            "url": None,
-        }
-
-    params = {
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "response_type": "code",
-        "scope": "openid email profile",
-        "access_type": "offline",
-        "prompt": "consent",
-    }
-    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
-    return {"configured": True, "url": auth_url}
-
-
-@router.post("/google/callback")
-def google_oauth_callback(payload: GoogleCallbackRequest):
-    """Placeholder exchanging Google auth code for verified token."""
-    client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
-    client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
-
-    if not client_id or not client_secret:
-        raise HTTPException(
-            status_code=501,
-            detail="Google OAuth is not configured on this server (missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET).",
-        )
-
-    # In production with actual credentials, requests.post exchanges code with Google OAuth endpoint.
-    return {
-        "success": False,
-        "error": "Google OAuth authorization exchange requires valid production credentials in environment.",
-    }
-
-
-@router.post("/forgot-password")
-def forgot_password(payload: ForgotPasswordRequest):
-    """Generates password reset token for the specified email."""
-    # In production, dispatches email via NotificationHub or SMTP provider
-    return {
-        "success": True,
-        "message": "Instruksi pemulihan kata sandi telah dikirimkan ke email yang terdaftar jika ditemukan.",
-    }
-
-
-@router.post("/reset-password")
-def reset_password(payload: ResetPasswordRequest):
-    """Submits password reset using verified cryptographic token."""
-    return {
-        "success": True,
-        "message": "Kata sandi berhasil diperbarui. Silakan masuk kembali.",
-    }

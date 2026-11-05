@@ -28,8 +28,8 @@ from core.tenant.models import Permission, TenantContext
 
 logger = logging.getLogger("aira.api.decisions")
 
-from core.tenant.entitlement_service import require_network_plus
-router = APIRouter(prefix="/api/v1/decisions", tags=["decisions"], dependencies=[Depends(require_network_plus)])
+from core.tenant.auth_deps import require_permission
+router = APIRouter(prefix="/api/v1/decisions", tags=["decisions"], dependencies=[Depends(require_permission("automation.read"))])
 
 _identity_mgr = IdentityManager()
 _decision_engine = OperationalDecisionEngine()

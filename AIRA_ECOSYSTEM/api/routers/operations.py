@@ -42,9 +42,9 @@ from core.operations.service_intelligence import ServiceIntelligenceEngine
 
 logger = logging.getLogger("aira.api.operations")
 
-from core.tenant.entitlement_service import require_network_plus
+from core.tenant.auth_deps import require_permission
 from fastapi import Depends
-router = APIRouter(prefix="/api/operations", tags=["operations"], dependencies=[Depends(require_network_plus)])
+router = APIRouter(prefix="/api/operations", tags=["operations"], dependencies=[Depends(require_permission("nms.alerts.read"))])
 
 # Shared engine instances
 _predictive_engine = PredictiveOperationsEngine()

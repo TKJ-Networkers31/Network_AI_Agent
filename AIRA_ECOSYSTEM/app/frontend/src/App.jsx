@@ -168,10 +168,8 @@ function AppShell() {
   const [active, setActive] = useState("workspace");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readCollapsed);
-  const networkingPages = ["infrastructure", "automations", "devices", "topology", "nms", "operations", "gateways", "decisions", "intelligence"];
-  const isBlockedNetworking = networkingPages.includes(active) && !hasNetworkingPlus;
   const isBlockedAdmin = active === "admin" && !isAdmin;
-  const Page = isBlockedAdmin ? AdminLoginPage : isBlockedNetworking ? ChatPage : (PAGES[active] || ChatPage);
+  const Page = isBlockedAdmin ? AdminLoginPage : (PAGES[active] || ChatPage);
   const isFixedHeight = FIXED_HEIGHT_PAGES.has(active);
 
   // Simpan pilihan collapse (di effect, BUKAN di dalam updater setState -

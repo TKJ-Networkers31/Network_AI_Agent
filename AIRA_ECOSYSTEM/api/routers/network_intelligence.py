@@ -46,9 +46,9 @@ from core.network_intelligence.evidence import EvidenceCollector
 
 logger = logging.getLogger("aira.api.network_intelligence")
 
-from core.tenant.entitlement_service import require_network_plus
+from core.tenant.auth_deps import require_permission
 from fastapi import Depends
-router = APIRouter(prefix="/api/intelligence", tags=["network_intelligence"], dependencies=[Depends(require_network_plus)])
+router = APIRouter(prefix="/api/intelligence", tags=["network_intelligence"], dependencies=[Depends(require_permission("nms.read"))])
 
 
 # ---------------------------------------------------------------------------

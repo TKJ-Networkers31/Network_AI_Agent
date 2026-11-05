@@ -825,3 +825,6 @@ async def publish_event_async(
         data=data,
         metadata=metadata,
     )
+
+
+current_event_scope = current_event_context

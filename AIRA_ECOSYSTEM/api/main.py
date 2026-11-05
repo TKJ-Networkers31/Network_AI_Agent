@@ -106,6 +106,8 @@ app.include_router(ws.router)
 from api.routers import auth, admin_platform, automations, billing, playbooks, personalization
 app.include_router(auth.router)
 app.include_router(admin_platform.router)
+from api.routers import user_management
+app.include_router(user_management.router)
 app.include_router(automations.router)
 app.include_router(billing.router)
 app.include_router(playbooks.router)

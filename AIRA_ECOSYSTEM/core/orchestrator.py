@@ -76,6 +76,58 @@ def _device_tool_names(schemas) -> set[str]:
 
 DEVICE_TOOLS: set[str] = _device_tool_names(AGENT_TOOL_SCHEMAS)
 
+TOOL_REQUIRED_PERMISSIONS: dict[str, str] = {
+    # Network Configuration & Mutation
+    "apply_config": "config.apply",
+    "plan_config_change": "config.apply",
+    "execute_router_command": "config.apply",
+    "update_device": "devices.update",
+    "delete_device": "devices.delete",
+    "add_device": "devices.create",
+    "add_credential": "devices.update",
+    "link_credential": "devices.update",
+
+    # Network Inventory & Topology
+    "list_devices": "inventory.read",
+    "connect_device": "devices.read",
+    "disconnect_device": "devices.read",
+    "list_connections": "devices.read",
+    "list_credentials": "devices.read",
+    "get_network_topology": "topology.read",
+
+    # Network Device Telemetry & Status
+    "get_interfaces": "devices.read",
+    "get_ip_addresses": "devices.read",
+    "get_routes": "devices.read",
+    "get_arp": "devices.read",
+    "get_dns": "devices.read",
+    "get_nat": "devices.read",
+    "get_dhcp_client": "devices.read",
+    "get_dhcp_server": "devices.read",
+    "get_firewall": "devices.read",
+    "get_neighbors": "devices.read",
+    "get_resources": "devices.read",
+    "get_identity": "devices.read",
+    "generate_router_report": "devices.read",
+
+    # Diagnostics
+    "ping": "devices.diagnostics",
+    "traceroute": "devices.diagnostics",
+    "nslookup": "devices.diagnostics",
+    "diagnose_network_route": "devices.diagnostics",
+    "auto_diagnose_network": "devices.diagnostics",
+    "troubleshoot_network_node": "devices.diagnostics",
+    "find_network_path": "devices.diagnostics",
+
+    # NMS Telemetry
+    "snmp_get_system_info": "nms.read",
+    "snmp_get_interface_traffic": "nms.metrics.read",
+
+    # SOC Security Audits
+    "audit_network_firewall": "soc.events.read",
+    "audit_network_vlan": "soc.events.read",
+}
+
 
 class Orchestrator:
 
@@ -107,6 +159,27 @@ class Orchestrator:
     def _execute_tool(self, name: str, arguments: dict) -> dict:
         if name not in AGENT_TOOL_MAP:
             return {"success": False, "error": f"Tool '{name}' tidak dikenal oleh orchestrator."}
+
+        # Backend-enforced AI Tool Authorization (Phase F.1)
+        required_perm = TOOL_REQUIRED_PERMISSIONS.get(name)
+        if required_perm:
+            from core.events import current_event_scope
+            scope = current_event_scope()
+            user_id = scope.get("user_id")
+            if not user_id or user_id == "guest_anonymous":
+                return {
+                    "success": False,
+                    "tool": name,
+                    "error": f"Izin Ditolak: Autentikasi akun diperlukan untuk menjalankan tool '{name}'.",
+                }
+            from core.tenant.rbac_service import get_rbac_service
+            rbac_svc = get_rbac_service()
+            if not rbac_svc.has_permission(user_id, required_perm):
+                return {
+                    "success": False,
+                    "tool": name,
+                    "error": f"Izin Ditolak (Permission Denied): Akun Anda tidak memiliki izin '{required_perm}' yang diperlukan untuk menjalankan tool '{name}'. Silakan hubungi administrator jika Anda memerlukan akses ini.",
+                }
 
         try:
             if name in DEVICE_TOOLS:

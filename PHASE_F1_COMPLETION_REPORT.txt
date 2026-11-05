@@ -1,0 +1,196 @@
+================================================================================
+AIRA OS — PHASE F.1 COMPLETION REPORT
+ARCHITECTURE SIMPLIFICATION, USER MANAGEMENT, GROUP-BASED RBAC,
+NETWORK DATA OWNERSHIP, USER ACTIVITY MONITORING & AI TOOL AUTHORIZATION
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------------------------------------------------------------------
+Phase F.1 successfully simplified the architecture of AIRA OS. All legacy
+concepts related to subscription plans (Free/Pro/Enterprise), payment, billing,
+plan-based feature entitlements, and token-based access blocking were eliminated.
+Tokens now function strictly as internal telemetry for performance and cost
+observability, never as operational gates.
+
+The platform now operates on an enterprise-grade model:
+AIRA OS -> Organization -> Users -> Groups -> Permissions
+
+All interactions require mandatory username/password authentication. Guest mode,
+anonymous access, and guest bypasses have been completely removed. Network
+infrastructure (devices, topology, NMS, playbooks, wiring) belongs to the
+organization and is shared among all authorized users without artificial silos.
+Simultaneously, chat conversations, personas, and memory remain strictly
+isolated per user.
+
+
+2. MANDATORY AUTHENTICATION & SESSION MANAGEMENT
+--------------------------------------------------------------------------------
+- Zero Guest / Anonymous Mode: Any request lacking a valid Bearer token returns
+  HTTP 401 Unauthorized across all endpoints (/api/devices, /api/topology,
+  /api/sessions, /api/chat, /api/v1/admin/*).
+- Standard Username & Password: Login via POST /api/v1/auth/login validating
+  against scrypt/PBKDF2 hashes in operational_users.
+- Account State Enforcement: If an account is disabled (account_enabled = 0),
+  active sessions are immediately revoked and further logins are rejected
+  with HTTP 401/403.
+- Heartbeat Tracking: Frontend reports active presence every 30 seconds to
+  POST /api/v1/auth/heartbeat, maintaining real-time ONLINE status.
+
+
+3. MIKROTIK-STYLE GROUP-BASED ACCESS CONTROL (RBAC)
+--------------------------------------------------------------------------------
+- Canonical Permission Registry: 43 granular permissions structured as
+  module.resource.action across all domains (devices, inventory, topology,
+  nms, config, playbooks, automation, admin, audit, system).
+- Conflict Resolution Principle: Explicit DENY strictly overrides ALLOW.
+  If a user belongs to multiple groups where one ALLOWs and another DENYs
+  a permission, the effective permission evaluates to FALSE.
+- Superadmin Privilege: Users belonging to SUPER_ADMIN automatically possess
+  all 43 permissions regardless of individual denials.
+- System Default Groups:
+  1. SUPER_ADMIN: Full platform, identity, and infrastructure control.
+  2. ADMIN: Infrastructure management, user management, and playbook execution.
+  3. NETWORK_ENGINEER: Device management, config deploy, topology edit, playbooks.
+  4. NOC: Read-only inventory, topology, NMS alerts, and diagnostic commands.
+  5. SOC: Security audit logs, incident inspection, read-only topology.
+  6. READ_ONLY: Viewer access across monitoring and topology without modifications.
+- Custom Groups & Multi-Membership: Administrators can create, edit, duplicate,
+  and delete custom groups with granular ALLOW/DENY/NONE assignments per permission.
+
+
+4. BACKEND-ENFORCED AI TOOL & API AUTHORIZATION
+--------------------------------------------------------------------------------
+- AI Tool Interception: In core/orchestrator.py, Orchestrator._execute_tool
+  inspects the active user context from current_event_scope() and queries
+  rbac_service.has_permission(user_id, required_perm).
+  If permission is lacking, tool execution is immediately aborted with a
+  descriptive "Permission Denied" error message.
+- Parity with REST APIs: Direct REST endpoints enforce identical permission
+  dependencies (e.g. inventory.create, config.apply, playbooks.execute),
+  guaranteeing that neither conversational AI nor direct API calls can bypass
+  security policies.
+
+
+5. DATA OWNERSHIP & MULTI-TENANT ISOLATION MODEL
+--------------------------------------------------------------------------------
+- Organization-Owned Operational Resources (Shared):
+  * Network Devices & Credentials
+  * Topology Nodes, Edges, Links, and Physical Wiring
+  * NMS Monitoring Metrics, Telemetry, and Incidents
+  * Automation Playbooks and Execution Runs
+  Engineers and operators collaborate on a single unified network state.
+- User-Owned Private Resources (Isolated):
+  * Chat Sessions and Message History (queries filtered by session owner_user_id)
+  * Personalization Profiles (Persona & Tone)
+  * User-Specific Adaptive Memory
+
+
+6. ADMIN USER ACTIVITY & LIVE SESSION MONITORING
+--------------------------------------------------------------------------------
+- User Status Engine: Computes status dynamically:
+  * DISABLED: Account flag account_enabled is false.
+  * ONLINE: Active session with heartbeat within last 120 seconds.
+  * SESSION_EXPIRED: Active session present but heartbeat older than 120 seconds.
+  * OFFLINE: No active sessions.
+- Masked Session Tracking: Active sessions displayed in Admin Control Plane with
+  token identifiers masked (e.g. sess_9f2a...81b).
+- Targeted & Bulk Revocation: Administrators can revoke any individual session
+  or all sessions for a user instantly via DELETE /api/v1/admin/sessions/{id}.
+- Security Audit Trail: High-severity events logged to
+  operational_user_activity_events (login, logout, session revocation,
+  password change, group updates, and account toggle).
+
+
+7. SELECTION-BASED AI REPLY OVERLAY
+--------------------------------------------------------------------------------
+- Highlighting text in any assistant message displays an interactive overlay:
+  [ Tanya AIRA ]
+- Clicking the overlay opens an inline quote reply box above the chat input
+  showing the quoted excerpt and a dismiss button.
+- Submitting a query incorporates both the quoted context and user instruction,
+  routing through the backend with quote metadata (source_message_id,
+  selected_text, selection_context).
+
+
+8. OPERATIONAL DATA PURGE & CLEAN START STATE
+--------------------------------------------------------------------------------
+Executed scripts/purge_operational_data.py to reset operational data to clean:
+- inventory.db: 0 devices, 0 credentials.
+- topology.db: 0 topology nodes/edges/links, 0 NMS profiles/incidents,
+  0 operational playbooks/jobs/support requests.
+- Preserved Data:
+  * operational_users (lingga_admin and test users intact)
+  * operational_user_roles (SUPER_ADMIN mapping intact)
+  * operational_groups (6 default system groups + custom groups)
+  * operational_permissions (43 canonical permissions seeded)
+  * operational_group_permissions (default permission matrices intact)
+  * user_personas (persona profiles preserved)
+
+
+9. AUTOMATED TEST SUITE VERIFICATION
+--------------------------------------------------------------------------------
+Test File: AIRA_ECOSYSTEM/tests/test_phase_f1_all.py
+Execution Command: pytest AIRA_ECOSYSTEM/tests/test_phase_f1_all.py -v
+Results: 9 passed, 0 failed in 37.56s (100% PASS)
+
+Tests Validated:
+1. test_clean_start_state: PASS (0 devices, 0 nodes, groups & admin intact)
+2. test_mandatory_authentication: PASS (Unauthenticated calls return 401)
+3. test_group_based_rbac_and_deny_precedence: PASS (DENY overrides ALLOW)
+4. test_backend_enforced_ai_tool_authorization: PASS (NOC blocked, Engineer passes)
+5. test_user_activity_monitoring_and_session_revocation: PASS (Heartbeat & 401 on revoke)
+6. test_account_disable_and_enable: PASS (Disabled login rejected, re-enabled succeeds)
+7. test_shared_network_data_ownership: PASS (NOC sees engineer's device, 403 on create)
+8. test_private_chat_session_isolation: PASS (User B cannot see/read User A's session)
+9. test_selection_quote_context_in_chat: PASS (Quote context accepted by ChatRequest)
+
+Regression Test Suite:
+- test_context_builder.py & test_persona_engine.py: 74 passed, 0 failed (100% PASS)
+
+Frontend Build Verification:
+- npm --prefix AIRA_ECOSYSTEM/app/frontend run build: SUCCESS (0 errors, 35.44s)
+
+
+10. MODIFIED & CREATED FILES SUMMARY
+--------------------------------------------------------------------------------
+Backend:
+- AIRA_ECOSYSTEM/core/tenant/db.py: Schema definitions for groups, permissions,
+  memberships, and activity log events.
+- AIRA_ECOSYSTEM/core/tenant/rbac_service.py: RBAC engine, effective permissions,
+  DENY precedence, activity audit, session revocation.
+- AIRA_ECOSYSTEM/core/tenant/auth_deps.py: get_current_authenticated_user,
+  require_permission, require_platform_admin.
+- AIRA_ECOSYSTEM/core/tenant/models.py & manager.py: User model and IdentityManager
+  extended with display_name, account_enabled, groups, permissions.
+- AIRA_ECOSYSTEM/core/orchestrator.py: Backend-enforced tool authorization via RBAC.
+- AIRA_ECOSYSTEM/core/events.py: current_event_scope alias for context builder.
+- AIRA_ECOSYSTEM/core/bootstrap_superadmin.py: Auto-seeding of SUPER_ADMIN group.
+- AIRA_ECOSYSTEM/api/routers/user_management.py: 16 administrative endpoints for
+  users, groups, permission matrix, active sessions, and activity log.
+- AIRA_ECOSYSTEM/api/routers/auth.py: Heartbeat endpoint, removed guest/entitlements.
+- AIRA_ECOSYSTEM/api/routers/chat.py: Mandatory authentication, selection quote metadata.
+- AIRA_ECOSYSTEM/api/routers/devices.py: RBAC enforcement (inventory.read/create/delete).
+- AIRA_ECOSYSTEM/api/routers/topology.py: RBAC enforcement (topology.read/write).
+- AIRA_ECOSYSTEM/api/routers/nms.py: RBAC enforcement (nms.read/alerts.manage).
+- AIRA_ECOSYSTEM/api/routers/playbooks.py: RBAC enforcement (playbooks.read/execute).
+- AIRA_ECOSYSTEM/api/routers/sessions.py: Mandatory authentication and user isolation.
+- AIRA_ECOSYSTEM/api/routers/decisions.py, gateways.py, network_intelligence.py,
+  operations.py: RBAC enforcement.
+- AIRA_ECOSYSTEM/api/schemas.py: Extended ChatRequest with selection context.
+- AIRA_ECOSYSTEM/api/main.py: Router registration for user management.
+- AIRA_ECOSYSTEM/scripts/purge_operational_data.py: Operational data purge utility.
+- AIRA_ECOSYSTEM/tests/test_phase_f1_all.py: Comprehensive test suite for Phase F.1.
+
+Frontend:
+- AIRA_ECOSYSTEM/app/frontend/src/pages/AdminPlatformPage.jsx: Redesigned into
+  MikroTik-style User Management, Groups & Permissions Matrix, Active Sessions,
+  and Security Audit Log.
+- AIRA_ECOSYSTEM/app/frontend/src/components/AccountProfileModal.jsx: Streamlined
+  Profile, Account Security, and Preferences (removed billing/tokens).
+- AIRA_ECOSYSTEM/app/frontend/src/components/Sidebar.jsx: Group badge and clean nav.
+- AIRA_ECOSYSTEM/app/frontend/src/context/AuthContext.jsx: 30s heartbeat reporting,
+  hasPermission() helper, eliminated guest mode.
+- AIRA_ECOSYSTEM/app/frontend/src/pages/SettingsPage.jsx: Removed subscription &
+  token tabs; preserved Persona, Memory, Appearance.
+- AIRA_ECOSYSTEM/app/frontend/src/App.jsx: Removed plan-based feature blockers.
+================================================================================

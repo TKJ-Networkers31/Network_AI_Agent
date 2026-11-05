@@ -32,78 +32,57 @@ _quota_service = TokenQuotaService()
 def chat(
     payload: ChatRequest,
     authorization: Optional[str] = Header(None),
-    x_guest_id: Optional[str] = Header(None),
 ):
     if not payload.message or not payload.message.strip():
         raise HTTPException(status_code=400, detail="Pesan tidak boleh kosong.")
 
-    # 1. Identity Resolution & Guest Isolation
-    user_id = None
-    tenant_id = None
-    is_guest = True
-    guest_id = x_guest_id or "guest_anonymous"
-
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ", 1)[1]
-        ctx = _identity_mgr.validate_session_token(token)
-        if ctx:
-            user_id = ctx.user_id
-            tenant_id = ctx.tenant_id
-            is_guest = False
-
-    # 2. Token Quota Pre-flight Verification
-    has_quota, quota_msg, remaining = _quota_service.check_quota_available(
-        user_id=user_id,
-        tenant_id=tenant_id,
-        estimated_tokens=50,
-        is_guest=is_guest,
-        guest_id=guest_id if is_guest else None,
-    )
-    if not has_quota:
+    # 1. Mandatory Authentication (Phase F.1 — Zero Anonymous / Guest Access)
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
-            status_code=403,
-            detail={
-                "error": "QUOTA_EXCEEDED",
-                "code": "LOGIN_REQUIRED" if is_guest else "QUOTA_EXHAUSTED",
-                "message": quota_msg,
-                "remaining_tokens": remaining,
-            },
+            status_code=401,
+            detail="Autentikasi wajib. Akses percakapan memerlukan login terlebih dahulu.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # 3. Guest Action Guard (disallow mutating operations without account)
-    if is_guest:
-        restricted_patterns = [
-            "deploy playbook",
-            "run playbook",
-            "reboot device",
-            "delete interface",
-            "save credentials",
-            "configure bgp",
-            "save device",
-        ]
-        low_msg = payload.message.lower()
-        if any(rp in low_msg for rp in restricted_patterns):
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "error": "RESTRICTED_OPERATION",
-                    "code": "LOGIN_REQUIRED",
-                    "message": "Operasi otomatisasi atau konfigurasi perangkat memerlukan autentikasi akun. Silakan masuk atau buat akun untuk melanjutkan.",
-                    "remaining_tokens": remaining,
-                },
-            )
+    token = authorization.split(" ", 1)[1].strip()
+    ctx = _identity_mgr.validate_session_token(token)
+    if not ctx:
+        raise HTTPException(
+            status_code=401,
+            detail="Sesi tidak valid atau telah kedaluwarsa. Silakan masuk kembali.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
+    if not ctx.account_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="Akun Anda telah dinonaktifkan oleh administrator.",
+        )
+
+    user_id = ctx.user_id
+    tenant_id = ctx.tenant_id
+
+    # 2. Session Scoping per User
     session_id = payload.session_id
-
     if not session_id or not store.get_session_row(session_id, user_id=user_id):
         session = store.create_session(user_id=user_id)
         session_id = session["id"]
 
+    # 3. Message & Selection Quote Composition
     if payload.dio_submission:
         display_message, llm_message = resolve_submission(payload.dio_submission)
     else:
         display_message = payload.message.strip()
         llm_message = apply_slash_command(display_message, AGENT_TOOL_MAP)
+
+    if payload.selected_text and payload.selected_text.strip():
+        quote_snippet = payload.selected_text.strip()
+        llm_message = (
+            f"[KUTIPAN DARI ASISTEN AIRA]:\n"
+            f'"{quote_snippet}"\n\n'
+            f"[PERTANYAAN PENGGUNA TERHADAP KUTIPAN]:\n"
+            f"{llm_message}"
+        )
 
     memory = get_memory(session_id)
 
@@ -118,34 +97,6 @@ def chat(
     persist_memory(session_id, memory)
     add_global_usage(result.token_usage)
 
-    # 4. Token Quota Consumption & Ledger Auditing
-    usage = result.token_usage or {}
-    p_tokens = usage.get("prompt_tokens", 50) or 50
-    c_tokens = usage.get("completion_tokens", 100) or 100
-    m_name = usage.get("model", "gemini-2.5-flash") or "gemini-2.5-flash"
-
-    try:
-        _quota_service.consume_tokens(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            session_id=session_id,
-            model_name=m_name,
-            input_tokens=p_tokens,
-            output_tokens=c_tokens,
-            cached_tokens=usage.get("cached_tokens", 0) or 0,
-            is_guest=is_guest,
-            guest_id=guest_id if is_guest else None,
-        )
-    except Exception as q_exc:
-        import logging
-        logging.getLogger("aira.chat").warning("Token consumption tracking warning: %s", q_exc)
-
-    updated_quota = (
-        _quota_service.get_guest_quota(guest_id)
-        if is_guest
-        else _quota_service.get_or_create_user_quota(user_id, tenant_id)
-    )
-
     store.add_turn(session_id, "user", display_message)
     store.add_turn(
         session_id, "assistant", result.answer,
@@ -153,7 +104,7 @@ def chat(
     )
     store.maybe_autotitle(session_id, display_message)
 
-    row = store.get_session_row(session_id)
+    row = store.get_session_row(session_id, user_id=user_id)
 
     return {
         "answer": result.answer,
@@ -164,7 +115,7 @@ def chat(
         "session_id": session_id,
         "session_title": row["title"] if row else "Chat baru",
         "interaction_schema": result.interaction_schema,
-        "quota": updated_quota.to_dict() if updated_quota else None,
+        "quota": None,
     }
 
 

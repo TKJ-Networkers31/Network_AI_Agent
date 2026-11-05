@@ -57,6 +57,7 @@ logs/
 *.sqlite3
 *.db-journal
 *.bak*
+*.backup*
 AIRA_ECOSYSTEM/database/backups/
 **/backups/
 

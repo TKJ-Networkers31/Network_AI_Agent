@@ -386,10 +386,16 @@ class User:
     email: str
     password_hash: str
     salt: str
+    display_name: Optional[str] = None
+    account_enabled: bool = True
     is_internal: bool = False
     tenant_id: Optional[str] = None  # None for global internal NOC users
     is_active: bool = True
     role_type: Optional[str] = None
+    last_login_at: Optional[str] = None
+    last_activity_at: Optional[str] = None
+    groups: List[str] = field(default_factory=list)
+    permissions: List[str] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     updated_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
 
@@ -397,11 +403,17 @@ class User:
         res = {
             "user_id": self.user_id,
             "username": self.username,
+            "display_name": self.display_name or self.username,
+            "account_enabled": self.account_enabled,
             "email": self.email,
             "is_internal": self.is_internal,
             "tenant_id": self.tenant_id,
             "is_active": self.is_active,
             "role_type": self.role_type,
+            "last_login_at": self.last_login_at,
+            "last_activity_at": self.last_activity_at,
+            "groups": self.groups,
+            "permissions": self.permissions,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -470,10 +482,14 @@ class TenantContext:
     is_internal: bool
     tenant_id: Optional[str]
     roles: List[str] = field(default_factory=list)
+    groups: List[str] = field(default_factory=list)
     permissions: Set[str] = field(default_factory=set)
+    session_id: Optional[str] = None
+    account_enabled: bool = True
 
-    def has_permission(self, perm: Permission) -> bool:
-        return perm.value in self.permissions or Permission.TENANT_MANAGE.value in self.permissions
+    def has_permission(self, perm: Any) -> bool:
+        perm_str = perm.value if hasattr(perm, "value") else str(perm)
+        return perm_str in self.permissions or "SUPER_ADMIN" in self.groups or "PLATFORM_OWNER" in self.roles
 
     def can_access_tenant(self, target_tenant_id: str) -> bool:
         """NOC operators with global access can access any tenant; customer users only access their own."""

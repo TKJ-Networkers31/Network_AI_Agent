@@ -483,6 +483,56 @@ CREATE TABLE IF NOT EXISTS user_personas (
 );
 CREATE INDEX IF NOT EXISTS idx_user_personas_user ON user_personas(user_id);
 
+-- 29. Phase F.1: Group-Based RBAC & MikroTik-style User Management
+CREATE TABLE IF NOT EXISTS operational_groups (
+    group_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT DEFAULT '',
+    is_system INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS operational_permissions (
+    permission_id TEXT PRIMARY KEY,
+    module TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    action TEXT NOT NULL,
+    description TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS operational_group_permissions (
+    group_id TEXT NOT NULL REFERENCES operational_groups(group_id) ON DELETE CASCADE,
+    permission_id TEXT NOT NULL REFERENCES operational_permissions(permission_id) ON DELETE CASCADE,
+    effect TEXT NOT NULL DEFAULT 'ALLOW' CHECK(effect IN ('ALLOW', 'DENY')),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (group_id, permission_id)
+);
+
+CREATE TABLE IF NOT EXISTS operational_user_group_memberships (
+    user_id TEXT NOT NULL REFERENCES operational_users(user_id) ON DELETE CASCADE,
+    group_id TEXT NOT NULL REFERENCES operational_groups(group_id) ON DELETE CASCADE,
+    assigned_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, group_id)
+);
+
+CREATE TABLE IF NOT EXISTS operational_user_activity_events (
+    event_id TEXT PRIMARY KEY,
+    user_id TEXT REFERENCES operational_users(user_id) ON DELETE SET NULL,
+    username TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    ip_address TEXT,
+    user_agent TEXT,
+    details_json TEXT DEFAULT '{}',
+    actor_id TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_perms ON operational_group_permissions(group_id, permission_id);
+CREATE INDEX IF NOT EXISTS idx_user_groups ON operational_user_group_memberships(user_id, group_id);
+CREATE INDEX IF NOT EXISTS idx_user_activity_time ON operational_user_activity_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_event_type ON operational_user_activity_events(event_type, created_at DESC);
+
 -- Additional Indexes for Phase E & E.1 & Phase F
 CREATE INDEX IF NOT EXISTS idx_user_sub_status ON operational_user_subscriptions(user_id, subscription_status);
 CREATE INDEX IF NOT EXISTS idx_billing_invoice_user ON operational_billing_invoices(user_id, status);
@@ -504,6 +554,9 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
         conn.executescript(TENANT_SCHEMA_SQL)
         # Safely add auth columns to operational_users if upgrading from older schema
         for col_def in [
+            "display_name TEXT",
+            "account_enabled INTEGER NOT NULL DEFAULT 1",
+            "last_activity_at TEXT",
             "email_verified INTEGER NOT NULL DEFAULT 1",
             "verification_token_hash TEXT",
             "reset_token_hash TEXT",
@@ -523,6 +576,17 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
                 conn.execute(f"ALTER TABLE operational_users ADD COLUMN {col_def}")
             except sqlite3.OperationalError:
                 pass  # column already exists
+
+        # Safely add columns to operational_user_sessions
+        for sess_col in [
+            "last_activity_at TEXT",
+            "ip_address TEXT",
+            "user_agent TEXT",
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE operational_user_sessions ADD COLUMN {sess_col}")
+            except sqlite3.OperationalError:
+                pass
 
         # Safely add quota reset columns to operational_token_policies
         for pol_col in [
@@ -695,13 +759,67 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
                 (*bp, now_iso, now_iso),
             )
 
+        # -------------------------------------------------------------
+        # Phase F.1: Seed Permissions & Default Groups
+        # -------------------------------------------------------------
+        from core.tenant.rbac_service import ALL_PERMISSIONS, DEFAULT_GROUP_PERMISSIONS
+
+        for p in ALL_PERMISSIONS:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO operational_permissions (permission_id, module, resource, action, description)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (p["permission_id"], p["module"], p["resource"], p["action"], p["description"]),
+            )
+
+        default_groups_meta = [
+            ("grp_super_admin", "SUPER_ADMIN", "Full platform access (unrestricted)", 1),
+            ("grp_admin", "ADMIN", "Administrative management", 1),
+            ("grp_noc", "NOC", "Network Operations Center (Read-only monitoring)", 1),
+            ("grp_soc", "SOC", "Security Operations Center", 1),
+            ("grp_net_engineer", "NETWORK_ENGINEER", "Network engineering access (Read/Write/Config)", 1),
+            ("grp_read_only", "READ_ONLY", "Read-only access across platform", 1),
+        ]
+        for gid, gname, gdesc, is_sys in default_groups_meta:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO operational_groups (group_id, name, description, is_system, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (gid, gname, gdesc, is_sys, now_iso, now_iso),
+            )
+            # Map permissions
+            assigned_perms = DEFAULT_GROUP_PERMISSIONS.get(gname, [])
+            for pid in assigned_perms:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO operational_group_permissions (group_id, permission_id, effect, created_at)
+                    VALUES (?, ?, 'ALLOW', ?)
+                    """,
+                    (gid, pid, now_iso),
+                )
+
         # Legacy Data Ownership Mapping:
-        # If lingga_admin exists, ensure default network workspace and associate unowned networking resources
+        # If lingga_admin exists, ensure default network workspace, SUPER_ADMIN group, and active status
         lingga_row = conn.execute("SELECT user_id, tenant_id FROM operational_users WHERE username = 'lingga_admin'").fetchone()
         if lingga_row:
             l_uid = lingga_row[0]
             l_tid = lingga_row[1] or "tenant_internal"
             ws_id = f"ws_lingga_default"
+
+            # Ensure account_enabled = 1
+            conn.execute("UPDATE operational_users SET account_enabled = 1 WHERE user_id = ?", (l_uid,))
+
+            # Ensure membership in SUPER_ADMIN group
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO operational_user_group_memberships (user_id, group_id, assigned_at)
+                VALUES (?, 'grp_super_admin', ?)
+                """,
+                (l_uid, now_iso),
+            )
+
             conn.execute(
                 """
                 INSERT OR IGNORE INTO network_workspaces (

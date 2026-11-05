@@ -294,48 +294,36 @@ class IdentityManager:
     def create_user(
         self,
         username: str,
-        email: str,
-        password: str,
-        role_type: str,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+        role_type: str = "USER",
         is_internal: bool = False,
         tenant_id: Optional[str] = None,
+        display_name: Optional[str] = None,
+        group_name: Optional[str] = None,
+        account_enabled: bool = True,
     ) -> User:
-        """Creates a new user and assigns their initial RBAC role."""
-        if not is_internal and not tenant_id:
-            raise ValueError("Customer users must be associated with a valid tenant_id.")
-
-        role_upper = role_type.upper().strip()
-        valid_roles = {r.value for r in UserRoleType}
-        if role_upper not in valid_roles:
-            raise ValueError(f"Invalid role_type: '{role_upper}'. Allowed: {valid_roles}")
-
-        # Enforce privilege boundary: Customer users cannot be given internal NOC roles
-        internal_roles = {
-            UserRoleType.PLATFORM_SUPER_ADMIN.value,
-            UserRoleType.NOC_ADMIN.value,
-            UserRoleType.NOC_OPERATOR.value,
-            UserRoleType.NETWORK_ENGINEER.value,
-            UserRoleType.NOC_ANALYST.value,
-            UserRoleType.SUPPORT_OPERATOR.value,
-            UserRoleType.AUDITOR.value,
-        }
-        if not is_internal and role_upper in internal_roles:
-            raise PermissionError(f"Privilege Boundary Violation: Customer user cannot be assigned internal NOC role '{role_upper}'.")
+        """Creates a new user and assigns their initial RBAC role and group."""
+        if not password:
+            raise ValueError("Password is required.")
+        effective_email = email.strip().lower() if email else f"{username.strip().lower()}@aira.local"
+        role_upper = role_type.upper().strip() if role_type else "USER"
 
         user_id = f"usr_{uuid.uuid4().hex[:12]}"
         salt = secrets.token_hex(16)
         pw_hash = _hash_password(password, salt)
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         asgn_id = f"asgn_{uuid.uuid4().hex[:12]}"
+        actual_display_name = (display_name or username).strip()
 
         with topology_transaction(self.db_path, write=True) as conn:
             conn.execute(
                 """
                 INSERT INTO operational_users 
-                (user_id, username, email, password_hash, salt, is_internal, tenant_id, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                (user_id, username, email, password_hash, salt, display_name, account_enabled, is_internal, tenant_id, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
-                (user_id, username.strip().lower(), email.strip().lower(), pw_hash, salt, 1 if is_internal else 0, tenant_id, now, now),
+                (user_id, username.strip().lower(), effective_email, pw_hash, salt, actual_display_name, 1 if account_enabled else 0, 1 if is_internal else 0, tenant_id, now, now),
             )
             conn.execute(
                 """
@@ -345,23 +333,45 @@ class IdentityManager:
                 (asgn_id, user_id, role_upper, now),
             )
 
-        logger.info("Created user %s (%s, internal=%s, role=%s)", user_id, username, is_internal, role_upper)
+        # Assign initial group
+        from core.tenant.rbac_service import get_rbac_service
+        rbac_svc = get_rbac_service(self.db_path)
+        target_group = group_name or (
+            "SUPER_ADMIN" if role_upper in ("PLATFORM_OWNER", "SUPERADMIN", "PLATFORM_SUPER_ADMIN")
+            else ("ADMIN" if role_upper == "ADMIN"
+            else ("NOC" if role_upper in ("NOC_ADMIN", "NOC_OPERATOR", "NOC_ANALYST")
+            else ("NETWORK_ENGINEER" if role_upper == "NETWORK_ENGINEER"
+            else "READ_ONLY")))
+        )
+        try:
+            rbac_svc.assign_user_groups(user_id, [target_group])
+        except Exception:
+            pass
+
+        logger.info("Created user %s (%s, display=%s, group=%s)", user_id, username, actual_display_name, target_group)
+        assigned_groups = [g["name"] for g in rbac_svc.get_user_groups(user_id)]
+        effective_perms = sorted(list(rbac_svc.get_effective_permissions(user_id)))
+
         return User(
             user_id=user_id,
             username=username.strip().lower(),
-            email=email.strip().lower(),
+            email=effective_email,
             password_hash=pw_hash,
             salt=salt,
+            display_name=actual_display_name,
+            account_enabled=account_enabled,
             is_internal=is_internal,
             tenant_id=tenant_id,
             is_active=True,
             role_type=role_upper,
+            groups=assigned_groups,
+            permissions=effective_perms,
             created_at=now,
             updated_at=now,
         )
 
     def get_user_by_username(self, username: str) -> Optional[User]:
-        """Retrieves a user entity by username including primary role."""
+        """Retrieves a user entity by username including primary role, groups, and permissions."""
         with topology_transaction(self.db_path, write=False) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
@@ -383,9 +393,19 @@ class IdentityManager:
             elif UserRoleType.SUPERADMIN.value in roles:
                 primary_role = UserRoleType.SUPERADMIN.value
 
+            from core.tenant.rbac_service import get_rbac_service
+            rbac_svc = get_rbac_service(self.db_path)
+            groups = [g["name"] for g in rbac_svc.get_user_groups(row["user_id"])]
+            perms = sorted(list(rbac_svc.get_effective_permissions(row["user_id"])))
+
+            d_name = row["display_name"] if "display_name" in row.keys() and row["display_name"] else row["username"]
+            acct_en = bool(row["account_enabled"]) if "account_enabled" in row.keys() else bool(row["is_active"])
+
             return User(
                 user_id=row["user_id"],
                 username=row["username"],
+                display_name=d_name,
+                account_enabled=acct_en,
                 email=row["email"],
                 password_hash=row["password_hash"],
                 salt=row["salt"],
@@ -393,12 +413,16 @@ class IdentityManager:
                 tenant_id=row["tenant_id"],
                 is_active=bool(row["is_active"]),
                 role_type=primary_role,
+                last_login_at=row["last_login_at"] if "last_login_at" in row.keys() else None,
+                last_activity_at=row["last_activity_at"] if "last_activity_at" in row.keys() else None,
+                groups=groups,
+                permissions=perms,
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
 
     def get_user_by_id(self, user_id: str) -> Optional[User]:
-        """Retrieves a user entity by user_id including primary role."""
+        """Retrieves a user entity by user_id including primary role, groups, and permissions."""
         with topology_transaction(self.db_path, write=False) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
@@ -420,9 +444,19 @@ class IdentityManager:
             elif UserRoleType.SUPERADMIN.value in roles:
                 primary_role = UserRoleType.SUPERADMIN.value
 
+            from core.tenant.rbac_service import get_rbac_service
+            rbac_svc = get_rbac_service(self.db_path)
+            groups = [g["name"] for g in rbac_svc.get_user_groups(user_id)]
+            perms = sorted(list(rbac_svc.get_effective_permissions(user_id)))
+
+            d_name = row["display_name"] if "display_name" in row.keys() and row["display_name"] else row["username"]
+            acct_en = bool(row["account_enabled"]) if "account_enabled" in row.keys() else bool(row["is_active"])
+
             return User(
                 user_id=row["user_id"],
                 username=row["username"],
+                display_name=d_name,
+                account_enabled=acct_en,
                 email=row["email"],
                 password_hash=row["password_hash"],
                 salt=row["salt"],
@@ -430,9 +464,115 @@ class IdentityManager:
                 tenant_id=row["tenant_id"],
                 is_active=bool(row["is_active"]),
                 role_type=primary_role,
+                last_login_at=row["last_login_at"] if "last_login_at" in row.keys() else None,
+                last_activity_at=row["last_activity_at"] if "last_activity_at" in row.keys() else None,
+                groups=groups,
+                permissions=perms,
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
+
+    def toggle_account_enabled(self, user_id: str, enabled: bool, actor_id: Optional[str] = None) -> bool:
+        """Enables or disables a user account, revoking all active sessions if disabled."""
+        val = 1 if enabled else 0
+        now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                "UPDATE operational_users SET account_enabled = ?, is_active = ?, updated_at = ? WHERE user_id = ?",
+                (val, val, now_str, user_id),
+            )
+            if not enabled:
+                conn.execute(
+                    "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE user_id = ? AND status = 'ACTIVE'",
+                    (user_id,),
+                )
+        from core.tenant.rbac_service import get_rbac_service
+        rbac_svc = get_rbac_service(self.db_path)
+        u = self.get_user_by_id(user_id)
+        uname = u.username if u else user_id
+        rbac_svc.log_activity_event(
+            username=uname,
+            event_type="ACCOUNT_ENABLED" if enabled else "ACCOUNT_DISABLED",
+            user_id=user_id,
+            details={"account_enabled": enabled},
+            actor_id=actor_id,
+        )
+        return True
+
+    def list_users(self, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Lists all registered users along with their groups, status, and activity timestamps."""
+        from core.tenant.rbac_service import get_rbac_service
+        rbac_svc = get_rbac_service(self.db_path)
+        with topology_transaction(self.db_path, write=False) as conn:
+            conn.row_factory = sqlite3.Row
+            query = "SELECT * FROM operational_users"
+            params: List[Any] = []
+            if tenant_id:
+                query += " WHERE tenant_id = ?"
+                params.append(tenant_id)
+            query += " ORDER BY created_at DESC"
+            rows = conn.execute(query, params).fetchall()
+
+        results = []
+        for r in rows:
+            uid = r["user_id"]
+            d_name = r["display_name"] if "display_name" in r.keys() and r["display_name"] else r["username"]
+            acct_en = bool(r["account_enabled"]) if "account_enabled" in r.keys() else bool(r["is_active"])
+            groups = [g["name"] for g in rbac_svc.get_user_groups(uid)]
+            status = rbac_svc.get_user_status(uid)
+            results.append({
+                "user_id": uid,
+                "username": r["username"],
+                "display_name": d_name,
+                "email": r["email"],
+                "account_enabled": acct_en,
+                "is_online": status == "ONLINE",
+                "status": status,
+                "is_internal": bool(r["is_internal"]),
+                "last_login_at": r["last_login_at"] if "last_login_at" in r.keys() else None,
+                "last_activity_at": r["last_activity_at"] if "last_activity_at" in r.keys() else None,
+                "groups": groups,
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            })
+        return results
+
+    def update_user(
+        self,
+        user_id: str,
+        display_name: Optional[str] = None,
+        group_names: Optional[List[str]] = None,
+        password: Optional[str] = None,
+        actor_id: Optional[str] = None,
+    ) -> Optional[User]:
+        """Updates user profile attributes (display_name, password, and assigned groups)."""
+        now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with topology_transaction(self.db_path, write=True) as conn:
+            if display_name is not None:
+                conn.execute(
+                    "UPDATE operational_users SET display_name = ?, updated_at = ? WHERE user_id = ?",
+                    (display_name.strip(), now_str, user_id),
+                )
+        if password:
+            self.change_user_password(user_id, password, reset_must_change=True)
+
+        if group_names is not None:
+            from core.tenant.rbac_service import get_rbac_service
+            rbac_svc = get_rbac_service(self.db_path)
+            rbac_svc.assign_user_groups(user_id, group_names)
+
+        from core.tenant.rbac_service import get_rbac_service
+        rbac_svc = get_rbac_service(self.db_path)
+        u = self.get_user_by_id(user_id)
+        if u:
+            rbac_svc.log_activity_event(
+                username=u.username,
+                event_type="USER_UPDATED",
+                user_id=user_id,
+                details={"display_name": display_name, "groups": group_names},
+                actor_id=actor_id,
+            )
+        return u
 
     def get_user_roles(self, user_id: str) -> List[str]:
         """Returns all assigned role types for a user."""
@@ -467,16 +607,34 @@ class IdentityManager:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
-                SELECT user_id, username, email, password_hash, salt, is_internal, tenant_id, is_active,
+                SELECT user_id, username, email, password_hash, salt, is_internal, tenant_id, is_active, account_enabled,
                        must_change_password, mfa_enabled, mfa_secret, failed_login_attempts, locked_until_utc
                 FROM operational_users 
-                WHERE (username = ? OR email = ?) AND is_active = 1
+                WHERE (username = ? OR email = ?)
                 """,
                 (identifier, identifier),
             ).fetchone()
 
             if not row:
+                from core.tenant.rbac_service import get_rbac_service
+                get_rbac_service(self.db_path).log_activity_event(
+                    username=identifier,
+                    event_type="LOGIN_FAILED",
+                    ip_address=ip_address,
+                    details={"reason": "User not found"},
+                )
                 return {"success": False, "error": "Username atau kata sandi tidak valid."}
+
+            if not bool(row["is_active"]) or ("account_enabled" in row.keys() and not bool(row["account_enabled"])):
+                from core.tenant.rbac_service import get_rbac_service
+                get_rbac_service(self.db_path).log_activity_event(
+                    username=row["username"],
+                    event_type="LOGIN_FAILED",
+                    user_id=row["user_id"],
+                    ip_address=ip_address,
+                    details={"reason": "Account disabled"},
+                )
+                return {"success": False, "error": "Akun ini telah dinonaktifkan oleh administrator."}
 
             user_id = row["user_id"]
             username = row["username"]
@@ -596,6 +754,14 @@ class IdentityManager:
 
         # Create active session
         session = self.create_session(user_id=user_id)
+        from core.tenant.rbac_service import get_rbac_service
+        get_rbac_service(self.db_path).log_activity_event(
+            username=username,
+            event_type="LOGIN_SUCCESS",
+            user_id=user_id,
+            ip_address=ip_address,
+            details={"session_id": session.session_id},
+        )
         return {
             "success": True,
             "session": session,
@@ -779,10 +945,14 @@ class IdentityManager:
             conn.execute(
                 """
                 INSERT INTO operational_user_sessions
-                (session_id, user_id, tenant_id, is_internal, token_hash, status, created_at, expires_at_utc)
-                VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
+                (session_id, user_id, tenant_id, is_internal, token_hash, status, created_at, expires_at_utc, last_activity_at)
+                VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?)
                 """,
-                (session_id, user_id, u_row["tenant_id"], u_row["is_internal"], token_hash, now_str, exp_str),
+                (session_id, user_id, u_row["tenant_id"], u_row["is_internal"], token_hash, now_str, exp_str, now_str),
+            )
+            conn.execute(
+                "UPDATE operational_users SET last_activity_at = ? WHERE user_id = ?",
+                (now_str, user_id),
             )
 
         return UserSession(
@@ -808,10 +978,11 @@ class IdentityManager:
         now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         with topology_transaction(self.db_path, write=False) as conn:
+            conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
                 SELECT s.session_id, s.user_id, s.tenant_id, s.is_internal, s.status, s.expires_at_utc,
-                       u.username, u.is_active, t.status as tenant_status
+                       u.username, u.is_active, u.account_enabled, t.status as tenant_status
                 FROM operational_user_sessions s
                 JOIN operational_users u ON s.user_id = u.user_id
                 LEFT JOIN operational_tenants t ON s.tenant_id = t.tenant_id
@@ -829,6 +1000,8 @@ class IdentityManager:
 
             # User and Tenant Active check
             if not row["is_active"]:
+                return None
+            if "account_enabled" in row.keys() and not bool(row["account_enabled"]):
                 return None
             if not row["is_internal"] and row["tenant_status"] not in (TenantStatus.ACTIVE.value, TenantStatus.MAINTENANCE.value):
                 return None
@@ -853,13 +1026,23 @@ class IdentityManager:
                 except ValueError:
                     pass
 
+            from core.tenant.rbac_service import get_rbac_service
+            rbac_svc = get_rbac_service(self.db_path)
+            groups = [g["name"] for g in rbac_svc.get_user_groups(user_id)]
+            effective_permissions = rbac_svc.get_effective_permissions(user_id)
+            for p in effective_permissions:
+                permissions.add(p)
+
             return TenantContext(
                 user_id=user_id,
                 username=username,
                 is_internal=is_internal,
                 tenant_id=tenant_id,
                 roles=roles,
+                groups=groups,
                 permissions=permissions,
+                session_id=row["session_id"],
+                account_enabled=bool(row["account_enabled"]) if "account_enabled" in row.keys() else bool(row["is_active"]),
             )
 
     def revoke_session(self, session_id: str) -> bool:

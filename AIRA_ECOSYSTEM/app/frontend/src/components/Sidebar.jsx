@@ -502,7 +502,7 @@ export default function Sidebar({
             className={`w-full flex items-center gap-2.5 rounded-control bg-white/[0.04] hover:bg-white/[0.08] text-left transition ${
               compact ? "justify-center p-1.5" : "px-3 py-2"
             }`}
-            title={isGuest ? "Masuk atau Daftar Akun" : "Kelola Profil, Langganan & Keamanan Akun"}
+            title="Kelola Profil & Keamanan Akun"
           >
             <div
               className={`w-8 h-8 rounded-pill flex items-center justify-center text-xs font-semibold shrink-0 text-white shadow-sm ${
@@ -514,10 +514,10 @@ export default function Sidebar({
             {!compact && (
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-medium text-text-primary truncate">
-                  {isGuest ? "Guest User" : (user?.username || "Pengguna")}
+                  {user?.display_name || user?.username || "Pengguna"}
                 </div>
                 <div className="text-[10px] text-text-secondary truncate">
-                  {isGuest ? "Sign In / Register" : (subscription?.plan_id ? `AIRA ${subscription.plan_id}` : "AIRA Workspace")}
+                  {user?.groups?.[0] ? `Grup: ${user.groups[0]}` : "AIRA Workspace"}
                 </div>
               </div>
             )}

@@ -16,11 +16,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from core.inventory_store import CREDENTIAL_TYPES, get_inventory_store
-from core.tenant.entitlement_service import require_network_plus
+from core.tenant.auth_deps import require_permission
+from core.tenant.models import TenantContext
 
 logger = logging.getLogger("aira.devices")
 
-router = APIRouter(prefix="/api", tags=["inventory"], dependencies=[Depends(require_network_plus)])
+router = APIRouter(prefix="/api", tags=["inventory"], dependencies=[Depends(require_permission("inventory.read"))])
 
 
 def _dump(model: BaseModel) -> dict:
@@ -162,7 +163,7 @@ def trigger_sync():
 
 
 @router.post("/devices")
-def create_device(body: DeviceIn):
+def create_device(body: DeviceIn, _perm: TenantContext = Depends(require_permission("inventory.create"))):
     res = _unwrap(get_inventory_store().create_device(**_dump(body)))
     try:
         from core.topology_engine import get_topology_engine
@@ -327,7 +328,7 @@ def get_device(name: str):
 
 
 @router.put("/devices/{name}")
-def update_device(name: str, body: DeviceUpdate):
+def update_device(name: str, body: DeviceUpdate, _perm: TenantContext = Depends(require_permission("inventory.update"))):
     res = _unwrap(get_inventory_store().update_device(name, **_dump(body)))
     try:
         from core.topology_engine import get_topology_engine
@@ -360,7 +361,7 @@ def update_device(name: str, body: DeviceUpdate):
 
 
 @router.delete("/devices/{name}")
-def delete_device(name: str):
+def delete_device(name: str, _perm: TenantContext = Depends(require_permission("inventory.delete"))):
     store = get_inventory_store()
     dev_info = store.get_device(name)
     dev_host = dev_info.get("device", {}).get("host") if dev_info.get("success") else None

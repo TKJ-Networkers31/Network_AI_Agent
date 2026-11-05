@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from pydantic import BaseModel
 
 
@@ -11,6 +11,10 @@ class ChatRequest(BaseModel):
     # membangun instruksi LLM dari data ini alih-alih memakai
     # `message` mentah - lihat api/routers/chat.py.
     dio_submission: Optional[dict] = None
+    # Selection-Based AI Reply Overlay (Phase F.1)
+    source_message_id: Optional[str] = None
+    selected_text: Optional[str] = None
+    selection_context: Optional[Union[dict[str, Any], str]] = None
 
 
 class ChatStep(BaseModel):
