@@ -12,14 +12,15 @@ import logging
 import re
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from core.inventory_store import CREDENTIAL_TYPES, get_inventory_store
+from core.tenant.entitlement_service import require_network_plus
 
 logger = logging.getLogger("aira.devices")
 
-router = APIRouter(prefix="/api", tags=["inventory"])
+router = APIRouter(prefix="/api", tags=["inventory"], dependencies=[Depends(require_network_plus)])
 
 
 def _dump(model: BaseModel) -> dict:

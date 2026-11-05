@@ -18,7 +18,8 @@ from core.nms_engine import get_nms_engine
 
 logger = logging.getLogger("aira.api.nms")
 
-router = APIRouter(prefix="/api/nms", tags=["nms"])
+from core.tenant.entitlement_service import require_network_plus
+router = APIRouter(prefix="/api/nms", tags=["nms"], dependencies=[Depends(require_network_plus)])
 
 
 # ---------------------------------------------------------------------------

@@ -46,7 +46,9 @@ from core.network_intelligence.evidence import EvidenceCollector
 
 logger = logging.getLogger("aira.api.network_intelligence")
 
-router = APIRouter(prefix="/api/intelligence", tags=["network_intelligence"])
+from core.tenant.entitlement_service import require_network_plus
+from fastapi import Depends
+router = APIRouter(prefix="/api/intelligence", tags=["network_intelligence"], dependencies=[Depends(require_network_plus)])
 
 
 # ---------------------------------------------------------------------------

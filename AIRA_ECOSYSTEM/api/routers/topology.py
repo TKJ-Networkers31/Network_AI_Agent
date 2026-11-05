@@ -27,10 +27,11 @@ from pydantic import BaseModel, Field
 from core.topology_engine import get_topology_engine
 from agents.akane.connection_manager import get_connection_manager
 from core.topology_models import bounded_icmp_ping, sanitize_untrusted_text
+from core.tenant.entitlement_service import require_network_plus
 
 logger = logging.getLogger("aira.topology")
 
-router = APIRouter(prefix="/api/topology", tags=["topology"])
+router = APIRouter(prefix="/api/topology", tags=["topology"], dependencies=[Depends(require_network_plus)])
 
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
 

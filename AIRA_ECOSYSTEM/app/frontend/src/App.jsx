@@ -164,11 +164,14 @@ class PageErrorBoundary extends Component {
 }
 
 function AppShell() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, hasNetworkingPlus } = useAuth();
   const [active, setActive] = useState("workspace");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readCollapsed);
-  const Page = (active === "admin" && !isAdmin) ? AdminLoginPage : (PAGES[active] || ChatPage);
+  const networkingPages = ["infrastructure", "automations", "devices", "topology", "nms", "operations", "gateways", "decisions", "intelligence"];
+  const isBlockedNetworking = networkingPages.includes(active) && !hasNetworkingPlus;
+  const isBlockedAdmin = active === "admin" && !isAdmin;
+  const Page = isBlockedAdmin ? AdminLoginPage : isBlockedNetworking ? ChatPage : (PAGES[active] || ChatPage);
   const isFixedHeight = FIXED_HEIGHT_PAGES.has(active);
 
   // Simpan pilihan collapse (di effect, BUKAN di dalam updater setState -
@@ -205,7 +208,13 @@ function AppShell() {
   useEffect(() => {
     function onNavigate(e) {
       const id = e.detail;
-      if (typeof id === "string" && PAGES[id]) setActive(id);
+      if (typeof id === "string" && PAGES[id]) {
+        if (networkingPages.includes(id) && !hasNetworkingPlus) {
+          setActive("workspace");
+        } else {
+          setActive(id);
+        }
+      }
     }
 
     window.addEventListener("aira:navigate", onNavigate);

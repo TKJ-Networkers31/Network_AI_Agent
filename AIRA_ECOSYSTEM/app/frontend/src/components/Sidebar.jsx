@@ -151,7 +151,18 @@ export default function Sidebar({
     useSessionsContext();
   const { unreadSessionIds, runningSessionIds } = useChatRuntime();
   const { notify } = useToast();
-  const { user, isGuest, subscription, openLogin } = useAuth();
+  const { user, isGuest, subscription, openLogin, isAdmin, hasNetworkingPlus } = useAuth();
+
+  const visibleNavGroups = NAV_GROUPS.map((group) => {
+    if (group.id === "admin" && !isAdmin) return null;
+    const filteredItems = group.items.filter((item) => {
+      if (item.id === "admin" && !isAdmin) return false;
+      if (["infrastructure", "automations"].includes(item.id) && !hasNetworkingPlus) return false;
+      return true;
+    });
+    if (filteredItems.length === 0) return null;
+    return { ...group, items: filteredItems };
+  }).filter(Boolean);
 
   const isDesktop = useIsDesktop();
   const compact = collapsed && isDesktop;
@@ -319,7 +330,7 @@ export default function Sidebar({
 
         {/* Menu + percakapan (satu area scroll) */}
         <nav className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
-          {NAV_GROUPS.map((group, index) => (
+          {visibleNavGroups.map((group, index) => (
             <div key={group.id}>
               {compact ? (
                 index > 0 && <div className="mx-3 my-2 border-t border-border/70" />

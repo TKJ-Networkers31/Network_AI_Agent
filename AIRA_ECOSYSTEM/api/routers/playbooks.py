@@ -16,9 +16,10 @@ from pydantic import BaseModel, Field
 
 from core.playbooks.runner import PlaybookRunner
 from core.tenant.models import TenantContext
+from core.tenant.entitlement_service import require_network_plus
 from api.routers.auth import get_current_user_context
 
-router = APIRouter(prefix="/api/v1/playbooks", tags=["playbooks"])
+router = APIRouter(prefix="/api/v1/playbooks", tags=["playbooks"], dependencies=[Depends(require_network_plus)])
 
 _playbook_runner = PlaybookRunner()
 

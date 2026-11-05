@@ -182,7 +182,8 @@ def login(payload: LoginRequest):
     if session.tenant_id:
         bal_obj = _entitlement_mgr.get_or_create_balance(session.tenant_id, session.user_id)
         balance = bal_obj.to_dict()
-        has_net = sub.has_networking_plus if sub else _entitlement_mgr.has_networking_access(session.tenant_id)
+        from core.tenant.entitlement_service import get_entitlement_service
+        has_net = get_entitlement_service().has_entitlement(session, "NETWORK_PLUS")
         quota_state = _quota_service.get_or_create_user_quota(session.user_id, session.tenant_id, tier=sub.plan_id if sub else "FREE")
         quota = quota_state.to_dict()
 
@@ -269,7 +270,8 @@ def get_current_user_profile(ctx: TenantContext = Depends(get_current_user_conte
         sub = _sub_service.ensure_user_subscription(ctx.user_id, ctx.tenant_id)
         bal_obj = _entitlement_mgr.get_or_create_balance(ctx.tenant_id, ctx.user_id)
         balance = bal_obj.to_dict()
-        has_net = sub.has_networking_plus if sub else _entitlement_mgr.has_networking_access(ctx.tenant_id)
+        from core.tenant.entitlement_service import get_entitlement_service
+        has_net = get_entitlement_service().has_entitlement(ctx, "NETWORK_PLUS")
         quota_state = _quota_service.get_or_create_user_quota(ctx.user_id, ctx.tenant_id, tier=sub.plan_id if sub else "FREE")
         quota = quota_state.to_dict()
 

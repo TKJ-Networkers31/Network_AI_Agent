@@ -304,9 +304,15 @@ export function AuthProvider({ children }) {
     Boolean(user?.is_internal) ||
     Boolean(
       user?.roles?.some((r) =>
-        ["SUPERADMIN", "PLATFORM_SUPER_ADMIN", "NOC_ADMIN"].includes(r)
+        ["PLATFORM_OWNER", "SUPERADMIN", "PLATFORM_SUPER_ADMIN", "NOC_ADMIN", "ADMIN"].includes(r)
       )
     );
+
+  const hasNetworkingPlus =
+    Boolean(isAdmin) ||
+    Boolean(entitlements?.networking_plus) ||
+    Boolean(subscription?.has_networking_plus) ||
+    subscription?.plan_id === "ENTERPRISE";
 
   const value = {
     status,
@@ -316,6 +322,7 @@ export function AuthProvider({ children }) {
     entitlements,
     isGuest,
     isAdmin,
+    hasNetworkingPlus,
     draftPrompt,
     setDraftPrompt,
     isLoginModalOpen,

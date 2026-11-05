@@ -80,51 +80,68 @@ def init_db():
 
 
 def _migrate_add_columns() -> None:
-    """Migrasi idempotent untuk database lama yang dibuat sebelum kolom
-    interaction_schema_json ada. CREATE TABLE IF NOT EXISTS di atas TIDAK
-    menambah kolom ke tabel yang sudah ada - migrasi manual ini yang
-    melakukannya, aman dijalankan berkali-kali."""
+    """Migrasi idempotent untuk database lama."""
     with closing(_connect()) as conn:
-        columns = [row[1] for row in conn.execute("PRAGMA table_info(chat_turns)").fetchall()]
-
-        if "interaction_schema_json" not in columns:
+        turn_cols = [row[1] for row in conn.execute("PRAGMA table_info(chat_turns)").fetchall()]
+        if "interaction_schema_json" not in turn_cols:
             conn.execute("ALTER TABLE chat_turns ADD COLUMN interaction_schema_json TEXT")
             conn.commit()
             logger.info("MIGRATION | kolom interaction_schema_json ditambahkan ke chat_turns.")
+
+        sess_cols = [row[1] for row in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()]
+        if "user_id" not in sess_cols:
+            conn.execute("ALTER TABLE chat_sessions ADD COLUMN user_id TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id)")
+            conn.commit()
+            logger.info("MIGRATION | kolom user_id ditambahkan ke chat_sessions.")
 
 
 init_db()
 
 
-def create_session(initial_title: str | None = None) -> dict:
+def create_session(initial_title: str | None = None, user_id: str | None = None) -> dict:
     session_id = uuid.uuid4().hex[:12]
     now = time.time()
     title = initial_title or DEFAULT_TITLE
 
     with closing(_connect()) as conn:
         conn.execute(
-            "INSERT INTO chat_sessions (id, title, raw_history, created_at, updated_at) "
-            "VALUES (?, ?, '[]', ?, ?)",
-            (session_id, title, now, now),
+            "INSERT INTO chat_sessions (id, title, user_id, raw_history, created_at, updated_at) "
+            "VALUES (?, ?, ?, '[]', ?, ?)",
+            (session_id, title, user_id, now, now),
         )
         conn.commit()
 
-    return {"id": session_id, "title": title, "created_at": now, "updated_at": now}
+    return {"id": session_id, "title": title, "user_id": user_id, "created_at": now, "updated_at": now}
 
 
-def list_sessions() -> list[dict]:
+def list_sessions(user_id: str | None = None) -> list[dict]:
     with closing(_connect()) as conn:
-        rows = conn.execute(
-            "SELECT id, title, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC"
-        ).fetchall()
+        if user_id:
+            rows = conn.execute(
+                "SELECT id, title, user_id, created_at, updated_at FROM chat_sessions "
+                "WHERE user_id = ? ORDER BY updated_at DESC",
+                (user_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, title, user_id, created_at, updated_at FROM chat_sessions "
+                "ORDER BY updated_at DESC"
+            ).fetchall()
     return [dict(row) for row in rows]
 
 
-def get_session_row(session_id: str) -> dict | None:
+def get_session_row(session_id: str, user_id: str | None = None) -> dict | None:
     with closing(_connect()) as conn:
-        row = conn.execute(
-            "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
-        ).fetchone()
+        if user_id:
+            row = conn.execute(
+                "SELECT * FROM chat_sessions WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (session_id, user_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM chat_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
     return dict(row) if row else None
 
 
@@ -164,26 +181,50 @@ def maybe_autotitle(session_id: str, first_user_message: str) -> None:
         conn.commit()
 
 
-def rename_session(session_id: str, title: str) -> bool:
-    if not get_session_row(session_id):
+def rename_session(session_id: str, title: str, user_id: str | None = None) -> bool:
+    if not get_session_row(session_id, user_id):
         return False
 
     with closing(_connect()) as conn:
-        conn.execute(
-            "UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?",
-            (title, time.time(), session_id),
-        )
+        if user_id:
+            conn.execute(
+                "UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+                (title, time.time(), session_id, user_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ?",
+                (title, time.time(), session_id),
+            )
         conn.commit()
 
     return True
 
 
-def delete_session(session_id: str) -> bool:
+def delete_session(session_id: str, user_id: str | None = None) -> bool:
     with closing(_connect()) as conn:
-        cursor = conn.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
-        conn.execute("DELETE FROM chat_turns WHERE session_id = ?", (session_id,))
+        if user_id:
+            cursor = conn.execute("DELETE FROM chat_sessions WHERE id = ? AND (user_id = ? OR user_id IS NULL)", (session_id, user_id))
+        else:
+            cursor = conn.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+        if cursor.rowcount > 0:
+            conn.execute("DELETE FROM chat_turns WHERE session_id = ?", (session_id,))
+            conn.commit()
+            return True
+        return False
+
+
+def delete_all_user_sessions(user_id: str) -> int:
+    """Deletes all chat sessions and messages owned by a user (used by Privacy & Data)."""
+    with closing(_connect()) as conn:
+        rows = conn.execute("SELECT id FROM chat_sessions WHERE user_id = ?", (user_id,)).fetchall()
+        sids = [r["id"] for r in rows]
+        if not sids:
+            return 0
+        conn.execute("DELETE FROM chat_sessions WHERE user_id = ?", (user_id,))
+        conn.executemany("DELETE FROM chat_turns WHERE session_id = ?", [(sid,) for sid in sids])
         conn.commit()
-        return cursor.rowcount > 0
+        return len(sids)
 
 
 def add_turn(

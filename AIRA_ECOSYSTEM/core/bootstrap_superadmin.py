@@ -73,13 +73,14 @@ def bootstrap_superadmin(
         if existing and not force_reset:
             user_id = existing["user_id"]
             # Ensure roles and active status
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO operational_user_roles (assignment_id, user_id, role_type, granted_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (f"asgn_{uuid.uuid4().hex[:12]}", user_id, UserRoleType.PLATFORM_SUPER_ADMIN.value, now_iso),
-            )
+            for r in (UserRoleType.PLATFORM_OWNER.value, UserRoleType.PLATFORM_SUPER_ADMIN.value):
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO operational_user_roles (assignment_id, user_id, role_type, granted_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (f"asgn_{uuid.uuid4().hex[:12]}", user_id, r, now_iso),
+                )
             # Ensure audit log
             conn.execute(
                 """
@@ -91,10 +92,11 @@ def bootstrap_superadmin(
             )
             return {
                 "success": True,
+                "status": "verified",
                 "created": False,
                 "username": SUPERADMIN_USERNAME,
                 "user_id": user_id,
-                "message": f"Superadmin account '{SUPERADMIN_USERNAME}' already exists and is active.",
+                "message": f"Platform Owner account '{SUPERADMIN_USERNAME}' already exists and is active.",
             }
 
         # Create or reset password
@@ -126,21 +128,38 @@ def bootstrap_superadmin(
             )
             action_name = "SUPERADMIN_BOOTSTRAPPED"
 
-        # 3. Assign Role: PLATFORM_SUPER_ADMIN
+        # 3. Assign Roles: PLATFORM_OWNER & PLATFORM_SUPER_ADMIN
+        for r in (UserRoleType.PLATFORM_OWNER.value, UserRoleType.PLATFORM_SUPER_ADMIN.value):
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO operational_user_roles (assignment_id, user_id, role_type, granted_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (f"asgn_{uuid.uuid4().hex[:12]}", user_id, r, now_iso),
+            )
+
+        # 4. Ensure Highest Subscription (ENTERPRISE) + Networking++ Entitlement
         conn.execute(
             """
-            INSERT OR IGNORE INTO operational_user_roles (assignment_id, user_id, role_type, granted_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO operational_user_subscriptions (
+                subscription_id, user_id, tenant_id, plan_id, subscription_status,
+                starts_at, expires_at, renewal_status, token_quota, token_consumed,
+                networking_addon_status, created_at, updated_at
+            ) VALUES (?, ?, 'tenant_internal', 'ENTERPRISE', 'ACTIVE', ?, NULL, 'AUTO', 10000000, 0, 1, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                plan_id = 'ENTERPRISE',
+                subscription_status = 'ACTIVE',
+                networking_addon_status = 1,
+                updated_at = ?
             """,
-            (f"asgn_{uuid.uuid4().hex[:12]}", user_id, UserRoleType.PLATFORM_SUPER_ADMIN.value, now_iso),
+            (f"sub_{uuid.uuid4().hex[:12]}", user_id, now_iso, now_iso, now_iso, now_iso),
         )
 
-        # 4. Grant Networking++ Entitlement
         conn.execute(
             """
             INSERT INTO operational_tenant_entitlements (
                 entitlement_id, tenant_id, entitlement_key, is_enabled, granted_at, metadata_json
-            ) VALUES (?, 'tenant_internal', 'networking_plus', 1, ?, '{"tier": "ENTERPRISE", "granted_to": "SUPERADMIN"}')
+            ) VALUES (?, 'tenant_internal', 'networking_plus', 1, ?, '{"tier": "ENTERPRISE", "granted_to": "PLATFORM_OWNER"}')
             ON CONFLICT(tenant_id, entitlement_key) DO UPDATE SET is_enabled = 1
             """,
             (f"ent_{uuid.uuid4().hex[:12]}", now_iso),
@@ -171,6 +190,7 @@ def bootstrap_superadmin(
 
     return {
         "success": True,
+        "status": "reset" if existing else "created",
         "created": not bool(existing),
         "username": SUPERADMIN_USERNAME,
         "user_id": user_id,

@@ -95,8 +95,8 @@ def chat(
 
     session_id = payload.session_id
 
-    if not session_id or not store.get_session_row(session_id):
-        session = store.create_session()
+    if not session_id or not store.get_session_row(session_id, user_id=user_id):
+        session = store.create_session(user_id=user_id)
         session_id = session["id"]
 
     if payload.dio_submission:
@@ -109,7 +109,7 @@ def chat(
 
     try:
         from core.events import event_scope
-        with event_scope(session_id=session_id):
+        with event_scope(session_id=session_id, user_id=user_id):
             brain = Brain(memory)
             result = brain.think(llm_message)
     except Exception as exc:

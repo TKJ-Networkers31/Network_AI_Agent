@@ -37,7 +37,14 @@ class SubscriptionTier(str, Enum):
 
 
 class UserRoleType(str, Enum):
-    # Internal NOC Roles
+    # Phase F Primary Role Hierarchy
+    PLATFORM_OWNER = "PLATFORM_OWNER"
+    SUPERADMIN = "SUPERADMIN"
+    ADMIN = "ADMIN"
+    USER = "USER"
+    GUEST = "GUEST"
+
+    # Backward-Compatible Platform Roles
     PLATFORM_SUPER_ADMIN = "PLATFORM_SUPER_ADMIN"
     NOC_ADMIN = "NOC_ADMIN"
     NOC_OPERATOR = "NOC_OPERATOR"
@@ -55,6 +62,27 @@ class UserRoleType(str, Enum):
 
 
 class Permission(str, Enum):
+    # Granular Administrative & Platform Permissions
+    USERS_READ = "users.read"
+    USERS_MANAGE = "users.manage"
+    SUBSCRIPTIONS_MANAGE = "subscriptions.manage"
+    ENTITLEMENTS_MANAGE = "entitlements.manage"
+    BILLING_READ = "billing.read"
+    BILLING_MANAGE = "billing.manage"
+    INFRASTRUCTURE_READ = "infrastructure.read"
+    INFRASTRUCTURE_MANAGE = "infrastructure.manage"
+    SECURITY_MANAGE = "security.manage"
+    PLATFORM_SETTINGS_MANAGE = "platform.settings.manage"
+
+    # Network++ Entitlement Permissions
+    NETWORK_READ = "network.read"
+    NETWORK_WRITE = "network.write"
+    NETWORK_OPERATE = "network.operate"
+
+    # Personalization Permissions
+    PERSONALIZATION_MANAGE = "personalization.manage"
+
+    # Operational & Tenant Permissions
     TENANT_READ = "tenant.read"
     TENANT_MANAGE = "tenant.manage"
     SITE_READ = "site.read"
@@ -84,7 +112,19 @@ class Permission(str, Enum):
 
 # Default permission mappings
 ROLE_PERMISSIONS: Dict[UserRoleType, Set[Permission]] = {
+    UserRoleType.PLATFORM_OWNER: set(Permission),
+    UserRoleType.SUPERADMIN: set(Permission),
     UserRoleType.PLATFORM_SUPER_ADMIN: set(Permission),
+    UserRoleType.ADMIN: {
+        Permission.USERS_READ, Permission.USERS_MANAGE, Permission.INFRASTRUCTURE_READ,
+        Permission.INFRASTRUCTURE_MANAGE, Permission.SUBSCRIPTIONS_MANAGE, Permission.ENTITLEMENTS_MANAGE,
+        Permission.BILLING_READ, Permission.REPORT_READ, Permission.AUDIT_READ,
+        Permission.TENANT_READ, Permission.SITE_READ, Permission.DEVICE_READ,
+    },
+    UserRoleType.USER: {
+        Permission.PERSONALIZATION_MANAGE, Permission.SUPPORT_CREATE, Permission.SUPPORT_READ,
+    },
+    UserRoleType.GUEST: set(),
     UserRoleType.NOC_ADMIN: set(Permission),
     UserRoleType.NOC_OPERATOR: {
         Permission.TENANT_READ, Permission.SITE_READ, Permission.SITE_MANAGE,
@@ -349,6 +389,7 @@ class User:
     is_internal: bool = False
     tenant_id: Optional[str] = None  # None for global internal NOC users
     is_active: bool = True
+    role_type: Optional[str] = None
     created_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
     updated_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
 
@@ -360,6 +401,7 @@ class User:
             "is_internal": self.is_internal,
             "tenant_id": self.tenant_id,
             "is_active": self.is_active,
+            "role_type": self.role_type,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

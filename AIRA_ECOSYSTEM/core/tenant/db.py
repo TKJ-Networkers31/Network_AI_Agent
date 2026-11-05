@@ -423,13 +423,74 @@ CREATE TABLE IF NOT EXISTS operational_token_quota_adjustments (
     timestamp_utc TEXT NOT NULL
 );
 
--- Additional Indexes for Phase E & E.1
+-- 25. Phase F: Network Workspaces (Isolated networking environment per user)
+CREATE TABLE IF NOT EXISTS network_workspaces (
+    workspace_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES operational_users(user_id) ON DELETE CASCADE,
+    tenant_id TEXT NOT NULL REFERENCES operational_tenants(tenant_id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    is_default INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_nw_workspace_user ON network_workspaces(user_id);
+CREATE INDEX IF NOT EXISTS idx_nw_workspace_tenant ON network_workspaces(tenant_id);
+
+-- 26. Phase F: User Personalization Preferences
+CREATE TABLE IF NOT EXISTS user_preferences (
+    pref_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL UNIQUE REFERENCES operational_users(user_id) ON DELETE CASCADE,
+    memory_enabled INTEGER NOT NULL DEFAULT 1,
+    active_persona_id TEXT,
+    custom_instructions TEXT DEFAULT '',
+    settings_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_pref_user ON user_preferences(user_id);
+
+-- 27. Phase F: User Memories (Isolated Context Memory with Category & Relevance)
+CREATE TABLE IF NOT EXISTS user_memories (
+    memory_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES operational_users(user_id) ON DELETE CASCADE,
+    category TEXT NOT NULL CHECK(category IN ('learning', 'technical', 'project', 'communication', 'workflows', 'general')),
+    content TEXT NOT NULL,
+    source TEXT DEFAULT 'USER',
+    importance REAL NOT NULL DEFAULT 0.5,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_memories_user ON user_memories(user_id, category);
+CREATE INDEX IF NOT EXISTS idx_user_memories_created ON user_memories(user_id, created_at);
+
+-- 28. Phase F: User Personas (Custom AI Behavior Profiles & System Presets)
+CREATE TABLE IF NOT EXISTS user_personas (
+    persona_id TEXT PRIMARY KEY,
+    user_id TEXT REFERENCES operational_users(user_id) ON DELETE CASCADE, -- NULL means system-wide built-in preset
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    response_style TEXT NOT NULL DEFAULT 'concise',
+    language TEXT NOT NULL DEFAULT 'id',
+    technical_depth INTEGER NOT NULL DEFAULT 80,
+    explanation_preference TEXT NOT NULL DEFAULT 'technical',
+    custom_instructions TEXT DEFAULT '',
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_personas_user ON user_personas(user_id);
+
+-- Additional Indexes for Phase E & E.1 & Phase F
 CREATE INDEX IF NOT EXISTS idx_user_sub_status ON operational_user_subscriptions(user_id, subscription_status);
 CREATE INDEX IF NOT EXISTS idx_billing_invoice_user ON operational_billing_invoices(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_billing_txn_user ON operational_billing_transactions(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_billing_webhook ON operational_billing_webhook_events(provider_name, event_type, processed);
 CREATE INDEX IF NOT EXISTS idx_playbooks_tenant ON operational_playbooks(tenant_id, category);
 CREATE INDEX IF NOT EXISTS idx_quota_adj_user ON operational_token_quota_adjustments(target_user_id, timestamp_utc DESC);
+
 
 """
 
@@ -570,5 +631,96 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
                 """,
                 (*pol, now_iso),
             )
+
+        # -------------------------------------------------------------
+        # Phase F: Safe Migrations for Workspace Isolation & Networking
+        # -------------------------------------------------------------
+        networking_tables = [
+            "topology_nodes", "topology_edges", "topology_links",
+            "topology_snapshots", "topology_discovery_jobs",
+            "nms_device_profiles", "nms_device_metrics", "nms_interface_metrics",
+            "nms_raw_metrics", "nms_incidents", "operational_devices", "operational_playbooks"
+        ]
+        for tbl in networking_tables:
+            # Check if table exists in target database
+            t_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name = ?", (tbl,)).fetchone()
+            if t_exists:
+                for col in ["workspace_id TEXT", "user_id TEXT"]:
+                    try:
+                        conn.execute(f"ALTER TABLE {tbl} ADD COLUMN {col}")
+                    except sqlite3.OperationalError:
+                        pass
+                try:
+                    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tbl}_ws_user ON {tbl}(workspace_id, user_id)")
+                except sqlite3.OperationalError:
+                    pass
+
+        # Seed System Built-in Personas (owner_id = NULL)
+        builtin_personas = [
+            (
+                "preset_general", None, "General Assistant",
+                "Asisten AI adaptif dan cerdas untuk bantuan harian dan pemecahan masalah umum.",
+                "concise", "id", 70, "conceptual", "", 1
+            ),
+            (
+                "preset_technical", None, "Technical Engineer",
+                "Insinyur jaringan senior yang presisi, mengutamakan diagnosa berbasis RFC, CLI, dan data telemetri aktual.",
+                "technical", "id", 95, "technical", "Utamakan bukti command show, latency ms, dan konfigurasi interface yang tepat.", 0
+            ),
+            (
+                "preset_tutor", None, "Learning Tutor",
+                "Tutor interaktif yang sabar menerangkan konsep jaringan, topologi, dan otomatisasi langkah demi langkah.",
+                "friendly", "id", 65, "hands-on", "Jelaskan analogi yang mudah dipahami sebelum masuk ke syntax teknis.", 0
+            ),
+            (
+                "preset_consultant", None, "Professional Consultant",
+                "Konsultan arsitektur infrastruktur berorientasi rekomendasi strategis, SLA, efisiensi biaya, dan keamanan tingkat enterprise.",
+                "formal", "id", 90, "strategic", "Fokus pada mitigasi risiko, compliance keamanan, dan ketahanan SLA.", 0
+            ),
+            (
+                "preset_custom", None, "Custom Persona",
+                "Persona dasar yang dapat disesuaikan penuh sesuai kebutuhan alur kerja pribadi Anda.",
+                "concise", "id", 80, "technical", "", 0
+            ),
+        ]
+        for bp in builtin_personas:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO user_personas (
+                    persona_id, user_id, name, description, response_style,
+                    language, technical_depth, explanation_preference, custom_instructions,
+                    is_default, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (*bp, now_iso, now_iso),
+            )
+
+        # Legacy Data Ownership Mapping:
+        # If lingga_admin exists, ensure default network workspace and associate unowned networking resources
+        lingga_row = conn.execute("SELECT user_id, tenant_id FROM operational_users WHERE username = 'lingga_admin'").fetchone()
+        if lingga_row:
+            l_uid = lingga_row[0]
+            l_tid = lingga_row[1] or "tenant_internal"
+            ws_id = f"ws_lingga_default"
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO network_workspaces (
+                    workspace_id, user_id, tenant_id, name, description, is_default, created_at, updated_at
+                ) VALUES (?, ?, ?, 'Lingga Primary Network Workspace', 'Default workspace for platform owner', 1, ?, ?)
+                """,
+                (ws_id, l_uid, l_tid, now_iso, now_iso),
+            )
+
+            # Map legacy unowned data to lingga's default workspace
+            for tbl in ["topology_nodes", "operational_devices", "operational_playbooks"]:
+                t_exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name = ?", (tbl,)).fetchone()
+                if t_exists:
+                    try:
+                        conn.execute(
+                            f"UPDATE {tbl} SET workspace_id = ?, user_id = ? WHERE workspace_id IS NULL OR workspace_id = ''",
+                            (ws_id, l_uid),
+                        )
+                    except sqlite3.OperationalError:
+                        pass
 
         logger.info("Multi-Tenant schema initialized successfully in %s", target_path)

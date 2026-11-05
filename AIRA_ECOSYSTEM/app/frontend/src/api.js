@@ -513,4 +513,31 @@ export const api = {
       return request(q);
     },
   },
+  personalization: {
+    getPreferences: () => request("/v1/personalization/preferences"),
+    updatePreferences: (body) => request("/v1/personalization/preferences", { method: "PUT", body: JSON.stringify(body) }),
+    getMemories: ({ category = null, query = null, limit = 50 } = {}) => {
+      const qs = new URLSearchParams();
+      if (category) qs.set("category", category);
+      if (query) qs.set("query", query);
+      qs.set("limit", limit);
+      return request(`/v1/personalization/memories?${qs.toString()}`);
+    },
+    addMemory: (body) => request("/v1/personalization/memories", { method: "POST", body: JSON.stringify(body) }),
+    updateMemory: (id, body) => request(`/v1/personalization/memories/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
+    deleteMemory: (id) => request(`/v1/personalization/memories/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    clearMemories: () => request("/v1/personalization/memories", { method: "DELETE" }),
+    getMemorySummary: () => request("/v1/personalization/memories/summary"),
+    getPersonas: () => request("/v1/personalization/personas"),
+    createPersona: (body) => request("/v1/personalization/personas", { method: "POST", body: JSON.stringify(body) }),
+    duplicatePersona: (id, name) => request(`/v1/personalization/personas/${encodeURIComponent(id)}/duplicate?new_name=${encodeURIComponent(name)}`, { method: "POST" }),
+    updatePersona: (id, body) => request(`/v1/personalization/personas/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
+    deletePersona: (id) => request(`/v1/personalization/personas/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    setActivePersona: (id) => request("/v1/personalization/personas/active", { method: "POST", body: JSON.stringify({ persona_id: id }) }),
+    previewPersona: (id) => request(`/v1/personalization/personas/${encodeURIComponent(id)}/preview`),
+    exportDataUrl: () => `${BASE}/v1/personalization/data/export`,
+    deleteConversations: () => request("/v1/personalization/data/conversations", { method: "DELETE" }),
+    deleteCustomPersonas: () => request("/v1/personalization/data/personas", { method: "DELETE" }),
+    requestAccountDeletion: (reason) => request("/v1/personalization/data/account-deletion-request", { method: "POST", body: JSON.stringify({ reason }) }),
+  },
 };

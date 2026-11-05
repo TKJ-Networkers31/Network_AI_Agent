@@ -50,13 +50,19 @@ def require_platform_admin(authorization: Optional[str] = Header(None)) -> Tenan
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session.")
 
     admin_roles = {
+        UserRoleType.PLATFORM_OWNER.value,
+        "PLATFORM_OWNER",
+        UserRoleType.SUPERADMIN.value,
+        "SUPERADMIN",
+        UserRoleType.ADMIN.value,
+        "ADMIN",
         UserRoleType.PLATFORM_SUPER_ADMIN.value,
         UserRoleType.NOC_ADMIN.value,
     }
-    if not any(r in admin_roles for r in ctx.roles):
+    if not (ctx.is_internal or any(r in admin_roles for r in ctx.roles)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: Platform administration access required.",
+            detail="Platform administration access required. Akses ditolak: AIRA Control Plane memerlukan kredensial staf internal administrator.",
         )
     return ctx
 

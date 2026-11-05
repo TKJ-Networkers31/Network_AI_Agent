@@ -382,6 +382,18 @@ class ContextBuilder:
         if behavior:
             data["behavior"] = _json_dict(behavior)
 
+        try:
+            from core.events import current_event_context
+            user_id = current_event_context().get("user_id")
+            if user_id:
+                from core.tenant.persona_service import get_persona_service
+                active_p = get_persona_service().get_active_persona(user_id)
+                if active_p:
+                    data["user_active_persona"] = active_p.get("name")
+                    data["user_persona_id"] = active_p.get("persona_id")
+        except Exception:
+            pass
+
         if not data:
             return None
 
@@ -403,29 +415,56 @@ class ContextBuilder:
         self, user_input: str, session_id: Optional[str], warnings: list[str],
     ) -> Optional[ContextSection]:
         """
-        SATU section memory dari DUA sumber independen (long_term_memory.db dan
-        semantic_memory.db). Keduanya dipanggil terisolasi (_call), jadi gagal di
-        satu sumber tidak pernah menghilangkan/merusak sumber lainnya.
-
-            legacy + semantic  -> legacy, baris kosong, semantic
-            semantic saja      -> semantic
-            legacy saja        -> persis perilaku lama
-            tidak ada          -> None
+        SATU section memory dari TIGA sumber: user-specific memory (tenant DB),
+        long-term legacy memory (long_term_memory.db), dan semantic memory (semantic_memory.db).
+        Ketiganya dipanggil terisolasi (_call), jadi gagal di satu sumber tidak
+        pernah menghilangkan/merusak sumber lainnya.
         """
+        user_mem_text = ""
+        user_id = None
+        try:
+            from core.events import current_event_context
+            user_id = current_event_context().get("user_id")
+        except Exception:
+            pass
+
+        if user_id:
+            try:
+                from core.tenant.memory_service import get_memory_service
+                mems = get_memory_service().retrieve_context_memories(user_id, user_input, max_items=5)
+                if mems:
+                    lines = [f"- [{m.get('category', 'general').upper()}] {m.get('content', '')}" for m in mems]
+                    user_mem_text = "=== USER SPECIFIC MEMORIES ===\n" + "\n".join(lines)
+            except Exception as exc:
+                warnings.append(f"user_memory: unavailable ({type(exc).__name__})")
+
         legacy = self._text_section(SECTION_MEMORY, "memory", self._memory_text, warnings)
         semantic = self._semantic_section(user_input, session_id, warnings)
 
-        if semantic is None:
-            return legacy
+        if not user_mem_text:
+            if semantic is None:
+                return legacy
+            if legacy is None:
+                return semantic
+            return ContextSection(
+                SECTION_MEMORY,
+                text=f"{legacy.text}\n\n{semantic.text}",
+                data={**semantic.data, "sources": ["legacy", "semantic"]},
+                source="memory+semantic_memory",
+            )
 
-        if legacy is None:
-            return semantic
+        text_parts = [p for p in [user_mem_text, getattr(legacy, "text", ""), getattr(semantic, "text", "")] if p]
+        sources = ["user_memory"]
+        if legacy and legacy.text:
+            sources.append("legacy")
+        if semantic and semantic.text:
+            sources.append("semantic")
 
         return ContextSection(
             SECTION_MEMORY,
-            text=f"{legacy.text}\n\n{semantic.text}",
-            data={**semantic.data, "sources": ["legacy", "semantic"]},
-            source="memory+semantic_memory",
+            text="\n\n".join(text_parts),
+            data={"sources": sources, "semantic_count": getattr(semantic, "data", {}).get("semantic_count", 0) if semantic else 0},
+            source="+".join(sources),
         )
 
     def _semantic_section(

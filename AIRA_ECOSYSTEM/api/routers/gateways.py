@@ -21,7 +21,8 @@ from core.tenant.models import Permission, TenantContext
 
 logger = logging.getLogger("aira.api.gateways")
 
-router = APIRouter(prefix="/api/v1/gateways", tags=["edge-gateways"])
+from core.tenant.entitlement_service import require_network_plus
+router = APIRouter(prefix="/api/v1/gateways", tags=["edge-gateways"], dependencies=[Depends(require_network_plus)])
 
 _gateway_mgr = EdgeGatewayManager()
 _identity_mgr = IdentityManager()

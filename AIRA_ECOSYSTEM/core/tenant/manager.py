@@ -355,9 +355,94 @@ class IdentityManager:
             is_internal=is_internal,
             tenant_id=tenant_id,
             is_active=True,
+            role_type=role_upper,
             created_at=now,
             updated_at=now,
         )
+
+    def get_user_by_username(self, username: str) -> Optional[User]:
+        """Retrieves a user entity by username including primary role."""
+        with topology_transaction(self.db_path, write=False) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM operational_users WHERE username = ?",
+                (username.strip().lower(),),
+            ).fetchone()
+            if not row:
+                return None
+            
+            roles = [
+                r["role_type"] for r in conn.execute(
+                    "SELECT role_type FROM operational_user_roles WHERE user_id = ?",
+                    (row["user_id"],),
+                ).fetchall()
+            ]
+            primary_role = roles[0] if roles else None
+            if UserRoleType.PLATFORM_OWNER.value in roles:
+                primary_role = UserRoleType.PLATFORM_OWNER.value
+            elif UserRoleType.SUPERADMIN.value in roles:
+                primary_role = UserRoleType.SUPERADMIN.value
+
+            return User(
+                user_id=row["user_id"],
+                username=row["username"],
+                email=row["email"],
+                password_hash=row["password_hash"],
+                salt=row["salt"],
+                is_internal=bool(row["is_internal"]),
+                tenant_id=row["tenant_id"],
+                is_active=bool(row["is_active"]),
+                role_type=primary_role,
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+
+    def get_user_by_id(self, user_id: str) -> Optional[User]:
+        """Retrieves a user entity by user_id including primary role."""
+        with topology_transaction(self.db_path, write=False) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM operational_users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            if not row:
+                return None
+            
+            roles = [
+                r["role_type"] for r in conn.execute(
+                    "SELECT role_type FROM operational_user_roles WHERE user_id = ?",
+                    (user_id,),
+                ).fetchall()
+            ]
+            primary_role = roles[0] if roles else None
+            if UserRoleType.PLATFORM_OWNER.value in roles:
+                primary_role = UserRoleType.PLATFORM_OWNER.value
+            elif UserRoleType.SUPERADMIN.value in roles:
+                primary_role = UserRoleType.SUPERADMIN.value
+
+            return User(
+                user_id=row["user_id"],
+                username=row["username"],
+                email=row["email"],
+                password_hash=row["password_hash"],
+                salt=row["salt"],
+                is_internal=bool(row["is_internal"]),
+                tenant_id=row["tenant_id"],
+                is_active=bool(row["is_active"]),
+                role_type=primary_role,
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+
+    def get_user_roles(self, user_id: str) -> List[str]:
+        """Returns all assigned role types for a user."""
+        with topology_transaction(self.db_path, write=False) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT role_type FROM operational_user_roles WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+            return [r["role_type"] for r in rows]
 
     def authenticate_user_detailed(
         self,
@@ -453,6 +538,12 @@ class IdentityManager:
                 roles_rows = conn.execute("SELECT role_type FROM operational_user_roles WHERE user_id = ?", (user_id,)).fetchall()
                 user_roles = [r["role_type"] for r in roles_rows]
                 internal_roles = {
+                    UserRoleType.PLATFORM_OWNER.value,
+                    "PLATFORM_OWNER",
+                    UserRoleType.SUPERADMIN.value,
+                    "SUPERADMIN",
+                    UserRoleType.ADMIN.value,
+                    "ADMIN",
                     UserRoleType.PLATFORM_SUPER_ADMIN.value,
                     UserRoleType.NOC_ADMIN.value,
                     UserRoleType.NOC_OPERATOR.value,
@@ -460,7 +551,6 @@ class IdentityManager:
                     UserRoleType.NOC_ANALYST.value,
                     UserRoleType.SUPPORT_OPERATOR.value,
                     UserRoleType.AUDITOR.value,
-                    "SUPERADMIN",
                 }
                 if not is_internal and not any(r in internal_roles for r in user_roles):
                     return {

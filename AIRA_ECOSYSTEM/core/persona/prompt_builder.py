@@ -124,6 +124,19 @@ def build_prompt(
         MAPS_RULES.strip(),
     ]
 
+    try:
+        from core.events import current_event_context
+        user_id = current_event_context().get("user_id")
+        if user_id:
+            from core.tenant.persona_service import get_persona_service
+            p_service = get_persona_service()
+            active_persona = p_service.get_active_persona(user_id)
+            if active_persona:
+                persona_prompt_part = p_service.preview_persona_prompt(active_persona)
+                sections.append(persona_prompt_part)
+    except Exception:
+        pass
+
     if extra_context:
         sections.append(extra_context.strip())
 
