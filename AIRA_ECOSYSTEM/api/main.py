@@ -103,10 +103,12 @@ from api.routers import portal
 app.include_router(portal.router)                # Customer Self-Service Portal (Networking VIII / Phase D)
 app.include_router(ws.router)
 
-from api.routers import auth, admin_platform, automations
+from api.routers import auth, admin_platform, automations, billing, playbooks
 app.include_router(auth.router)
 app.include_router(admin_platform.router)
 app.include_router(automations.router)
+app.include_router(billing.router)
+app.include_router(playbooks.router)
 
 
 def _warm_host_location() -> None:

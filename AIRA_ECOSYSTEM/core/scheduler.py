@@ -760,6 +760,13 @@ class AutomationEngine:
                             daemon=True,
                         ).start()
 
+                    # Phase E: Automated subscription expiration check
+                    try:
+                        from core.tenant.user_subscription import UserSubscriptionService
+                        UserSubscriptionService(self.db_path).check_and_expire_subscriptions()
+                    except Exception:
+                        pass
+
                 except Exception:
                     logger.exception("Error in automation timer cycle.")
 

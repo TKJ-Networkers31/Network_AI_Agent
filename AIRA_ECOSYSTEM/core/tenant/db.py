@@ -312,6 +312,112 @@ CREATE INDEX IF NOT EXISTS idx_token_policy_scope ON operational_token_policies(
 CREATE INDEX IF NOT EXISTS idx_token_balance_tenant ON operational_token_balances(tenant_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_token_usage_tenant ON operational_token_usage_ledger(tenant_id, timestamp_utc DESC);
 CREATE INDEX IF NOT EXISTS idx_pending_approvals_tenant ON operational_pending_approvals(tenant_id, status);
+
+-- 20. User-Specific Subscriptions & Entitlements (Directive Section 5)
+CREATE TABLE IF NOT EXISTS operational_user_subscriptions (
+    subscription_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES operational_users(user_id) ON DELETE CASCADE,
+    tenant_id TEXT NOT NULL REFERENCES operational_tenants(tenant_id) ON DELETE CASCADE,
+    plan_id TEXT NOT NULL DEFAULT 'FREE' CHECK(plan_id IN ('FREE', 'PRO', 'ENTERPRISE', 'CUSTOM')),
+    subscription_status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(subscription_status IN ('PENDING', 'ACTIVE', 'EXPIRED', 'SUSPENDED', 'CANCELLED')),
+    starts_at TEXT NOT NULL,
+    expires_at TEXT,
+    renewal_status TEXT NOT NULL DEFAULT 'MANUAL' CHECK(renewal_status IN ('AUTO', 'MANUAL', 'NONE')),
+    token_quota INTEGER NOT NULL DEFAULT 10000,
+    token_consumed INTEGER NOT NULL DEFAULT 0,
+    networking_addon_status INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(user_id)
+);
+
+-- 21. Billing Foundation — Products & Plans (Directive Section 6)
+CREATE TABLE IF NOT EXISTS operational_billing_products (
+    product_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS operational_billing_plans (
+    plan_id TEXT PRIMARY KEY,
+    product_id TEXT NOT NULL REFERENCES operational_billing_products(product_id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    tier TEXT NOT NULL CHECK(tier IN ('FREE', 'PRO', 'ENTERPRISE')),
+    has_networking_plus INTEGER NOT NULL DEFAULT 0,
+    monthly_tokens INTEGER NOT NULL DEFAULT 10000,
+    price_cents INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'IDR',
+    interval_months INTEGER NOT NULL DEFAULT 1,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
+-- 22. Billing Foundation — Invoices & Transactions
+CREATE TABLE IF NOT EXISTS operational_billing_invoices (
+    invoice_id TEXT PRIMARY KEY,
+    subscription_id TEXT REFERENCES operational_user_subscriptions(subscription_id) ON DELETE SET NULL,
+    user_id TEXT NOT NULL REFERENCES operational_users(user_id) ON DELETE CASCADE,
+    tenant_id TEXT NOT NULL REFERENCES operational_tenants(tenant_id) ON DELETE CASCADE,
+    amount_cents INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'IDR',
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('DRAFT', 'PENDING', 'PAID', 'FAILED', 'VOID')),
+    due_date TEXT,
+    paid_at TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS operational_billing_transactions (
+    transaction_id TEXT PRIMARY KEY,
+    invoice_id TEXT REFERENCES operational_billing_invoices(invoice_id) ON DELETE SET NULL,
+    user_id TEXT NOT NULL REFERENCES operational_users(user_id) ON DELETE CASCADE,
+    provider_name TEXT NOT NULL DEFAULT 'MOCK_GATEWAY',
+    provider_ref TEXT,
+    amount_cents INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'IDR',
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'SUCCESS', 'FAILED', 'REFUNDED')),
+    idempotency_key TEXT UNIQUE,
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS operational_billing_webhook_events (
+    event_id TEXT PRIMARY KEY,
+    provider_name TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    signature TEXT,
+    processed INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    processed_at TEXT
+);
+
+-- 23. Ansible-Compatible Playbooks & Workflows (Directive Section 8)
+CREATE TABLE IF NOT EXISTS operational_playbooks (
+    playbook_id TEXT PRIMARY KEY,
+    tenant_id TEXT REFERENCES operational_tenants(tenant_id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'GENERAL',
+    description TEXT NOT NULL,
+    yaml_content TEXT NOT NULL,
+    variables_schema_json TEXT NOT NULL DEFAULT '{}',
+    risk_level TEXT NOT NULL DEFAULT 'CATEGORY_A' CHECK(risk_level IN ('CATEGORY_A', 'CATEGORY_B', 'CATEGORY_C')),
+    is_builtin INTEGER NOT NULL DEFAULT 0,
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Additional Indexes for Phase E
+CREATE INDEX IF NOT EXISTS idx_user_sub_status ON operational_user_subscriptions(user_id, subscription_status);
+CREATE INDEX IF NOT EXISTS idx_billing_invoice_user ON operational_billing_invoices(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_billing_txn_user ON operational_billing_transactions(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_billing_webhook ON operational_billing_webhook_events(provider_name, event_type, processed);
+CREATE INDEX IF NOT EXISTS idx_playbooks_tenant ON operational_playbooks(tenant_id, category);
+
 """
 
 
@@ -330,6 +436,13 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
             "reset_token_expires_at TEXT",
             "google_id TEXT",
             "auth_provider TEXT NOT NULL DEFAULT 'LOCAL'",
+            "must_change_password INTEGER NOT NULL DEFAULT 0",
+            "mfa_enabled INTEGER NOT NULL DEFAULT 0",
+            "mfa_secret TEXT",
+            "failed_login_attempts INTEGER NOT NULL DEFAULT 0",
+            "locked_until_utc TEXT",
+            "last_login_at TEXT",
+            "last_login_ip TEXT",
         ]:
             col_name = col_def.split()[0]
             try:
@@ -366,4 +479,38 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
                 now_iso,
             ),
         )
-    logger.info("Multi-Tenant schema initialized successfully in %s", target_path)
+    
+        # Seed default products & plans
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO operational_billing_products (product_id, name, description, is_active, created_at)
+            VALUES ('prod_aira_workspace', 'AIRA Workspace', 'Core AI-native Network Engineering Workspace', 1, ?)
+            """,
+            (now_iso,),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO operational_billing_products (product_id, name, description, is_active, created_at)
+            VALUES ('prod_netplus_addon', 'Networking++ Add-on', 'Advanced topology, NMS telemetry & Playbook execution', 1, ?)
+            """,
+            (now_iso,),
+        )
+        default_plans = [
+            ('plan_free', 'prod_aira_workspace', 'AIRA Free', 'FREE', 0, 10000, 0, 'IDR', 1),
+            ('plan_pro', 'prod_aira_workspace', 'AIRA Pro', 'PRO', 0, 100000, 25000000, 'IDR', 1),
+            ('plan_pro_netplus', 'prod_aira_workspace', 'AIRA Pro + Networking++', 'PRO', 1, 150000, 50000000, 'IDR', 1),
+            ('plan_enterprise', 'prod_aira_workspace', 'AIRA Enterprise', 'ENTERPRISE', 1, 1000000, 150000000, 'IDR', 1),
+            ('plan_netplus_addon', 'prod_netplus_addon', 'Networking++ Standalone Add-on', 'FREE', 1, 50000, 30000000, 'IDR', 1),
+        ]
+        for p in default_plans:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO operational_billing_plans (
+                    plan_id, product_id, name, tier, has_networking_plus,
+                    monthly_tokens, price_cents, currency, interval_months, is_active, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (*p, now_iso),
+            )
+
+        logger.info("Multi-Tenant schema initialized successfully in %s", target_path)

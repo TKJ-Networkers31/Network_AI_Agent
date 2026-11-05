@@ -22,12 +22,14 @@ from pydantic import BaseModel, Field
 from core.tenant.entitlements import EntitlementManager
 from core.tenant.manager import IdentityManager, TenantManager
 from core.tenant.models import TenantContext, UserRoleType
+from core.tenant.user_subscription import UserSubscriptionService
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 _identity_mgr = IdentityManager()
 _tenant_mgr = TenantManager()
 _entitlement_mgr = EntitlementManager()
+_sub_service = UserSubscriptionService()
 
 
 class RegisterRequest(BaseModel):
@@ -40,6 +42,17 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     username_or_email: str
     password: str
+    totp_code: Optional[str] = None
+    admin_only: bool = False
+
+
+class ChangePasswordMandatoryRequest(BaseModel):
+    new_password: str = Field(..., min_length=8)
+
+
+class MfaVerifyRequest(BaseModel):
+    secret: str
+    code: str
 
 
 class VerifyEmailRequest(BaseModel):
@@ -130,25 +143,47 @@ def register(payload: RegisterRequest):
 @router.post("/login")
 def login(payload: LoginRequest):
     """Authenticates credentials and issues an active session token."""
-    session = _identity_mgr.authenticate_user(payload.username_or_email, payload.password)
-    if not session:
+    res = _identity_mgr.authenticate_user_detailed(
+        username_or_email=payload.username_or_email,
+        password=payload.password,
+        totp_code=payload.totp_code,
+        admin_only=payload.admin_only,
+    )
+
+    if res.get("mfa_required"):
+        return {
+            "success": False,
+            "mfa_required": True,
+            "username": res.get("username"),
+            "message": "Kode verifikasi 2FA (TOTP) diperlukan.",
+        }
+
+    if not res.get("success"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Username atau password tidak sesuai.",
+            detail=res.get("error", "Username atau password tidak sesuai."),
         )
+
+    session = res["session"]
+
+    # Ensure user has subscription and fetch subscription data
+    sub = None
+    if session.tenant_id:
+        sub = _sub_service.ensure_user_subscription(session.user_id, session.tenant_id)
 
     # Fetch token balance and entitlements
     balance = None
-    has_net = True
+    has_net = False
     if session.tenant_id:
         bal_obj = _entitlement_mgr.get_or_create_balance(session.tenant_id, session.user_id)
         balance = bal_obj.to_dict()
-        has_net = _entitlement_mgr.has_networking_access(session.tenant_id)
+        has_net = sub.has_networking_plus if sub else _entitlement_mgr.has_networking_access(session.tenant_id)
 
     return {
         "success": True,
         "token": session.token,
         "session_id": session.session_id,
+        "must_change_password": res.get("must_change_password", False),
         "user": {
             "user_id": session.user_id,
             "username": session.username,
@@ -157,11 +192,53 @@ def login(payload: LoginRequest):
             "roles": session.roles,
             "permissions": session.permissions,
         },
+        "subscription": sub.to_dict() if sub else None,
         "entitlements": {
             "networking_plus": has_net,
+            "tier": sub.plan_id if sub else "FREE",
         },
         "token_balance": balance,
     }
+
+
+@router.post("/change-password-mandatory")
+def change_password_mandatory(payload: ChangePasswordMandatoryRequest, ctx: TenantContext = Depends(get_current_user_context)):
+    """Mandatory password change requirement for first login (e.g. lingga_admin bootstrap)."""
+    try:
+        _identity_mgr.change_user_password(ctx.user_id, payload.new_password, reset_must_change=True)
+        return {"success": True, "message": "Kata sandi berhasil diubah. Akun Anda kini aktif sepenuhnya."}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/mfa/setup")
+def setup_mfa(ctx: TenantContext = Depends(get_current_user_context)):
+    """Generates standard TOTP secret and QR URI for user."""
+    try:
+        mfa_data = _identity_mgr.setup_mfa(ctx.user_id)
+        return {"success": True, "mfa": mfa_data}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/mfa/verify")
+def verify_mfa(payload: MfaVerifyRequest, ctx: TenantContext = Depends(get_current_user_context)):
+    """Verifies authenticator code and activates two-factor authentication."""
+    try:
+        _identity_mgr.verify_and_enable_mfa(ctx.user_id, payload.secret, payload.code)
+        return {"success": True, "message": "Autentikasi dua faktor (MFA/TOTP) berhasil diaktifkan."}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/mfa/disable")
+def disable_mfa(ctx: TenantContext = Depends(get_current_user_context)):
+    """Deactivates two-factor authentication."""
+    try:
+        _identity_mgr.disable_mfa(ctx.user_id)
+        return {"success": True, "message": "Autentikasi dua faktor dinonaktifkan."}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/logout")
@@ -177,11 +254,13 @@ def logout(ctx: TenantContext = Depends(get_current_user_context), authorization
 def get_current_user_profile(ctx: TenantContext = Depends(get_current_user_context)):
     """Returns profile, roles, active entitlements, and token balance of current user."""
     balance = None
-    has_net = True
+    has_net = False
+    sub = None
     if ctx.tenant_id:
+        sub = _sub_service.ensure_user_subscription(ctx.user_id, ctx.tenant_id)
         bal_obj = _entitlement_mgr.get_or_create_balance(ctx.tenant_id, ctx.user_id)
         balance = bal_obj.to_dict()
-        has_net = _entitlement_mgr.has_networking_access(ctx.tenant_id)
+        has_net = sub.has_networking_plus if sub else _entitlement_mgr.has_networking_access(ctx.tenant_id)
 
     return {
         "success": True,
@@ -193,8 +272,10 @@ def get_current_user_profile(ctx: TenantContext = Depends(get_current_user_conte
             "roles": ctx.roles,
             "permissions": ctx.permissions,
         },
+        "subscription": sub.to_dict() if sub else None,
         "entitlements": {
             "networking_plus": has_net,
+            "tier": sub.plan_id if sub else "FREE",
         },
         "token_balance": balance,
     }

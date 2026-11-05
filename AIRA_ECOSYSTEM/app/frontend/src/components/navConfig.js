@@ -21,14 +21,13 @@ export const NAV_GROUPS = [
       { id: "infrastructure", label: "Infrastructure", icon: Network },
       { id: "automations", label: "Automations", icon: Zap },
       { id: "files", label: "Files", icon: FolderOpen },
-      { id: "settings", label: "Settings", icon: Settings },
     ],
   },
   {
     id: "admin",
-    label: "Platform Admin",
+    label: "Control Plane",
     items: [
-      { id: "admin", label: "Admin Platform", icon: ShieldCheck },
+      { id: "admin", label: "AIRA Control Plane", icon: ShieldCheck },
     ],
   },
 ];

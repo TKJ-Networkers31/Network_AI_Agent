@@ -10,6 +10,7 @@ Implements business logic, security validation, and database operations for:
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import logging
@@ -358,42 +359,298 @@ class IdentityManager:
             updated_at=now,
         )
 
-    def authenticate_user(self, username_or_email: str, password: str) -> Optional[UserSession]:
-        """Authenticates credentials and establishes a new UserSession upon success."""
+    def authenticate_user_detailed(
+        self,
+        username_or_email: str,
+        password: str,
+        totp_code: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        admin_only: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Authenticates credentials with:
+        - Rate limiting & lockout protection (after 5 failed attempts, locked for 15 minutes)
+        - First-login password change requirement flag
+        - Two-factor authentication (TOTP) enforcement
+        - Admin portal privilege barrier
+        """
         identifier = username_or_email.strip().lower()
-        with topology_transaction(self.db_path, write=False) as conn:
+        now_dt = datetime.now(timezone.utc)
+        now_iso = now_dt.isoformat()
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
-                SELECT user_id, username, email, password_hash, salt, is_internal, tenant_id, is_active 
+                SELECT user_id, username, email, password_hash, salt, is_internal, tenant_id, is_active,
+                       must_change_password, mfa_enabled, mfa_secret, failed_login_attempts, locked_until_utc
                 FROM operational_users 
                 WHERE (username = ? OR email = ?) AND is_active = 1
                 """,
                 (identifier, identifier),
             ).fetchone()
-            if not row:
-                return None
 
-            expected_hash = _hash_password(password, row["salt"])
-            if not secrets.compare_digest(row["password_hash"], expected_hash):
-                return None
+            if not row:
+                return {"success": False, "error": "Username atau kata sandi tidak valid."}
 
             user_id = row["user_id"]
             username = row["username"]
             tenant_id = row["tenant_id"]
             is_internal = bool(row["is_internal"])
+            must_change = bool(row["must_change_password"])
+            mfa_enabled = bool(row["mfa_enabled"])
+            mfa_secret = row["mfa_secret"]
+            failed_attempts = row["failed_login_attempts"] or 0
+            locked_until = row["locked_until_utc"]
 
-            # Verify tenant is not suspended if customer user
+            # Check lockout
+            if locked_until:
+                try:
+                    lock_dt = datetime.fromisoformat(locked_until.replace("Z", "+00:00"))
+                    if now_dt < lock_dt:
+                        remaining_min = max(1, int((lock_dt - now_dt).total_seconds() // 60))
+                        return {
+                            "success": False,
+                            "error": f"Akun terkunci karena terlalu banyak percobaan login yang gagal. Silakan coba {remaining_min} menit lagi.",
+                            "locked": True,
+                        }
+                except Exception:
+                    pass
+
+            # Check password
+            expected_hash = _hash_password(password, row["salt"])
+            if not secrets.compare_digest(row["password_hash"], expected_hash):
+                new_failed = failed_attempts + 1
+                if new_failed >= 5:
+                    lock_time = (now_dt + timedelta(minutes=15)).isoformat()
+                    conn.execute(
+                        "UPDATE operational_users SET failed_login_attempts = ?, locked_until_utc = ? WHERE user_id = ?",
+                        (new_failed, lock_time, user_id),
+                    )
+                    aud_id = f"aud_{uuid.uuid4().hex[:16]}"
+                    conn.execute(
+                        """
+                        INSERT INTO operational_audit_log
+                        (audit_id, tenant_id, user_id, username, action, resource_type, resource_id, details_json, ip_address, timestamp_utc)
+                        VALUES (?, ?, ?, ?, 'ACCOUNT_LOCKED', 'USER', ?, ?, ?, ?)
+                        """,
+                        (aud_id, tenant_id, user_id, username, user_id, json.dumps({"reason": "Excessive failed logins", "attempts": new_failed}), ip_address or "127.0.0.1", now_iso),
+                    )
+                    return {
+                        "success": False,
+                        "error": "Terlalu banyak percobaan gagal. Akun dikunci selama 15 menit untuk keamanan.",
+                        "locked": True,
+                    }
+                else:
+                    conn.execute(
+                        "UPDATE operational_users SET failed_login_attempts = ? WHERE user_id = ?",
+                        (new_failed, user_id),
+                    )
+                    return {"success": False, "error": "Username atau kata sandi tidak valid."}
+
+            # Verify admin role boundary if logging into admin site
+            if admin_only:
+                roles_rows = conn.execute("SELECT role_type FROM operational_user_roles WHERE user_id = ?", (user_id,)).fetchall()
+                user_roles = [r["role_type"] for r in roles_rows]
+                internal_roles = {
+                    UserRoleType.PLATFORM_SUPER_ADMIN.value,
+                    UserRoleType.NOC_ADMIN.value,
+                    UserRoleType.NOC_OPERATOR.value,
+                    UserRoleType.NETWORK_ENGINEER.value,
+                    UserRoleType.NOC_ANALYST.value,
+                    UserRoleType.SUPPORT_OPERATOR.value,
+                    UserRoleType.AUDITOR.value,
+                    "SUPERADMIN",
+                }
+                if not is_internal and not any(r in internal_roles for r in user_roles):
+                    return {
+                        "success": False,
+                        "error": "Akses ditolak. AIRA Control Plane memerlukan kredensial staf internal administrator.",
+                    }
+
+            # Verify tenant is active
             if not is_internal and tenant_id:
-                t_row = conn.execute(
-                    "SELECT status FROM operational_tenants WHERE tenant_id = ?",
-                    (tenant_id,),
-                ).fetchone()
+                t_row = conn.execute("SELECT status FROM operational_tenants WHERE tenant_id = ?", (tenant_id,)).fetchone()
                 if not t_row or t_row["status"] not in (TenantStatus.ACTIVE.value, TenantStatus.MAINTENANCE.value):
-                    logger.warning("Authentication rejected: Tenant %s is %s", tenant_id, t_row["status"] if t_row else "NOT_FOUND")
-                    return None
+                    return {"success": False, "error": f"Organisasi sedang {t_row['status'] if t_row else 'NONAKTIF'}. Hubungi administrator."}
 
-        # Create session
-        return self.create_session(user_id=user_id)
+            # MFA Verification Check
+            if mfa_enabled and mfa_secret:
+                from core.security.mfa import verify_totp_code
+                if not totp_code:
+                    return {
+                        "success": False,
+                        "mfa_required": True,
+                        "user_id": user_id,
+                        "username": username,
+                        "message": "Kode verifikasi 2FA (TOTP) diperlukan.",
+                    }
+                if not verify_totp_code(mfa_secret, totp_code):
+                    return {
+                        "success": False,
+                        "mfa_required": True,
+                        "user_id": user_id,
+                        "username": username,
+                        "error": "Kode verifikasi 2FA tidak sesuai atau sudah kadaluarsa.",
+                    }
+
+            # Login successful: reset failed attempts & update last_login
+            conn.execute(
+                """
+                UPDATE operational_users
+                SET failed_login_attempts = 0, locked_until_utc = NULL, last_login_at = ?, last_login_ip = ?
+                WHERE user_id = ?
+                """,
+                (now_iso, ip_address or "127.0.0.1", user_id),
+            )
+
+        # Create active session
+        session = self.create_session(user_id=user_id)
+        return {
+            "success": True,
+            "session": session,
+            "user_id": user_id,
+            "username": username,
+            "is_internal": is_internal,
+            "must_change_password": must_change,
+            "mfa_verified": mfa_enabled,
+        }
+
+    def authenticate_user(self, username_or_email: str, password: str) -> Optional[UserSession]:
+        """Authenticates credentials and establishes a new UserSession upon success."""
+        res = self.authenticate_user_detailed(username_or_email, password)
+        return res.get("session") if res.get("success") else None
+
+    def change_user_password(self, user_id: str, new_password: str, reset_must_change: bool = True) -> bool:
+        """Changes user password with cryptographically fresh salt and clears mandatory change flag."""
+        if len(new_password) < 8:
+            raise ValueError("Password must be at least 8 characters.")
+
+        salt = secrets.token_hex(16)
+        pw_hash = _hash_password(new_password, salt)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        must_change_val = 0 if reset_must_change else 1
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                UPDATE operational_users
+                SET password_hash = ?, salt = ?, must_change_password = ?, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (pw_hash, salt, must_change_val, now_iso, user_id),
+            )
+
+            aud_id = f"aud_{uuid.uuid4().hex[:16]}"
+            conn.execute(
+                """
+                INSERT INTO operational_audit_log
+                (audit_id, tenant_id, user_id, username, action, resource_type, resource_id, details_json, ip_address, timestamp_utc)
+                VALUES (?, 'tenant_internal', ?, 'user', 'PASSWORD_CHANGED', 'USER', ?, '{}', '127.0.0.1', ?)
+                """,
+                (aud_id, user_id, user_id, now_iso),
+            )
+        return True
+
+    def setup_mfa(self, user_id: str) -> Dict[str, Any]:
+        """Initiates MFA setup by generating a TOTP secret and QR URI."""
+        from core.security.mfa import generate_totp_secret, get_totp_uri
+        with topology_transaction(self.db_path, write=False) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT username, email FROM operational_users WHERE user_id = ?", (user_id,)).fetchone()
+            if not row:
+                raise ValueError(f"User '{user_id}' not found.")
+            username = row["username"]
+
+        secret = generate_totp_secret()
+        otpauth_uri = get_totp_uri(secret, username=username, issuer="AIRA OS")
+        return {
+            "secret": secret,
+            "otpauth_uri": otpauth_uri,
+            "username": username,
+        }
+
+    def verify_and_enable_mfa(self, user_id: str, secret: str, code: str) -> bool:
+        """Verifies initial TOTP code and activates MFA for user."""
+        from core.security.mfa import verify_totp_code
+        if not verify_totp_code(secret, code):
+            raise ValueError("Kode verifikasi 2FA tidak valid. Pastikan waktu perangkat Anda sinkron.")
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                "UPDATE operational_users SET mfa_enabled = 1, mfa_secret = ?, updated_at = ? WHERE user_id = ?",
+                (secret, now_iso, user_id),
+            )
+            aud_id = f"aud_{uuid.uuid4().hex[:16]}"
+            conn.execute(
+                """
+                INSERT INTO operational_audit_log
+                (audit_id, tenant_id, user_id, username, action, resource_type, resource_id, details_json, ip_address, timestamp_utc)
+                VALUES (?, 'tenant_internal', ?, 'user', 'MFA_ENABLED', 'USER', ?, '{}', '127.0.0.1', ?)
+                """,
+                (aud_id, user_id, user_id, now_iso),
+            )
+        return True
+
+    def disable_mfa(self, user_id: str) -> bool:
+        """Disables MFA for user."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                "UPDATE operational_users SET mfa_enabled = 0, mfa_secret = NULL, updated_at = ? WHERE user_id = ?",
+                (now_iso, user_id),
+            )
+            aud_id = f"aud_{uuid.uuid4().hex[:16]}"
+            conn.execute(
+                """
+                INSERT INTO operational_audit_log
+                (audit_id, tenant_id, user_id, username, action, resource_type, resource_id, details_json, ip_address, timestamp_utc)
+                VALUES (?, 'tenant_internal', ?, 'user', 'MFA_DISABLED', 'USER', ?, '{}', '127.0.0.1', ?)
+                """,
+                (aud_id, user_id, user_id, now_iso),
+            )
+        return True
+
+    def impersonate_user(self, admin_user_id: str, target_user_id: str, reason: str, ip_address: str = "127.0.0.1") -> UserSession:
+        """Allows superadmin to establish an audited impersonation session for troubleshooting."""
+        if not reason or not reason.strip():
+            raise ValueError("A clear, non-empty reason is mandatory for superadmin impersonation.")
+
+        with topology_transaction(self.db_path, write=False) as conn:
+            conn.row_factory = sqlite3.Row
+            admin_roles = conn.execute("SELECT role_type FROM operational_user_roles WHERE user_id = ?", (admin_user_id,)).fetchall()
+            role_names = [r["role_type"] for r in admin_roles]
+            if not any(r in (UserRoleType.PLATFORM_SUPER_ADMIN.value, "SUPERADMIN") for r in role_names):
+                raise PermissionError("Only Superadmin is permitted to perform user impersonation.")
+
+            target_row = conn.execute("SELECT username, tenant_id FROM operational_users WHERE user_id = ?", (target_user_id,)).fetchone()
+            if not target_row:
+                raise ValueError(f"Target user '{target_user_id}' does not exist.")
+
+        session = self.create_session(user_id=target_user_id, duration_hours=2)
+
+        # Audit impersonation
+        now_iso = datetime.now(timezone.utc).isoformat()
+        aud_id = f"aud_{uuid.uuid4().hex[:16]}"
+        details = {
+            "action": "SUPERADMIN_IMPERSONATION",
+            "superadmin_user_id": admin_user_id,
+            "target_user_id": target_user_id,
+            "target_username": target_row["username"],
+            "reason": reason.strip(),
+            "session_id": session.session_id,
+        }
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO operational_audit_log
+                (audit_id, tenant_id, user_id, username, action, resource_type, resource_id, details_json, ip_address, timestamp_utc)
+                VALUES (?, ?, ?, 'lingga_admin', 'SUPERADMIN_IMPERSONATION', 'USER', ?, ?, ?, ?)
+                """,
+                (aud_id, target_row["tenant_id"], admin_user_id, target_user_id, json.dumps(details), ip_address, now_iso),
+            )
+        return session
 
     def create_session(self, user_id: str, duration_hours: int = 24) -> UserSession:
         """Issues an active session token for an authenticated user."""

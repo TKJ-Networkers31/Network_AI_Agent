@@ -21,6 +21,8 @@ from core.operations.approval_engine import CentralizedApprovalEngine
 from core.tenant.entitlements import EntitlementManager, PlanTier, TokenPolicy
 from core.tenant.manager import IdentityManager, TenantManager
 from core.tenant.models import Permission, TenantContext, TenantStatus, UserRoleType
+from core.tenant.user_subscription import UserSubscriptionService
+from core.billing.service import BillingService
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin_platform"])
 
@@ -28,6 +30,8 @@ _identity_mgr = IdentityManager()
 _tenant_mgr = TenantManager()
 _entitlement_mgr = EntitlementManager()
 _approval_engine = CentralizedApprovalEngine()
+_sub_service = UserSubscriptionService()
+_billing_service = BillingService()
 
 
 def require_platform_admin(authorization: Optional[str] = Header(None)) -> TenantContext:
@@ -183,3 +187,112 @@ def resolve_approval(
     if not resolved:
         raise HTTPException(status_code=404, detail="Pending approval not found or already resolved.")
     return {"success": True, "approval": resolved.to_dict()}
+
+
+class ImpersonateInput(BaseModel):
+    target_user_id: str
+    reason: str = Field(..., min_length=5, description="Audited justification for account impersonation")
+
+
+class AssignUserSubscriptionInput(BaseModel):
+    user_id: str
+    plan_id: str = Field(..., description="FREE, PRO, ENTERPRISE, CUSTOM")
+    duration_days: Optional[int] = 30
+    networking_addon: bool = False
+    renewal_status: str = "MANUAL"
+
+
+@router.post("/impersonate")
+def impersonate_user(payload: ImpersonateInput, admin: TenantContext = Depends(require_platform_admin)):
+    """Allows Superadmin to impersonate a customer account for troubleshooting, with mandatory audit reason."""
+    try:
+        session = _identity_mgr.impersonate_user(
+            admin_user_id=admin.user_id,
+            target_user_id=payload.target_user_id,
+            reason=payload.reason,
+        )
+        return {
+            "success": True,
+            "message": "Impersonation session established. All actions are logged.",
+            "impersonated_session": {
+                "session_id": session.session_id,
+                "token": session.token,
+                "target_user_id": session.user_id,
+                "target_username": session.username,
+                "tenant_id": session.tenant_id,
+            },
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/subscriptions")
+def list_user_subscriptions(
+    status: Optional[str] = Query(None),
+    plan_id: Optional[str] = Query(None),
+    limit: int = Query(100),
+    admin: TenantContext = Depends(require_platform_admin),
+):
+    """Lists customer user subscriptions with plan tiers and status."""
+    subs = _sub_service.list_subscriptions(status=status, plan_id=plan_id, limit=limit)
+    return {"success": True, "subscriptions": subs}
+
+
+@router.post("/subscriptions/assign")
+def assign_user_subscription(payload: AssignUserSubscriptionInput, admin: TenantContext = Depends(require_platform_admin)):
+    """Admin endpoint to manually upgrade or grant entitlements to a user."""
+    try:
+        sub = _sub_service.assign_subscription(
+            user_id=payload.user_id,
+            plan_id=payload.plan_id,
+            duration_days=payload.duration_days,
+            networking_addon=payload.networking_addon,
+            renewal_status=payload.renewal_status,
+            operator_user=admin.username,
+        )
+        return {"success": True, "subscription": sub.to_dict()}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/subscriptions/check-expirations")
+def check_expirations(admin: TenantContext = Depends(require_platform_admin)):
+    """Manually triggers background sweep of expired subscriptions and non-destructive downgrade."""
+    report = _sub_service.check_and_expire_subscriptions()
+    return {"success": True, "report": report}
+
+
+@router.get("/billing/invoices")
+def list_all_invoices(limit: int = Query(50), admin: TenantContext = Depends(require_platform_admin)):
+    """Control plane view of platform billing invoices."""
+    invoices = _billing_service.list_invoices(limit=limit)
+    return {"success": True, "invoices": invoices}
+
+
+@router.get("/billing/transactions")
+def list_all_transactions(limit: int = Query(50), admin: TenantContext = Depends(require_platform_admin)):
+    """Control plane view of platform payment transactions."""
+    txns = _billing_service.list_transactions(limit=limit)
+    return {"success": True, "transactions": txns}
+
+
+@router.get("/users")
+def list_platform_users(limit: int = Query(100), admin: TenantContext = Depends(require_platform_admin)):
+    """Lists registered users across the platform."""
+    from core.topology_db import topology_transaction
+    import sqlite3
+    with topology_transaction(_identity_mgr.db_path, write=False) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT u.user_id, u.username, u.email, u.is_internal, u.tenant_id, u.is_active,
+                   u.must_change_password, u.mfa_enabled, u.last_login_at, t.name as tenant_name,
+                   s.plan_id, s.subscription_status, s.networking_addon_status
+            FROM operational_users u
+            LEFT JOIN operational_tenants t ON u.tenant_id = t.tenant_id
+            LEFT JOIN operational_user_subscriptions s ON u.user_id = s.user_id
+            ORDER BY u.created_at DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return {"success": True, "users": [dict(r) for r in rows]}

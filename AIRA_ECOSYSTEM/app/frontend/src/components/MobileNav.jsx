@@ -9,7 +9,7 @@
 import { Menu } from "lucide-react";
 import { ALL_NAV_ITEMS } from "./navConfig.js";
 
-const PRIMARY_IDS = ["workspace", "infrastructure", "automations", "files", "settings"];
+const PRIMARY_IDS = ["workspace", "infrastructure", "automations", "files"];
 
 const PRIMARY_ITEMS = PRIMARY_IDS.map((id) => ALL_NAV_ITEMS.find((item) => item.id === id)).filter(
   Boolean

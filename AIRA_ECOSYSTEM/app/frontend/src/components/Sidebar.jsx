@@ -26,6 +26,7 @@ import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
 import { useToast } from "./Toast.jsx";
 import { NAV_GROUPS } from "./navConfig.js";
 import BrandEmblem from "./BrandEmblem.jsx";
+import AccountProfileModal from "./AccountProfileModal.jsx";
 
 const GROUPS_KEY = "aira_sidebar_groups";
 const DEFAULT_OPEN = { main: true, admin: true, sessions: true };
@@ -158,6 +159,7 @@ export default function Sidebar({
   const [editValue, setEditValue] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   // Simpan status buka/tutup grup.
   useEffect(() => {
@@ -475,24 +477,32 @@ export default function Sidebar({
 
         {/* User panel */}
         <div className={`shrink-0 border-t border-border ${compact ? "p-2" : "p-3"}`}>
-          <div
-            className={`flex items-center gap-2.5 rounded-control bg-white/[0.04] ${
+          <button
+            type="button"
+            onClick={() => setIsProfileOpen(true)}
+            className={`w-full flex items-center gap-2.5 rounded-control bg-white/[0.04] hover:bg-white/[0.08] text-left transition ${
               compact ? "justify-center p-1.5" : "px-3 py-2"
             }`}
-            title={compact ? "Lingga" : undefined}
+            title="Kelola Profil, Langganan & Keamanan Akun"
           >
-            <div className="w-8 h-8 rounded-pill bg-accent-gradient flex items-center justify-center text-xs font-semibold shrink-0">
+            <div className="w-8 h-8 rounded-pill bg-accent-gradient flex items-center justify-center text-xs font-semibold shrink-0 text-white shadow-sm">
               L
             </div>
             {!compact && (
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-medium text-text-primary truncate">Lingga</div>
-                <div className="text-[10px] text-text-secondary truncate">AIRA Ecosystem</div>
+                <div className="text-[10px] text-text-secondary truncate">AIRA Workspace</div>
               </div>
             )}
-          </div>
+          </button>
         </div>
       </aside>
+
+      {/* Account Profile, Security & Subscription Modal */}
+      <AccountProfileModal
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+      />
     </>
   );
 }
