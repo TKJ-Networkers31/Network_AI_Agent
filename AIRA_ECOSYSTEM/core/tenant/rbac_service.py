@@ -109,6 +109,35 @@ ALL_PERMISSIONS: List[Dict[str, str]] = [
     # Audit
     {"permission_id": "audit.read", "module": "Audit", "resource": "audit", "action": "read", "description": "View platform security audit logs"},
     {"permission_id": "audit.export", "module": "Audit", "resource": "audit", "action": "export", "description": "Export platform audit records"},
+
+    # Navigation / UI Access Permissions (Phase F.2)
+    {"permission_id": "dashboard.view", "module": "Navigation", "resource": "dashboard", "action": "view", "description": "Access dashboard navigation tab"},
+    {"permission_id": "workspace.view", "module": "Navigation", "resource": "workspace", "action": "view", "description": "Access Ask AIRA conversational workspace"},
+    {"permission_id": "inventory.view", "module": "Navigation", "resource": "inventory", "action": "view", "description": "Access infrastructure and devices tab"},
+    {"permission_id": "topology.view", "module": "Navigation", "resource": "topology", "action": "view", "description": "Access network topology visualizer tab"},
+    {"permission_id": "nms.view", "module": "Navigation", "resource": "nms", "action": "view", "description": "Access NMS monitoring and telemetry tab"},
+    {"permission_id": "automations.view", "module": "Navigation", "resource": "automations", "action": "view", "description": "Access network automations and playbooks tab"},
+    {"permission_id": "files.view", "module": "Navigation", "resource": "files", "action": "view", "description": "Access workspace file management tab"},
+    {"permission_id": "models.view", "module": "Navigation", "resource": "models", "action": "view", "description": "Access AI model policies tab"},
+    {"permission_id": "logs.view", "module": "Navigation", "resource": "logs", "action": "view", "description": "Access platform activity and audit logs tab"},
+    {"permission_id": "settings.view", "module": "Navigation", "resource": "settings", "action": "view", "description": "Access settings navigation center"},
+    {"permission_id": "admin.view", "module": "Navigation", "resource": "admin", "action": "view", "description": "Access AIRA Control Plane admin site"},
+
+    # Settings & Personalization Permissions (Phase F.2)
+    {"permission_id": "settings.memory.view", "module": "Settings", "resource": "memory", "action": "view", "description": "View AI long-term memories in settings"},
+    {"permission_id": "settings.memory.update", "module": "Settings", "resource": "memory", "action": "update", "description": "Create, modify or delete AI long-term memories"},
+    {"permission_id": "settings.persona.view", "module": "Settings", "resource": "persona", "action": "view", "description": "View AI persona and instructions in settings"},
+    {"permission_id": "settings.persona.update", "module": "Settings", "resource": "persona", "action": "update", "description": "Modify AI persona, presets, and system instructions"},
+
+    # Granular Action Permissions (Phase F.2)
+    {"permission_id": "inventory.device.create", "module": "Inventory", "resource": "device", "action": "create", "description": "Register and add new network device to inventory"},
+    {"permission_id": "inventory.device.read", "module": "Inventory", "resource": "device", "action": "read", "description": "Inspect inventory device properties and specs"},
+    {"permission_id": "inventory.device.update", "module": "Inventory", "resource": "device", "action": "update", "description": "Update inventory device parameters or credentials"},
+    {"permission_id": "inventory.device.delete", "module": "Inventory", "resource": "device", "action": "delete", "description": "Decommission and remove device from inventory"},
+    {"permission_id": "inventory.device.ssh", "module": "Inventory", "resource": "device", "action": "ssh", "description": "Open live interactive SSH terminal to inventory device"},
+    {"permission_id": "topology.device.discover", "module": "Topology", "resource": "device", "action": "discover", "description": "Initiate network topology discovery scan"},
+    {"permission_id": "nms.monitoring.read", "module": "NMS", "resource": "monitoring", "action": "read", "description": "Poll and view real-time NMS telemetry and statistics"},
+    {"permission_id": "nms.monitoring.configure", "module": "NMS", "resource": "monitoring", "action": "configure", "description": "Configure NMS thresholds, alerts, and polling rate"},
 ]
 
 DEFAULT_GROUP_PERMISSIONS: Dict[str, List[str]] = {
@@ -119,19 +148,30 @@ DEFAULT_GROUP_PERMISSIONS: Dict[str, List[str]] = {
         "groups.read", "permissions.read", "permissions.assign",
         "user_activity.read", "user_activity.sessions.read", "user_activity.sessions.revoke", "user_activity.audit.read",
         "audit.read",
+        # Navigation
+        "dashboard.view", "workspace.view", "inventory.view", "topology.view", "nms.view",
+        "automations.view", "files.view", "models.view", "logs.view", "settings.view", "admin.view",
+        # Settings
+        "settings.memory.view", "settings.memory.update", "settings.persona.view", "settings.persona.update",
+        # Inventory read
+        "inventory.read", "inventory.device.read",
     ],
     "NOC": [
-        "dashboard.read",
-        "inventory.read",
-        "devices.read",
-        "topology.read",
-        "nms.read", "nms.metrics.read", "nms.alerts.read",
-        "audit.read",
+        "dashboard.read", "inventory.read", "devices.read", "topology.read",
+        "nms.read", "nms.metrics.read", "nms.alerts.read", "audit.read",
+        # Navigation
+        "dashboard.view", "workspace.view", "inventory.view", "topology.view", "nms.view", "logs.view", "settings.view",
+        # Settings
+        "settings.memory.view", "settings.persona.view",
+        # Action reads
+        "inventory.device.read", "nms.monitoring.read",
     ],
     "SOC": [
-        "dashboard.read",
-        "soc.dashboard.read", "soc.events.read", "soc.alerts.read", "soc.incidents.read", "soc.investigation.write",
-        "audit.read",
+        "dashboard.read", "soc.dashboard.read", "soc.events.read", "soc.alerts.read", "soc.incidents.read", "soc.investigation.write", "audit.read",
+        # Navigation
+        "dashboard.view", "workspace.view", "logs.view", "settings.view",
+        # Settings
+        "settings.memory.view", "settings.persona.view",
     ],
     "NETWORK_ENGINEER": [
         "dashboard.read", "settings.read",
@@ -143,15 +183,25 @@ DEFAULT_GROUP_PERMISSIONS: Dict[str, List[str]] = {
         "automation.read", "automation.create", "automation.update", "automation.execute",
         "playbooks.read", "playbooks.create", "playbooks.update", "playbooks.execute",
         "audit.read",
+        # Navigation
+        "dashboard.view", "workspace.view", "inventory.view", "topology.view", "nms.view",
+        "automations.view", "files.view", "models.view", "logs.view", "settings.view",
+        # Settings
+        "settings.memory.view", "settings.memory.update", "settings.persona.view", "settings.persona.update",
+        # Actions
+        "inventory.device.create", "inventory.device.read", "inventory.device.update",
+        "inventory.device.delete", "inventory.device.ssh", "topology.device.discover",
+        "nms.monitoring.read", "nms.monitoring.configure",
     ],
     "READ_ONLY": [
-        "dashboard.read",
-        "inventory.read",
-        "devices.read",
-        "topology.read",
-        "nms.read", "nms.metrics.read",
-        "soc.dashboard.read", "soc.events.read",
-        "audit.read",
+        "dashboard.read", "inventory.read", "devices.read", "topology.read",
+        "nms.read", "nms.metrics.read", "soc.dashboard.read", "soc.events.read", "audit.read",
+        # Navigation
+        "dashboard.view", "workspace.view", "inventory.view", "topology.view", "nms.view", "logs.view", "settings.view",
+        # Settings
+        "settings.memory.view", "settings.persona.view",
+        # Action reads
+        "inventory.device.read", "nms.monitoring.read",
     ],
 }
 
@@ -168,6 +218,17 @@ class RBACService:
 
     def get_user_groups(self, user_id: str) -> List[Dict[str, Any]]:
         """Returns all group records assigned to a user."""
+        if not user_id:
+            return []
+
+        # Resolve username to UUID if needed
+        actual_uid = user_id
+        if not str(actual_uid).startswith("usr_"):
+            with topology_transaction(self.db_path, write=False) as conn:
+                u = conn.execute("SELECT user_id FROM operational_users WHERE username = ?", (str(actual_uid),)).fetchone()
+                if u:
+                    actual_uid = u[0]
+
         with topology_transaction(self.db_path, write=False) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
@@ -178,7 +239,7 @@ class RBACService:
                 WHERE m.user_id = ?
                 ORDER BY g.name ASC
                 """,
-                (user_id,),
+                (actual_uid,),
             ).fetchall()
             return [dict(r) for r in rows]
 

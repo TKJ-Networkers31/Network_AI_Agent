@@ -16,11 +16,15 @@ export default function SelectField({ field, value, onChange, error }) {
         <option value="" disabled>
           {field.placeholder || "Pilih salah satu..."}
         </option>
-        {(field.options || []).map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
+        {(field.options || []).map((opt, idx) => {
+          const val = typeof opt === "object" && opt !== null ? opt.value : opt;
+          const lbl = typeof opt === "object" && opt !== null ? (opt.label || opt.value) : opt;
+          return (
+            <option key={val ?? idx} value={val}>
+              {lbl}
+            </option>
+          );
+        })}
       </select>
       {error && <p className="text-[11px] text-[#EF4444] mt-1">{error}</p>}
     </div>

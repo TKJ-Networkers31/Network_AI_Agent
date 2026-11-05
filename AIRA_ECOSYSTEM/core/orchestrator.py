@@ -27,7 +27,9 @@ Integrasi APCE + DIO (device resolution):
 Google Maps: tool maps_* (agents/rei/maps_tools.py) digabung di sini.
 """
 
+import json
 import logging
+import re
 import time
 from typing import Any, Optional
 
@@ -42,7 +44,11 @@ from agents.akane.registry import (
 from agents.hikari.registry import (
     HIKARI_TOOLS, HIKARI_DANGEROUS_TOOLS, HIKARI_TOOL_CATEGORY, HIKARI_TOOL_SCHEMAS,
 )
-from core.dio.parameter_resolver import DIOParameterResolver, ParameterStatus
+from core.dio.parameter_resolver import (
+    DIOParameterResolver,
+    ParameterStatus,
+    build_device_registration_schema,
+)
 
 logger = logging.getLogger("aira.orchestrator")
 
@@ -130,6 +136,47 @@ TOOL_REQUIRED_PERMISSIONS: dict[str, str] = {
 }
 
 
+def _is_device_registration_request(text: str) -> bool:
+    clean = (text or "").strip().lower()
+    add_words = ["tambah", "tambahkan", "daftarkan", "register", "add"]
+    dev_words = ["router", "device", "perangkat"]
+    has_add = any(w in clean for w in add_words)
+    has_dev = any(w in clean for w in dev_words)
+    has_inv = "inventory" in clean
+
+    # If IP is already provided, let normal execution proceed
+    has_ip = bool(re.search(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", clean))
+    return (has_add and (has_dev or has_inv)) and not has_ip
+
+
+def _parse_form_submission_values(text: str) -> Optional[dict]:
+    """Extracts values from DIO form submission message if present."""
+    if not text:
+        return None
+
+    # Format 1: DIO JSON system message ("Instruksi sistem: User baru saja mengisi form...")
+    if "Instruksi sistem: User baru saja mengisi form" in text:
+        match = re.search(r"dengan data berikut:\s*(\{.*?\})", text, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except Exception:
+                pass
+
+    # Format 2: Direct form submission marker "[Form Submission: add_device]" or "[Form Submission...]"
+    if "[Form Submission" in text:
+        data = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if ":" in line and not line.startswith("["):
+                k, v = line.split(":", 1)
+                data[k.strip()] = v.strip()
+        if data:
+            return data
+
+    return None
+
+
 class Orchestrator:
 
     def __init__(self):
@@ -145,6 +192,76 @@ class Orchestrator:
         context=None, stream: bool = False,
     ) -> dict:
         start = time.perf_counter()
+
+        # 1. Direct Schema-Driven Form Generation for Device Registration (Phase F.2)
+        if _is_device_registration_request(user_input):
+            schema = build_device_registration_schema()
+            answer = "Baik, saya akan membantu mendaftarkan perangkat. Silakan lengkapi informasi berikut melalui form interaktif:"
+            memory.add_user(user_input)
+            memory.add_message({"role": "assistant", "content": answer})
+            return {
+                "answer": answer,
+                "steps": [{
+                    "type": "tool_call",
+                    "name": "request_structured_input",
+                    "category": "interaction",
+                    "arguments": {"intent": "add_device", "title": "Register Network Device"},
+                    "success": True,
+                    "duration": 0.02,
+                    "result_preview": "Form pendaftaran perangkat ditampilkan.",
+                }],
+                "token_usage": None,
+                "session_token_usage": None,
+                "error": False,
+                "duration": round(time.perf_counter() - start, 3),
+                "interaction_schema": schema,
+            }
+
+        # 2. Form Submission Handling for Device Registration (Phase F.2)
+        sub_values = _parse_form_submission_values(user_input)
+        if sub_values and "name" in sub_values and "host" in sub_values:
+            from core.events import event_scope
+            user_id_scope = None
+            if isinstance(context, dict):
+                user_id_scope = context.get("user_id") or context.get("username")
+            elif hasattr(context, "user_id"):
+                user_id_scope = getattr(context, "user_id", None)
+            elif hasattr(context, "username"):
+                user_id_scope = getattr(context, "username", None)
+
+            with event_scope(user_id=user_id_scope or "lingga_admin"):
+                tool_res = self._execute_tool("add_device", sub_values)
+            if tool_res.get("success"):
+                dev = tool_res.get("device", {})
+                d_name = dev.get("name") or sub_values.get("name")
+                d_host = dev.get("host") or sub_values.get("host")
+                d_type = dev.get("device_type") or sub_values.get("device_type") or "mikrotik"
+                answer = f"Perangkat **{d_name}** ({d_host}, tipe: `{d_type}`) berhasil didaftarkan ke inventory."
+            else:
+                err = tool_res.get("error", "Gagal mendaftarkan perangkat.")
+                answer = f"Gagal mendaftarkan perangkat ke inventory: {err}"
+
+            memory.add_user(user_input)
+            memory.add_message({"role": "assistant", "content": answer})
+            return {
+                "answer": answer,
+                "steps": [{
+                    "type": "tool_call",
+                    "name": "add_device",
+                    "category": "inventory",
+                    "arguments": {k: ("***" if "pass" in k.lower() else v) for k, v in sub_values.items()},
+                    "success": bool(tool_res.get("success")),
+                    "duration": 0.05,
+                    "result_preview": str(tool_res),
+                }],
+                "token_usage": None,
+                "session_token_usage": None,
+                "error": not tool_res.get("success"),
+                "duration": round(time.perf_counter() - start, 3),
+                "interaction_schema": None,
+            }
+
+        # 3. Standard Planner & Reasoning Loop
         result = self.planner.run(
             user_input, memory,
             tool_executor=self._execute_tool,

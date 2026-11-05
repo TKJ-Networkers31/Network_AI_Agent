@@ -263,7 +263,36 @@ export function AuthProvider({ children }) {
     (permissionId) => {
       if (!user) return false;
       if (user.groups?.includes("SUPER_ADMIN")) return true;
-      return Array.isArray(user.permissions) && user.permissions.includes(permissionId);
+      if (!Array.isArray(user.permissions)) return false;
+
+      // Direct check
+      if (user.permissions.includes(permissionId)) return true;
+
+      // Canonical aliases mapping (Phase F.2)
+      const ALIASES = {
+        "workspace.view": ["ai_assistant.view", "dashboard.read"],
+        "ai_assistant.view": ["workspace.view", "dashboard.read"],
+        "inventory.view": ["inventory.read", "devices.read"],
+        "topology.view": ["topology.read"],
+        "nms.view": ["nms.read"],
+        "automations.view": ["playbooks.read", "automation.read"],
+        "files.view": ["workspace.view"],
+        "models.view": ["settings.read"],
+        "logs.view": ["audit.read"],
+        "settings.view": ["settings.read", "settings.write"],
+        "settings.memory.view": ["settings.view", "settings.read"],
+        "settings.memory.update": ["settings.write"],
+        "settings.persona.view": ["settings.view", "settings.read"],
+        "settings.persona.update": ["settings.write"],
+        "inventory.device.create": ["devices.create", "inventory.create"],
+        "inventory.device.read": ["devices.read", "inventory.read"],
+        "inventory.device.update": ["devices.update", "inventory.update"],
+        "inventory.device.delete": ["devices.delete", "inventory.delete"],
+        "inventory.device.ssh": ["devices.read", "devices.diagnostics"],
+      };
+
+      const equivalents = ALIASES[permissionId] || [];
+      return equivalents.some((eq) => user.permissions.includes(eq));
     },
     [user]
   );

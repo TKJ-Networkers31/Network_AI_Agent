@@ -147,6 +147,140 @@ class ParameterResolutionResult:
         }
 
 
+def build_device_registration_schema(
+    initial_values: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Generates a canonical, schema-driven device registration DIO form."""
+    vals = initial_values or {}
+    device_type_options = [
+        ChoiceOption(value="mikrotik", label="MikroTik RouterOS"),
+        ChoiceOption(value="linux", label="Linux Server"),
+        ChoiceOption(value="switch", label="Managed Switch"),
+        ChoiceOption(value="server", label="Generic Server"),
+        ChoiceOption(value="other", label="Other / Unknown"),
+    ]
+
+    missing_fields = [
+        MissingField(
+            key="name",
+            data_type="string",
+            label="Device Name",
+            required=True,
+            default=vals.get("name", ""),
+            placeholder="R1",
+            helper_text="Nama unik untuk perangkat di inventory.",
+        ),
+        MissingField(
+            key="host",
+            data_type="string",
+            label="Host / IP Address",
+            required=True,
+            default=vals.get("host", ""),
+            placeholder="192.168.88.1",
+            helper_text="Alamat IP atau hostname perangkat.",
+        ),
+        MissingField(
+            key="username",
+            data_type="string",
+            label="SSH Username",
+            required=True,
+            default=vals.get("username", "admin"),
+            placeholder="admin",
+            helper_text="Username untuk login SSH.",
+        ),
+        MissingField(
+            key="password",
+            data_type="password",
+            label="SSH Password",
+            required=False,
+            default=vals.get("password", ""),
+            placeholder="••••••••",
+            helper_text="Password SSH (opsional jika tanpa password).",
+        ),
+        MissingField(
+            key="device_type",
+            data_type="choice",
+            label="Device Type",
+            required=True,
+            default=vals.get("device_type", "mikrotik"),
+            options=device_type_options,
+            helper_text="Tipe perangkat jaringan.",
+        ),
+        MissingField(
+            key="port",
+            data_type="integer",
+            label="SSH Port",
+            required=False,
+            default=vals.get("port", 22),
+            placeholder="22",
+            helper_text="Port SSH standar (22).",
+        ),
+        MissingField(
+            key="note",
+            data_type="long_text",
+            label="Notes",
+            required=False,
+            default=vals.get("note", ""),
+            placeholder="Catatan bebas (lokasi, fungsi rak, dll)...",
+            helper_text="Catatan operasional tambahan.",
+        ),
+    ]
+
+    plan = InteractionPlan(
+        intent="add_device",
+        confidence=1.0,
+        known_data={},
+        missing_data=missing_fields,
+        priority="normal",
+    )
+
+    builder = SchemaBuilder()
+    schema = builder.build_schema(
+        plan,
+        title="Register Network Device",
+        description="Masukkan informasi perangkat yang akan ditambahkan ke inventory.",
+    )
+    schema_dict = schema.to_dict()
+    schema_dict["requested_for"] = "add_device"
+    schema_dict["form_id"] = "device_registration"
+    schema_dict["type"] = "interactive_form"
+    schema_dict["submit"] = {"label": "Register Device"}
+    schema_dict["actions"] = [
+        {"id": "cancel", "label": "Batal", "style": "ghost", "disabled": False},
+        {"id": "submit", "label": "Register Device", "style": "primary", "disabled": False},
+    ]
+
+    # Provide flat fields for any consumer reading schema.fields
+    flat_fields = []
+    for mf in missing_fields:
+        component = "text"
+        if mf.data_type in ("password", "secret"):
+            component = "password"
+        elif mf.data_type in ("integer", "number"):
+            component = "number"
+        elif mf.data_type == "choice":
+            component = "select"
+        elif mf.data_type == "long_text":
+            component = "textarea"
+
+        f_dict = {
+            "name": mf.key,
+            "id": mf.key,
+            "label": mf.label,
+            "type": component,
+            "required": mf.required,
+            "placeholder": mf.placeholder,
+            "default": mf.default,
+            "helper_text": mf.helper_text,
+        }
+        if mf.options:
+            f_dict["options"] = [{"value": o.value, "label": o.label} for o in mf.options]
+        flat_fields.append(f_dict)
+
+    schema_dict["fields"] = flat_fields
+    return schema_dict
+
+
 class DIOParameterResolver:
     """Universal Parameter Resolution & Schema Validation Engine for AIRA DIO."""
 
@@ -641,6 +775,8 @@ class DIOParameterResolver:
             error="Pilih perangkat target dari daftar inventory.",
         )
 
+
+
     def _build_dio_interaction_schema(
         self,
         tool_name: str,
@@ -649,6 +785,11 @@ class DIOParameterResolver:
         ambiguous_keys: List[str],
     ) -> Dict[str, Any]:
         """Constructs an interactive DIO form/picker for missing or ambiguous inputs."""
+        # Special-case canonical device registration to return full schema-driven form
+        if tool_name == "add_device":
+            init_vals = {k: rp.value for k, rp in parameters.items() if rp.value is not None}
+            return build_device_registration_schema(init_vals)
+
         missing_fields: List[MissingField] = []
 
         # Handle ambiguous keys with choice options

@@ -16,19 +16,19 @@ export const NAV_GROUPS = [
     id: "main",
     label: "Workspace",
     items: [
-      { id: "workspace", label: "Workspace", icon: MessageSquare },
-      { id: "infrastructure", label: "Infrastructure", icon: Network, requiredPermission: "inventory.read" },
-      { id: "automations", label: "Automations", icon: Zap, requiredPermission: "playbooks.read" },
-      { id: "files", label: "Files", icon: FolderOpen },
-      { id: "models", label: "Models", icon: Cpu, requiredPermission: "settings.read" },
-      { id: "logs", label: "Logs", icon: FileText, requiredPermission: "audit.read" },
+      { id: "workspace", label: "Workspace", icon: MessageSquare, requiredPermission: "workspace.view" },
+      { id: "infrastructure", label: "Infrastructure", icon: Network, requiredPermission: "inventory.view" },
+      { id: "automations", label: "Automations", icon: Zap, requiredPermission: "automations.view" },
+      { id: "files", label: "Files", icon: FolderOpen, requiredPermission: "files.view" },
+      { id: "models", label: "Models", icon: Cpu, requiredPermission: "models.view" },
+      { id: "logs", label: "Logs", icon: FileText, requiredPermission: "logs.view" },
     ],
   },
   {
     id: "admin",
     label: "Control Plane",
     items: [
-      { id: "admin", label: "AIRA Control Plane", icon: ShieldCheck, adminOnly: true },
+      { id: "admin", label: "AIRA Control Plane", icon: ShieldCheck, adminOnly: true, requiredPermission: "admin.view" },
     ],
   },
 ];

@@ -40,10 +40,32 @@ const CATEGORY_COLORS = {
 };
 
 export default function SettingsPage({ onOpenMenu }) {
-  const { user, role, plan, hasNetworkingPlus, isAdmin, isGuest } = useAuth();
+  const { user, role, plan, hasNetworkingPlus, isAdmin, isGuest, hasPermission } = useAuth();
   const { notify } = useToast();
 
-  const [activeTab, setActiveTab] = useState("general");
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      const stored = sessionStorage.getItem("aira_settings_tab");
+      if (stored && ["general", "memory", "persona", "security", "account", "privacy"].includes(stored)) {
+        sessionStorage.removeItem("aira_settings_tab");
+        return stored;
+      }
+    } catch {}
+    return "general";
+  });
+
+  useEffect(() => {
+    function onTabChange(e) {
+      if (typeof e.detail === "string" && ["general", "memory", "persona", "security", "account", "privacy"].includes(e.detail)) {
+        setActiveTab(e.detail);
+      }
+    }
+    window.addEventListener("aira:settings-tab", onTabChange);
+    return () => window.removeEventListener("aira:settings-tab", onTabChange);
+  }, []);
+
+  const canEditMemory = isAdmin || !hasPermission || hasPermission("settings.memory.update");
+  const canEditPersona = isAdmin || !hasPermission || hasPermission("settings.persona.update");
 
   // General & Quota State
   const [usage, setUsage] = useState(null);
@@ -177,6 +199,10 @@ export default function SettingsPage({ onOpenMenu }) {
 
   // Handle Updates
   const handleToggleMemory = async () => {
+    if (!canEditMemory) {
+      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin memperbarui memori." });
+      return;
+    }
     if (!preferences) return;
     const nextState = !preferences.memory_enabled;
     try {
@@ -194,6 +220,10 @@ export default function SettingsPage({ onOpenMenu }) {
   };
 
   const handleSaveInstructions = async () => {
+    if (!canEditPersona) {
+      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin memperbarui instruksi." });
+      return;
+    }
     setSavingInstructions(true);
     try {
       const res = await api.personalization.updatePreferences({ custom_instructions: customInstructions });
@@ -209,6 +239,10 @@ export default function SettingsPage({ onOpenMenu }) {
 
   const handleAddMemory = async (e) => {
     e.preventDefault();
+    if (!canEditMemory) {
+      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin memperbarui memori." });
+      return;
+    }
     if (!newMemoryContent.trim()) return;
     setSavingMemory(true);
     try {
@@ -231,6 +265,10 @@ export default function SettingsPage({ onOpenMenu }) {
   };
 
   const handleDeleteMemory = async (memoryId) => {
+    if (!canEditMemory) {
+      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin menghapus memori." });
+      return;
+    }
     try {
       const res = await api.personalization.deleteMemory(memoryId);
       if (res.success) {
@@ -244,6 +282,10 @@ export default function SettingsPage({ onOpenMenu }) {
   };
 
   const handleSetActivePersona = async (personaId) => {
+    if (!canEditPersona) {
+      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin memperbarui persona." });
+      return;
+    }
     try {
       const res = await api.personalization.setActivePersona(personaId);
       if (res.success) {
@@ -256,6 +298,10 @@ export default function SettingsPage({ onOpenMenu }) {
   };
 
   const handleDuplicatePersona = async (personaId, personaName) => {
+    if (!canEditPersona) {
+      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin memperbarui persona." });
+      return;
+    }
     const cloneName = prompt(`Nama untuk kloning persona '${personaName}':`, `${personaName} (Copy)`);
     if (!cloneName || !cloneName.trim()) return;
     try {
@@ -270,6 +316,10 @@ export default function SettingsPage({ onOpenMenu }) {
   };
 
   const handleDeleteCustomPersona = async (personaId) => {
+    if (!canEditPersona) {
+      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin menghapus persona." });
+      return;
+    }
     if (!confirm("Hapus custom persona ini?")) return;
     try {
       const res = await api.personalization.deletePersona(personaId);
@@ -284,6 +334,10 @@ export default function SettingsPage({ onOpenMenu }) {
 
   const handleCreateCustomPersona = async (e) => {
     e.preventDefault();
+    if (!canEditPersona) {
+      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin membuat persona." });
+      return;
+    }
     if (!newPersonaName.trim()) return;
     setSavingPersona(true);
     try {
@@ -407,14 +461,20 @@ export default function SettingsPage({ onOpenMenu }) {
   const usedTokens = balance?.tokens_used_this_period ?? 0;
   const usedPercent = Math.min(100, Math.round((usedTokens / Math.max(1, monthlyAllow)) * 100));
 
-  const TABS = [
+  const RAW_TABS = [
     { id: "general", label: "General & Autonomy", icon: Settings },
-    { id: "memory", label: "Memory Settings", icon: Brain },
-    { id: "persona", label: "Persona Settings", icon: Sparkles },
+    { id: "memory", label: "Memory Settings", icon: Brain, requiredPermission: "settings.memory.view" },
+    { id: "persona", label: "Persona Settings", icon: Sparkles, requiredPermission: "settings.persona.view" },
     { id: "security", label: "Security & Sessions", icon: Key },
     { id: "account", label: "Account Profile", icon: User },
     { id: "privacy", label: "Privacy & Data", icon: Shield },
   ];
+
+  const TABS = RAW_TABS.filter((tab) => {
+    if (!tab.requiredPermission) return true;
+    if (isAdmin) return true;
+    return hasPermission ? hasPermission(tab.requiredPermission) : true;
+  });
 
   return (
     <div className="space-y-6 pb-16">

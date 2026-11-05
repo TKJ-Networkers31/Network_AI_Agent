@@ -85,6 +85,36 @@ class UserMemoryService:
             )
             return True
 
+    def update_user_preferences(
+        self,
+        user_id: str,
+        memory_enabled: Optional[bool] = None,
+        active_persona_id: Optional[str] = None,
+        custom_instructions: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Updates user personalization preferences fields."""
+        self.get_or_create_user_preferences(user_id)
+        updates = []
+        params = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if memory_enabled is not None:
+            updates.append("memory_enabled = ?")
+            params.append(1 if memory_enabled else 0)
+        if active_persona_id is not None:
+            updates.append("active_persona_id = ?")
+            params.append(active_persona_id)
+        if custom_instructions is not None:
+            updates.append("custom_instructions = ?")
+            params.append(custom_instructions)
+        if updates:
+            updates.append("updated_at = ?")
+            params.append(now_iso)
+            params.append(user_id)
+            sql = f"UPDATE user_preferences SET {', '.join(updates)} WHERE user_id = ?"
+            with topology_transaction(self.db_path, write=True) as conn:
+                conn.execute(sql, tuple(params))
+        return self.get_or_create_user_preferences(user_id)
+
     def is_memory_enabled(self, user_id: str) -> bool:
         pref = self.get_or_create_user_preferences(user_id)
         return bool(pref.get("memory_enabled", 1))

@@ -248,16 +248,64 @@ export default function AccountProfileModal({ isOpen, onClose }) {
             </div>
           )}
 
-          {/* 3. PREFERENCES TAB */}
+          {/* 3. PREFERENCES TAB (Phase F.2 - Real Navigation to Settings) */}
           {activeTab === "preferences" && (
-            <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-3">
-              <h4 className="font-semibold text-white flex items-center gap-2">
-                <Sliders size={14} className="text-cyan-400" />
-                Preferensi Personalisasi & Memory
-              </h4>
-              <p className="text-neutral-400 text-xs leading-relaxed">
-                Persona dan interaksi memori Anda disimpan secara terisolasi per akun. Anda dapat mengkonfigurasinya melalui pengaturan Personalization.
-              </p>
+            <div className="space-y-4">
+              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-2">
+                <h4 className="font-semibold text-white flex items-center gap-2 text-sm">
+                  <Sliders size={16} className="text-cyan-400" />
+                  Preferensi & Personalisasi AI
+                </h4>
+                <p className="text-neutral-400 text-xs leading-relaxed">
+                  Persona respons dan memori jangka panjang AI Anda disimpan dan diisolasi secara mandiri pada tingkat akun.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try { sessionStorage.setItem("aira_settings_tab", "memory"); } catch {}
+                    window.dispatchEvent(new CustomEvent("aira:navigate", { detail: "settings" }));
+                    window.dispatchEvent(new CustomEvent("aira:settings-tab", { detail: "memory" }));
+                    onClose();
+                  }}
+                  className="p-4 rounded-xl bg-black/40 hover:bg-cyan-500/10 border border-white/10 hover:border-cyan-500/40 text-left transition group space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-white group-hover:text-cyan-300 transition">Memori AI</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 font-mono">Isolated</span>
+                  </div>
+                  <p className="text-[11px] text-neutral-400 leading-snug">
+                    Kelola fakta teknis, preferensi IP, dan batasan operasional yang diingat AIRA.
+                  </p>
+                  <span className="text-[11px] text-cyan-400 font-medium inline-flex items-center gap-1 group-hover:underline">
+                    Buka Tab Memory &rarr;
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    try { sessionStorage.setItem("aira_settings_tab", "persona"); } catch {}
+                    window.dispatchEvent(new CustomEvent("aira:navigate", { detail: "settings" }));
+                    window.dispatchEvent(new CustomEvent("aira:settings-tab", { detail: "persona" }));
+                    onClose();
+                  }}
+                  className="p-4 rounded-xl bg-black/40 hover:bg-purple-500/10 border border-white/10 hover:border-purple-500/40 text-left transition group space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-white group-hover:text-purple-300 transition">Persona AI</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 font-mono">Customizable</span>
+                  </div>
+                  <p className="text-[11px] text-neutral-400 leading-snug">
+                    Atur gaya bahasa, instruksi khusus, dan preset peran AIRA untuk akun Anda.
+                  </p>
+                  <span className="text-[11px] text-purple-400 font-medium inline-flex items-center gap-1 group-hover:underline">
+                    Buka Tab Persona &rarr;
+                  </span>
+                </button>
+              </div>
             </div>
           )}
         </div>

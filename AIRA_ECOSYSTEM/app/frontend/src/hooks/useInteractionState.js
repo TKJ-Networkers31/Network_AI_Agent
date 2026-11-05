@@ -2,9 +2,14 @@ import { useCallback, useMemo, useState } from "react";
 
 function flattenFields(schema) {
   const fields = [];
+  if (Array.isArray(schema?.fields)) {
+    schema.fields.forEach((field) => {
+      fields.push({ ...field, id: field.id || field.name });
+    });
+  }
   (schema?.sections || []).forEach((section) => {
     (section.fields || []).forEach((field) => {
-      fields.push(field);
+      fields.push({ ...field, id: field.id || field.name });
     });
   });
   return fields;
@@ -59,14 +64,15 @@ function validateField(field, value) {
 function defaultValues(schema) {
   const values = {};
   flattenFields(schema).forEach((field) => {
+    const fid = field.id || field.name;
     if (field.default !== undefined) {
-      values[field.id] = field.default;
+      values[fid] = field.default;
     } else if (field.type === "checkbox" || field.type === "switch") {
-      values[field.id] = field.options ? [] : false;
+      values[fid] = field.options ? [] : false;
     } else if (field.type === "table") {
-      values[field.id] = field.rows || [];
+      values[fid] = field.rows || [];
     } else {
-      values[field.id] = "";
+      values[fid] = "";
     }
   });
   return values;

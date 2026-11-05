@@ -1009,7 +1009,7 @@ class IdentityManager:
                 return None
             if "account_enabled" in row.keys() and not bool(row["account_enabled"]):
                 return None
-            if not row["is_internal"] and row["tenant_status"] not in (TenantStatus.ACTIVE.value, TenantStatus.MAINTENANCE.value):
+            if row["tenant_id"] and row["tenant_status"] not in (TenantStatus.ACTIVE.value, TenantStatus.MAINTENANCE.value):
                 return None
 
             user_id = row["user_id"]

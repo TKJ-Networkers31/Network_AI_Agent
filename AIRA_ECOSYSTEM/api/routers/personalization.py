@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from core.tenant.manager import IdentityManager
 from core.tenant.models import TenantContext
+from core.tenant.auth_deps import get_current_authenticated_user, require_permission
 from core.tenant.memory_service import UserMemoryService
 from core.tenant.persona_service import UserPersonaService
 from core import chat_sessions as session_store
@@ -27,7 +28,9 @@ _memory_svc = UserMemoryService()
 _persona_svc = UserPersonaService()
 
 
-def get_current_user_context(authorization: Optional[str] = Header(None)) -> TenantContext:
+get_current_user_context = get_current_authenticated_user
+
+def _legacy_get_current_user_context(authorization: Optional[str] = Header(None)) -> TenantContext:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -109,7 +112,7 @@ class DuplicatePersonaRequest(BaseModel):
 
 @router.get("/memory/summary")
 @router.get("/memories/summary")
-def get_memory_summary(ctx: TenantContext = Depends(get_current_user_context)):
+def get_memory_summary(ctx: TenantContext = Depends(require_permission("settings.memory.view"))):
     """Provides categorized memory metrics for the current user."""
     return _memory_svc.get_memory_summary(ctx.user_id)
 
@@ -120,7 +123,7 @@ def list_memories(
     category: Optional[str] = Query(None),
     query: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
-    ctx: TenantContext = Depends(get_current_user_context),
+    ctx: TenantContext = Depends(require_permission("settings.memory.view")),
 ):
     """Lists isolated memories belonging to the authenticated user."""
     memories = _memory_svc.list_memories(ctx.user_id, category=category, query=query, limit=limit)
@@ -129,7 +132,7 @@ def list_memories(
 
 @router.post("/memory")
 @router.post("/memories")
-def add_memory(payload: MemoryCreateRequest, ctx: TenantContext = Depends(get_current_user_context)):
+def add_memory(payload: MemoryCreateRequest, ctx: TenantContext = Depends(require_permission("settings.memory.update"))):
     """Creates a new isolated memory entry."""
     imp = float(payload.importance)
     if imp > 1.0:
@@ -154,19 +157,32 @@ def get_preferences(ctx: TenantContext = Depends(get_current_user_context)):
 
 @router.put("/preferences")
 @router.patch("/preferences")
-def update_preferences(payload: PreferencesUpdateRequest, ctx: TenantContext = Depends(get_current_user_context)):
+def update_preferences(payload: PreferencesUpdateRequest, ctx: TenantContext = Depends(get_current_authenticated_user)):
     """Updates user personalization preferences."""
     if payload.memory_enabled is not None:
+        if not ctx.has_permission("settings.memory.update"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "PERMISSION_DENIED", "message": "Akses ditolak: Izin 'settings.memory.update' diperlukan."},
+            )
         _memory_svc.set_memory_enabled(ctx.user_id, payload.memory_enabled)
-    if payload.active_persona_id is not None:
-        _persona_svc.set_active_persona(ctx.user_id, payload.active_persona_id)
+    if payload.active_persona_id is not None or payload.custom_instructions is not None:
+        if not ctx.has_permission("settings.persona.update"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "PERMISSION_DENIED", "message": "Akses ditolak: Izin 'settings.persona.update' diperlukan."},
+            )
+        if payload.active_persona_id is not None:
+            _persona_svc.set_active_persona(ctx.user_id, payload.active_persona_id)
+        if payload.custom_instructions is not None:
+            _memory_svc.update_user_preferences(ctx.user_id, custom_instructions=payload.custom_instructions)
     prefs = _memory_svc.get_or_create_user_preferences(ctx.user_id)
     return {"success": True, "preferences": prefs}
 
 
 @router.post("/memory/toggle")
 @router.post("/memories/toggle")
-def toggle_memory(payload: MemoryToggleRequest, ctx: TenantContext = Depends(get_current_user_context)):
+def toggle_memory(payload: MemoryToggleRequest, ctx: TenantContext = Depends(require_permission("settings.memory.update"))):
     """Enables or disables long-term AI memory for the user."""
     _memory_svc.set_memory_enabled(ctx.user_id, payload.enabled)
     return {"success": True, "memory_enabled": payload.enabled}
@@ -174,7 +190,7 @@ def toggle_memory(payload: MemoryToggleRequest, ctx: TenantContext = Depends(get
 
 @router.get("/memory/{memory_id}")
 @router.get("/memories/{memory_id}")
-def get_memory(memory_id: str, ctx: TenantContext = Depends(get_current_user_context)):
+def get_memory(memory_id: str, ctx: TenantContext = Depends(require_permission("settings.memory.view"))):
     """Retrieves a single memory verifying user ownership."""
     mem = _memory_svc.get_memory(memory_id, ctx.user_id)
     if not mem:
@@ -186,7 +202,7 @@ def get_memory(memory_id: str, ctx: TenantContext = Depends(get_current_user_con
 @router.patch("/memories/{memory_id}")
 @router.put("/memory/{memory_id}")
 @router.put("/memories/{memory_id}")
-def update_memory(memory_id: str, payload: MemoryUpdateRequest, ctx: TenantContext = Depends(get_current_user_context)):
+def update_memory(memory_id: str, payload: MemoryUpdateRequest, ctx: TenantContext = Depends(require_permission("settings.memory.update"))):
     """Updates memory content or classification verifying user ownership."""
     updated = _memory_svc.update_memory(
         memory_id=memory_id,
@@ -203,7 +219,7 @@ def update_memory(memory_id: str, payload: MemoryUpdateRequest, ctx: TenantConte
 
 @router.delete("/memory/{memory_id}")
 @router.delete("/memories/{memory_id}")
-def delete_memory(memory_id: str, ctx: TenantContext = Depends(get_current_user_context)):
+def delete_memory(memory_id: str, ctx: TenantContext = Depends(require_permission("settings.memory.update"))):
     """Deletes an individual memory verifying user ownership."""
     ok = _memory_svc.delete_memory(memory_id, ctx.user_id)
     if not ok:
@@ -213,7 +229,7 @@ def delete_memory(memory_id: str, ctx: TenantContext = Depends(get_current_user_
 
 @router.delete("/memory")
 @router.delete("/memories")
-def clear_all_memories(ctx: TenantContext = Depends(get_current_user_context)):
+def clear_all_memories(ctx: TenantContext = Depends(require_permission("settings.memory.update"))):
     """Clears all memories belonging to the user."""
     count = _memory_svc.clear_all_memories(ctx.user_id)
     return {"success": True, "deleted_count": count, "message": f"{count} memori berhasil dibersihkan."}
@@ -225,14 +241,14 @@ def clear_all_memories(ctx: TenantContext = Depends(get_current_user_context)):
 
 @router.get("/persona")
 @router.get("/personas")
-def list_personas(ctx: TenantContext = Depends(get_current_user_context)):
+def list_personas(ctx: TenantContext = Depends(require_permission("settings.persona.view"))):
     """Lists built-in system presets and the user's custom personas."""
     return _persona_svc.list_personas_for_user(ctx.user_id)
 
 
 @router.get("/persona/active")
 @router.get("/personas/active")
-def get_active_persona(ctx: TenantContext = Depends(get_current_user_context)):
+def get_active_persona(ctx: TenantContext = Depends(require_permission("settings.persona.view"))):
     """Retrieves the active persona for the user."""
     persona = _persona_svc.get_active_persona(ctx.user_id)
     preview = _persona_svc.preview_persona_prompt(persona)
@@ -241,7 +257,7 @@ def get_active_persona(ctx: TenantContext = Depends(get_current_user_context)):
 
 @router.post("/persona/active")
 @router.post("/personas/active")
-def set_active_persona(payload: ActivePersonaRequest, ctx: TenantContext = Depends(get_current_user_context)):
+def set_active_persona(payload: ActivePersonaRequest, ctx: TenantContext = Depends(require_permission("settings.persona.update"))):
     """Switches the active persona for the user."""
     try:
         _persona_svc.set_active_persona(ctx.user_id, payload.persona_id)
@@ -252,7 +268,7 @@ def set_active_persona(payload: ActivePersonaRequest, ctx: TenantContext = Depen
 
 @router.post("/persona")
 @router.post("/personas")
-def create_custom_persona(payload: PersonaCreateRequest, ctx: TenantContext = Depends(get_current_user_context)):
+def create_custom_persona(payload: PersonaCreateRequest, ctx: TenantContext = Depends(require_permission("settings.persona.update"))):
     """Creates a new custom persona owned exclusively by the user."""
     persona = _persona_svc.create_custom_persona(
         user_id=ctx.user_id,
@@ -269,7 +285,7 @@ def create_custom_persona(payload: PersonaCreateRequest, ctx: TenantContext = De
 
 @router.get("/persona/{persona_id}")
 @router.get("/personas/{persona_id}")
-def get_persona(persona_id: str, ctx: TenantContext = Depends(get_current_user_context)):
+def get_persona(persona_id: str, ctx: TenantContext = Depends(require_permission("settings.persona.view"))):
     """Retrieves persona details and prompt preview."""
     persona = _persona_svc.get_persona(persona_id, ctx.user_id)
     if not persona:
@@ -280,7 +296,7 @@ def get_persona(persona_id: str, ctx: TenantContext = Depends(get_current_user_c
 
 @router.get("/persona/{persona_id}/preview")
 @router.get("/personas/{persona_id}/preview")
-def preview_persona(persona_id: str, ctx: TenantContext = Depends(get_current_user_context)):
+def preview_persona(persona_id: str, ctx: TenantContext = Depends(require_permission("settings.persona.view"))):
     """Retrieves prompt preview formatted for system prompt injection."""
     persona = _persona_svc.get_persona(persona_id, ctx.user_id)
     if not persona:
@@ -295,7 +311,7 @@ def duplicate_persona(
     persona_id: str,
     payload: Optional[DuplicatePersonaRequest] = None,
     new_name: Optional[str] = Query(None),
-    ctx: TenantContext = Depends(get_current_user_context),
+    ctx: TenantContext = Depends(require_permission("settings.memory.view")),
 ):
     """Duplicates an existing preset or custom persona into a user custom persona."""
     target_name = None
@@ -314,7 +330,7 @@ def duplicate_persona(
 @router.patch("/personas/{persona_id}")
 @router.put("/persona/{persona_id}")
 @router.put("/personas/{persona_id}")
-def update_custom_persona(persona_id: str, payload: PersonaUpdateRequest, ctx: TenantContext = Depends(get_current_user_context)):
+def update_custom_persona(persona_id: str, payload: PersonaUpdateRequest, ctx: TenantContext = Depends(require_permission("settings.persona.update"))):
     """Updates a user custom persona. System presets cannot be edited."""
     try:
         updated = _persona_svc.update_custom_persona(
@@ -337,7 +353,7 @@ def update_custom_persona(persona_id: str, payload: PersonaUpdateRequest, ctx: T
 
 @router.delete("/persona/{persona_id}")
 @router.delete("/personas/{persona_id}")
-def delete_custom_persona(persona_id: str, ctx: TenantContext = Depends(get_current_user_context)):
+def delete_custom_persona(persona_id: str, ctx: TenantContext = Depends(require_permission("settings.persona.update"))):
     """Deletes a custom persona. System presets cannot be deleted."""
     try:
         ok = _persona_svc.delete_custom_persona(persona_id, ctx.user_id)
@@ -441,7 +457,7 @@ def delete_all_custom_personas(ctx: TenantContext = Depends(get_current_user_con
 @router.post("/data/account-deletion-request")
 def request_account_deletion(
     payload: Optional[Dict[str, Any]] = None,
-    ctx: TenantContext = Depends(get_current_user_context),
+    ctx: TenantContext = Depends(require_permission("settings.memory.view")),
 ):
     """Initiates an audited request for permanent account deletion."""
     if ctx.username == "lingga_admin" or "PLATFORM_OWNER" in (ctx.roles or []):

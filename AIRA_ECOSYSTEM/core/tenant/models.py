@@ -471,6 +471,63 @@ class UserSession:
         }
 
 
+PERMISSION_ALIASES: Dict[str, Set[str]] = {
+    # Navigation / View
+    "workspace.view": {"ai_assistant.view", "workspace.view"},
+    "inventory.view": {"inventory.read", "devices.read", "inventory.device.read", "inventory.view"},
+    "topology.view": {"topology.read", "topology.view"},
+    "nms.view": {"nms.read", "nms.view"},
+    "automations.view": {"playbooks.read", "automations.view"},
+    "files.view": {"files.read", "files.view"},
+    "models.view": {"models.read", "models.view"},
+    "logs.view": {"logs.view", "audit.read", "logs.read"},
+    "settings.view": {"settings.view"},
+    "admin.view": {"admin.view", "users.read"},
+
+    # Inventory / Device Actions
+    "inventory.device.read": {"inventory.read", "devices.read", "inventory.device.read", "inventory.view"},
+    "inventory.read": {"inventory.read", "devices.read", "inventory.device.read", "inventory.view"},
+    "devices.read": {"inventory.read", "devices.read", "inventory.device.read", "inventory.view"},
+
+    "inventory.device.create": {"inventory.create", "devices.create", "inventory.device.create"},
+    "inventory.create": {"inventory.create", "devices.create", "inventory.device.create"},
+    "devices.create": {"inventory.create", "devices.create", "inventory.device.create"},
+
+    "inventory.device.update": {"inventory.update", "devices.update", "inventory.device.update"},
+    "inventory.update": {"inventory.update", "devices.update", "inventory.device.update"},
+    "devices.update": {"inventory.update", "devices.update", "inventory.device.update"},
+
+    "inventory.device.delete": {"inventory.delete", "devices.delete", "inventory.device.delete"},
+    "inventory.delete": {"inventory.delete", "devices.delete", "inventory.device.delete"},
+    "devices.delete": {"inventory.delete", "devices.delete", "inventory.device.delete"},
+
+    "inventory.device.ssh": {"inventory.device.ssh", "devices.ssh"},
+    "devices.ssh": {"inventory.device.ssh", "devices.ssh"},
+
+    # Topology & NMS Actions
+    "topology.device.discover": {"topology.discover", "topology.device.discover"},
+    "topology.discover": {"topology.discover", "topology.device.discover"},
+    "nms.monitoring.read": {"nms.read", "nms.monitoring.read", "nms.view"},
+    "nms.read": {"nms.read", "nms.monitoring.read", "nms.view"},
+    "nms.monitoring.configure": {"nms.configure", "nms.monitoring.configure"},
+    "nms.configure": {"nms.configure", "nms.monitoring.configure"},
+
+    # Audit & Logs
+    "audit.read": {"logs.view", "audit.read", "logs.read"},
+
+    # Settings: Memory & Persona
+    "settings.memory.view": {"settings.memory.view", "memory.read", "settings.view"},
+    "memory.read": {"settings.memory.view", "memory.read", "settings.view"},
+    "settings.memory.update": {"settings.memory.update", "memory.write"},
+    "memory.write": {"settings.memory.update", "memory.write"},
+
+    "settings.persona.view": {"settings.persona.view", "persona.read", "settings.view"},
+    "persona.read": {"settings.persona.view", "persona.read", "settings.view"},
+    "settings.persona.update": {"settings.persona.update", "persona.write"},
+    "persona.write": {"settings.persona.update", "persona.write"},
+}
+
+
 @dataclass
 class TenantContext:
     """
@@ -489,7 +546,12 @@ class TenantContext:
 
     def has_permission(self, perm: Any) -> bool:
         perm_str = perm.value if hasattr(perm, "value") else str(perm)
-        return perm_str in self.permissions or "SUPER_ADMIN" in self.groups or "PLATFORM_OWNER" in self.roles
+        if "SUPER_ADMIN" in self.groups or "PLATFORM_OWNER" in self.roles or "PLATFORM_SUPER_ADMIN" in self.roles:
+            return True
+        if perm_str in self.permissions:
+            return True
+        aliases = PERMISSION_ALIASES.get(perm_str, set())
+        return bool(aliases & set(self.permissions))
 
     def can_access_tenant(self, target_tenant_id: str) -> bool:
         """NOC operators with global access can access any tenant; customer users only access their own."""

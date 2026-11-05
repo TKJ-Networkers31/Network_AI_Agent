@@ -163,11 +163,54 @@ class PageErrorBoundary extends Component {
   }
 }
 
+// Tampilan Access Denied yang konsisten untuk Route Guarding (Phase F.2)
+function AccessDeniedView({ requiredPermission, onBackToWorkspace }) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-neutral-400 select-none animate-in fade-in duration-200">
+      <div className="w-16 h-16 mb-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shadow-[0_0_24px_rgba(244,63,94,0.15)]">
+        <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+        </svg>
+      </div>
+      <h2 className="text-lg font-bold text-white mb-2">Akses Halaman Ditolak (403 Forbidden)</h2>
+      <p className="text-xs text-neutral-400 max-w-md leading-relaxed mb-4">
+        Akun Anda tidak memiliki izin navigasi <span className="font-mono text-cyan-400 px-1.5 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20">{requiredPermission}</span> yang diperlukan untuk mengakses modul ini. Silakan hubungi administrator organisasi Anda.
+      </p>
+      <button
+        type="button"
+        onClick={onBackToWorkspace}
+        className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-md transition"
+      >
+        Kembali ke Workspace
+      </button>
+    </div>
+  );
+}
+
+const PAGE_PERMISSIONS = {
+  workspace: "workspace.view",
+  chat: "workspace.view",
+  infrastructure: "inventory.view",
+  automations: "automations.view",
+  files: "files.view",
+  models: "models.view",
+  logs: "logs.view",
+  settings: "settings.view",
+  admin: "admin.view",
+  topology: "topology.view",
+  nms: "nms.view",
+  devices: "inventory.view",
+};
+
 function AppShell() {
-  const { isAdmin, hasNetworkingPlus } = useAuth();
+  const { isAdmin, hasPermission } = useAuth();
   const [active, setActive] = useState("workspace");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readCollapsed);
+
+  const reqPerm = PAGE_PERMISSIONS[active];
+  const isDenied = reqPerm && !isAdmin && hasPermission && !hasPermission(reqPerm);
   const isBlockedAdmin = active === "admin" && !isAdmin;
   const Page = isBlockedAdmin ? AdminLoginPage : (PAGES[active] || ChatPage);
   const isFixedHeight = FIXED_HEIGHT_PAGES.has(active);
@@ -234,9 +277,16 @@ function AppShell() {
                     }`}
                   >
                     <PageErrorBoundary key={active}>
-                      <Suspense fallback={<PageLoadingFallback label={`Memuat ${active}...`} />}>
-                        <Page onOpenMenu={() => setDrawerOpen(true)} />
-                      </Suspense>
+                      {isDenied ? (
+                        <AccessDeniedView
+                          requiredPermission={reqPerm}
+                          onBackToWorkspace={() => setActive("workspace")}
+                        />
+                      ) : (
+                        <Suspense fallback={<PageLoadingFallback label={`Memuat ${active}...`} />}>
+                          <Page onOpenMenu={() => setDrawerOpen(true)} />
+                        </Suspense>
+                      )}
                     </PageErrorBoundary>
                   </div>
                 </div>
