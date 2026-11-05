@@ -60,3 +60,54 @@ def update_setting(key: str, payload: SettingUpdateRequest):
         raise HTTPException(status_code=400, detail=result.get("error"))
 
     return result
+
+
+@router.get("/approvals/preferences")
+def get_approval_preferences(tenant_id: str = "tenant_default"):
+    from core.operations.approval_engine import get_approval_engine
+    engine = get_approval_engine()
+    prefs = engine.get_preferences(tenant_id)
+    return {"success": True, "preferences": prefs.__dict__}
+
+
+class UpdateApprovalPreferencesIn(BaseModel):
+    mode: str = "ALWAYS_ASK"
+    auto_approve_categories: list[str] = ["A"]
+    allowed_change_windows: list[str] = []
+
+
+@router.put("/approvals/preferences")
+def update_approval_preferences(body: UpdateApprovalPreferencesIn, tenant_id: str = "tenant_default"):
+    from core.operations.approval_engine import get_approval_engine
+    engine = get_approval_engine()
+    engine.set_preferences(
+        tenant_id=tenant_id,
+        mode=body.mode,
+        auto_approve_categories=body.auto_approve_categories,
+        allowed_change_windows=body.allowed_change_windows,
+    )
+    return {"success": True, "message": "Approval preferences updated successfully."}
+
+
+@router.get("/entitlements/summary")
+def get_entitlements_summary(tenant_id: str = "tenant_default"):
+    from core.tenant.entitlements import get_entitlement_manager
+    mgr = get_entitlement_manager()
+    plan = mgr.get_tenant_plan(tenant_id)
+    bal = mgr.get_token_balance(tenant_id)
+    return {
+        "success": True,
+        "entitlements": {
+            "tier": plan.tier.value,
+            "has_networking_plus": plan.has_networking_plus,
+            "monthly_allowance": plan.monthly_token_allowance,
+        },
+        "balance": {
+            "current_balance": bal.current_balance,
+            "monthly_allowance": bal.monthly_allowance,
+            "tokens_used_this_period": bal.tokens_used_this_period,
+            "rollover_tokens": bal.rollover_tokens,
+            "period_ends_at": bal.period_ends_at,
+        },
+    }
+

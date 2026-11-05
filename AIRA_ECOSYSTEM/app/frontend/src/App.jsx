@@ -46,6 +46,9 @@ function lazyWithRetry(componentImport) {
 
 // Secondary pages loaded on demand via dynamic imports
 const WorkspacePage = lazyWithRetry(() => import("./pages/WorkspacePage.jsx"));
+const InfrastructurePage = lazyWithRetry(() => import("./pages/InfrastructurePage.jsx"));
+const AutomationsPage = lazyWithRetry(() => import("./pages/AutomationsPage.jsx"));
+const AdminPlatformPage = lazyWithRetry(() => import("./pages/AdminPlatformPage.jsx"));
 const DevicesPage = lazyWithRetry(() => import("./pages/DevicesPage.jsx"));
 const TopologyPage = lazyWithRetry(() => import("./pages/TopologyPage.jsx"));
 const NmsPage = lazyWithRetry(() => import("./pages/NmsPage.jsx"));
@@ -62,26 +65,32 @@ const SettingsPage = lazyWithRetry(() => import("./pages/SettingsPage.jsx"));
 const LogsPage = lazyWithRetry(() => import("./pages/LogsPage.jsx"));
 
 const PAGES = {
+  workspace: ChatPage,
   chat: ChatPage,
-  workspace: WorkspacePage,
+  infrastructure: InfrastructurePage,
+  automations: AutomationsPage,
+  files: WorkspacePage,
+  settings: SettingsPage,
+  admin: AdminPlatformPage,
+
+  // Legacy mappings for backward compatibility & voice commands:
   topology: TopologyPage,
   nms: NmsPage,
+  devices: DevicesPage,
   operations: OperationsPage,
   gateways: GatewaysPage,
   decisions: DecisionsPage,
   portal: CustomerPortalPage,
-  devices: DevicesPage,
   intelligence: NetworkIntelligencePage,
   akane: AkaneWorkspace,
   models: ModelsPage,
   persona: PersonaPage,
   memory: MemoryPage,
   logs: LogsPage,
-  settings: SettingsPage,
 };
 
 // Halaman yang mengatur scroll-nya sendiri di dalam (butuh tinggi tetap).
-const FIXED_HEIGHT_PAGES = new Set(["chat", "workspace", "logs", "topology", "nms", "operations", "gateways"]);
+const FIXED_HEIGHT_PAGES = new Set(["chat", "workspace", "files", "logs", "topology", "nms", "operations", "gateways", "infrastructure", "automations", "admin"]);
 
 const SIDEBAR_KEY = "aira_sidebar_collapsed";
 
@@ -149,7 +158,7 @@ class PageErrorBoundary extends Component {
 }
 
 export default function App() {
-  const [active, setActive] = useState("chat");
+  const [active, setActive] = useState("workspace");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const Page = PAGES[active] || ChatPage;
@@ -199,7 +208,7 @@ export default function App() {
   return (
     <ToastProvider>
       <SessionsProvider>
-        <ChatRuntimeProvider isOnChatPage={active === "chat"}>
+        <ChatRuntimeProvider isOnChatPage={active === "chat" || active === "workspace"}>
           <AccessLocationReporter />
           <VoiceCompanionHost onNavigate={setActive} />
           <BootGate>

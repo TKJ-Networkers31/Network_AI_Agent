@@ -103,6 +103,11 @@ from api.routers import portal
 app.include_router(portal.router)                # Customer Self-Service Portal (Networking VIII / Phase D)
 app.include_router(ws.router)
 
+from api.routers import auth, admin_platform, automations
+app.include_router(auth.router)
+app.include_router(admin_platform.router)
+app.include_router(automations.router)
+
 
 def _warm_host_location() -> None:
     try:
@@ -283,6 +288,26 @@ def _shutdown_voice_service():
 @app.on_event("shutdown")
 def _shutdown_connections():
     get_connection_manager().shutdown()
+
+@app.on_event("startup")
+def _startup_automation_engine():
+    try:
+        from core.scheduler import get_automation_engine
+        get_automation_engine().start_scheduler_loop()
+        logger.info("Automation engine scheduler loop started successfully on startup.")
+    except Exception as exc:
+        logger.error("Failed to start automation engine on startup: %s", exc)
+
+
+@app.on_event("shutdown")
+def _shutdown_automation_engine():
+    try:
+        from core.scheduler import get_automation_engine
+        get_automation_engine().stop_scheduler_loop()
+        logger.info("Automation engine scheduler loop stopped.")
+    except Exception as exc:
+        logger.error("Error stopping automation engine on shutdown: %s", exc)
+
 
 
 @app.get("/health")

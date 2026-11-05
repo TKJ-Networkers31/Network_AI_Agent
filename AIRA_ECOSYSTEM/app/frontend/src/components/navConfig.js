@@ -1,66 +1,34 @@
 // src/components/navConfig.js
-// Sumber tunggal struktur menu (dipakai Sidebar.jsx & MobileNav.jsx).
-// Tambah halaman baru: tambahkan item di grup yang sesuai + daftarkan
-// di PAGES pada App.jsx.
+// Struktur menu navigasi terpadu AIRA OS (dipakai Sidebar.jsx & MobileNav.jsx).
+// Minimalist AI Workspace: 5 tujuan utama pelanggan + 1 area administrasi platform terpisah.
 
 import {
   Activity,
-  MessageSquare,
   FolderOpen,
-  Server,
-  Cable,
+  MessageSquare,
   Network,
-  Cpu,
-  Sparkles,
-  Brain,
-  ScrollText,
   Settings,
   ShieldCheck,
-  Compass,
-  Radio,
-  CheckSquare,
-  Building,
+  Zap,
 } from "lucide-react";
 
 export const NAV_GROUPS = [
   {
     id: "main",
-    label: "Utama",
+    label: "Workspace",
     items: [
-      { id: "chat", label: "Chat", icon: MessageSquare },
-      { id: "workspace", label: "Workspace", icon: FolderOpen },
-    ],
-  },
-  {
-    id: "network",
-    label: "Jaringan",
-    items: [
-      { id: "topology", label: "Topology", icon: Network },
-      { id: "nms", label: "Monitoring NMS", icon: Activity },
-      { id: "operations", label: "Operations Center", icon: Compass },
-      { id: "gateways", label: "Edge Gateways", icon: Radio },
-      { id: "decisions", label: "Decision Center", icon: CheckSquare },
-      { id: "portal", label: "Customer Portal", icon: Building },
-      { id: "devices", label: "Devices", icon: Server },
-      { id: "intelligence", label: "Investigasi & Planning", icon: ShieldCheck },
-      { id: "akane", label: "AKANE", icon: Cable },
-    ],
-  },
-  {
-    id: "ai",
-    label: "AI",
-    items: [
-      { id: "models", label: "Models", icon: Cpu },
-      { id: "persona", label: "Persona", icon: Sparkles },
-      { id: "memory", label: "Memory", icon: Brain },
-    ],
-  },
-  {
-    id: "system",
-    label: "Sistem",
-    items: [
-      { id: "logs", label: "Logs", icon: ScrollText },
+      { id: "workspace", label: "Workspace", icon: MessageSquare },
+      { id: "infrastructure", label: "Infrastructure", icon: Network },
+      { id: "automations", label: "Automations", icon: Zap },
+      { id: "files", label: "Files", icon: FolderOpen },
       { id: "settings", label: "Settings", icon: Settings },
+    ],
+  },
+  {
+    id: "admin",
+    label: "Platform Admin",
+    items: [
+      { id: "admin", label: "Admin Platform", icon: ShieldCheck },
     ],
   },
 ];

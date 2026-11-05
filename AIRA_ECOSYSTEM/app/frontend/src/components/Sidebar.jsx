@@ -28,7 +28,7 @@ import { NAV_GROUPS } from "./navConfig.js";
 import BrandEmblem from "./BrandEmblem.jsx";
 
 const GROUPS_KEY = "aira_sidebar_groups";
-const DEFAULT_OPEN = { main: true, network: true, ai: true, system: false, sessions: true };
+const DEFAULT_OPEN = { main: true, admin: true, sessions: true };
 
 function loadOpenGroups() {
   try {
@@ -188,11 +188,11 @@ export default function Sidebar({
   }
   function handleNewChat() {
     startNewChat();
-    goToNav("chat");
+    goToNav("workspace");
   }
   function handleSelectSession(id) {
     setActiveId(id);
-    goToNav("chat");
+    goToNav("workspace");
   }
   function startEdit(session) {
     setEditingId(session.id);
@@ -333,9 +333,9 @@ export default function Sidebar({
                     <NavButton
                       key={item.id}
                       item={item}
-                      active={active === item.id}
+                      active={active === item.id || (item.id === "workspace" && active === "chat")}
                       compact={compact}
-                      dot={compact && item.id === "chat" && hasUnread}
+                      dot={compact && (item.id === "workspace" || item.id === "chat") && hasUnread}
                       onClick={() => goToNav(item.id)}
                     />
                   ))}
@@ -357,7 +357,7 @@ export default function Sidebar({
               <Collapsible open={openGroups.sessions}>
                 <div className="space-y-1 pb-1">
                   {sessions.map((s) => {
-                    const isRowActive = s.id === activeId && active === "chat";
+                    const isRowActive = s.id === activeId && (active === "chat" || active === "workspace");
                     const isEditing = editingId === s.id;
                     const isConfirming = confirmDeleteId === s.id;
                     const isUnread = unreadSessionIds.has(s.id);

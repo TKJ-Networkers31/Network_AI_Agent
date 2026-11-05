@@ -401,8 +401,12 @@ function ChatPageInner({ onOpenMenu }) {
     async function handleSelectionAction(actionId, selection) {
     if (!selection?.selected_text) return;
 
-    // "Tanya AIRA": JANGAN auto-send. Taruh sebagai kutipan di composer.
+    // "Tanya AIRA": jika membawa pertanyaan dari contextual composer, kirim langsung!
     if (actionId === "ask") {
+      if (selection.custom_question) {
+        await handleComposerSend(selection.custom_question, selection);
+        return;
+      }
       setQuote(selection);
       return;
     }

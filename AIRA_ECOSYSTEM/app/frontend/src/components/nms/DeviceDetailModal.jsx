@@ -89,15 +89,21 @@ export default function DeviceDetailModal({
 
   useEffect(() => {
     fetchDetail();
+    const timer = setInterval(fetchDetail, 5000);
+    return () => clearInterval(timer);
   }, [deviceId]);
 
   useEffect(() => {
     fetchResHistory();
+    const timer = setInterval(fetchResHistory, 5000);
+    return () => clearInterval(timer);
   }, [deviceId, timeRange]);
 
   useEffect(() => {
     if (selectedIface) {
       fetchIfaceHistory(selectedIface);
+      const timer = setInterval(() => fetchIfaceHistory(selectedIface), 5000);
+      return () => clearInterval(timer);
     }
   }, [deviceId, selectedIface, timeRange]);
 

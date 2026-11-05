@@ -142,30 +142,7 @@ def sync_inventory_and_topology() -> dict:
                     monitoring_method="icmp_ping",
                 )
 
-        # 2. Topology -> Inventory
-        inv_ips = {d.get("host") for d in inv_devices if d.get("host")}
-        inv_names = {d.get("name", "").lower() for d in inv_devices if d.get("name")}
-
-        for node in topo.get_topology().get("nodes", []):
-            ip = (node.get("ip") or "").strip()
-            name = (node.get("name") or "").strip()
-            if not ip or not name:
-                continue
-            if name.lower() in ("keepme", "n_keep", "n1", "n2"):
-                continue
-            if ip not in inv_ips and name.lower() not in inv_names:
-                try:
-                    inv.create_device(
-                        name=name,
-                        host=ip,
-                        port=22,
-                        username="admin",
-                        device_type=node.get("device_type") or "mikrotik",
-                        note="Sinkronisasi otomatis dari Topology & NMS",
-                    )
-                except Exception:
-                    pass
-
+        # 2. Topology -> Inventory (Keep unmanaged discovered nodes pending; do not inject dummy credentials)
         return {"success": True}
     except Exception as exc:
         logger.warning("Gagal sinkronisasi inventory dan topologi: %s", exc)
@@ -217,6 +194,130 @@ def create_device(body: DeviceIn):
     except Exception as exc:
         logger.warning("Gagal sinkronisasi perangkat ke Topology/NMS: %s", exc)
     return res
+
+
+@router.get("/devices/pending-discovered")
+def list_pending_discovered():
+    """
+    Lists discovered devices that are pending identification or credentials.
+    Exposes clear states: Discovered, SNMP accessible, Credential required.
+    """
+    try:
+        from core.topology_engine import get_topology_engine
+        topo = get_topology_engine()
+        nodes = topo.get_topology().get("nodes", [])
+
+        inv = get_inventory_store()
+        inv_res = inv.list_devices()
+        inv_ips = {d.get("host") for d in (inv_res.get("devices") or []) if d.get("host")}
+        inv_names = {d.get("name", "").lower() for d in (inv_res.get("devices") or []) if d.get("name")}
+
+        pending = []
+        for n in nodes:
+            ip = (n.get("ip") or "").strip()
+            name = (n.get("name") or "").strip()
+            if ip in inv_ips or name.lower() in inv_names:
+                continue
+
+            status_desc = "Perangkat terdeteksi — Membutuhkan kredensial akses."
+            if n.get("snmp_accessible") or n.get("monitoring_method") == "snmp":
+                status_desc = "Device discovered — SNMP available — SSH credentials not configured."
+            elif n.get("reachability_status") == "reachable":
+                status_desc = "Device discovered — Reachable via ICMP — Credentials required."
+
+            pending.append({
+                "node_id": n.get("id"),
+                "name": name,
+                "ip": ip,
+                "device_type": n.get("device_type") or "router",
+                "vendor": n.get("vendor") or "MikroTik",
+                "discovery_status": n.get("discovery_status") or "discovered",
+                "management_status": "credential_required",
+                "status_description": status_desc,
+                "first_seen": n.get("first_seen"),
+                "last_seen": n.get("last_seen"),
+                "suggested_action": "Add to Inventory / Configure Access",
+            })
+
+        return {"success": True, "count": len(pending), "pending_devices": pending}
+    except Exception as exc:
+        logger.exception("Failed to list pending discovered devices")
+        return {"success": False, "error": str(exc), "pending_devices": []}
+
+
+@router.post("/devices/promote-discovered")
+def promote_discovered(body: PromoteDiscoveredDeviceIn):
+    """
+    Promotes a discovered topology device to fully managed status in Inventory and NMS.
+    Attaches credentials without recreating its topology relationships or interfaces.
+    """
+    from core.topology_engine import get_topology_engine
+    from core.nms_engine import get_nms_engine
+
+    topo = get_topology_engine()
+    nodes = topo.get_topology().get("nodes", [])
+    target_node = next((n for n in nodes if n.get("id") == body.node_id), None)
+    if not target_node:
+        raise HTTPException(status_code=404, detail=f"Discovered node '{body.node_id}' not found in topology.")
+
+    dev_name = body.name or target_node.get("name") or target_node.get("identity") or f"device_{body.node_id}"
+    dev_host = body.host or target_node.get("ip")
+    if not dev_host:
+        raise HTTPException(status_code=400, detail="Cannot promote device without valid management IP.")
+
+    inv = get_inventory_store()
+
+    cred_names = list(body.credential_names)
+    new_creds = list(body.new_credentials or [])
+    if body.password:
+        new_creds.append({
+            "name": f"cred_{re.sub(r'[^a-zA-Z0-9_-]', '_', dev_name.lower())}_ssh",
+            "type": "ssh_password",
+            "username": body.username,
+            "secret": body.password,
+            "note": f"Auto-created credential for promoted device {dev_name}",
+        })
+
+    create_res = inv.create_device(
+        name=dev_name,
+        host=dev_host,
+        port=body.port,
+        username=body.username,
+        device_type=body.device_type or target_node.get("device_type") or "mikrotik",
+        credential_names=cred_names,
+        new_credentials=new_creds if new_creds else None,
+        note=body.note or f"Promoted from discovered topology node ({body.node_id})",
+    )
+    if not create_res.get("success"):
+        raise HTTPException(status_code=400, detail=create_res.get("error", "Failed to add device to inventory."))
+
+    topo.upsert_node(
+        node_id=body.node_id,
+        name=dev_name,
+        identity=dev_name,
+        ip=dev_host,
+        device_type=body.device_type,
+        provenance="user_managed",
+        management_status="managed",
+    )
+
+    nms = get_nms_engine()
+    nms.upsert_device_profile(
+        device_id=body.node_id,
+        name=dev_name,
+        ip=dev_host,
+        device_type=body.device_type,
+        management_mode="managed",
+        ownership_status="owned",
+        monitoring_enabled=True,
+    )
+
+    return {
+        "success": True,
+        "message": f"Device '{dev_name}' successfully promoted to managed inventory.",
+        "device": create_res.get("device"),
+        "node_id": body.node_id,
+    }
 
 
 @router.get("/devices/{name}")
@@ -331,3 +432,15 @@ def update_credential(name: str, body: CredentialUpdate):
 @router.delete("/credentials/{name}")
 def delete_credential(name: str):
     return _unwrap(get_inventory_store().delete_credential(name))
+
+class PromoteDiscoveredDeviceIn(BaseModel):
+    node_id: str
+    name: Optional[str] = None
+    host: Optional[str] = None
+    port: int = 22
+    username: str = "admin"
+    password: Optional[str] = None
+    device_type: str = "mikrotik"
+    credential_names: list[str] = Field(default_factory=list)
+    new_credentials: Optional[list[dict]] = None
+    note: str = ""

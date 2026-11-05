@@ -9,7 +9,7 @@
 import { Menu } from "lucide-react";
 import { ALL_NAV_ITEMS } from "./navConfig.js";
 
-const PRIMARY_IDS = ["chat", "workspace", "devices", "akane"];
+const PRIMARY_IDS = ["workspace", "infrastructure", "automations", "files", "settings"];
 
 const PRIMARY_ITEMS = PRIMARY_IDS.map((id) => ALL_NAV_ITEMS.find((item) => item.id === id)).filter(
   Boolean
@@ -41,7 +41,7 @@ export default function MobileNav({ active, onChange, onOpenMenu }) {
             key={item.id}
             icon={item.icon}
             label={item.label}
-            isActive={active === item.id}
+            isActive={active === item.id || (item.id === "workspace" && active === "chat")}
             onClick={() => onChange(item.id)}
           />
         ))}

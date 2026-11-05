@@ -15,6 +15,7 @@ import logging
 from pathlib import Path
 import sqlite3
 from typing import Optional
+from datetime import datetime, timezone
 
 from core.topology_db import (
     DEFAULT_TOPOLOGY_DB_PATH,
@@ -201,6 +202,99 @@ CREATE TABLE IF NOT EXISTS operational_customer_notification_preferences (
     UNIQUE(tenant_id, user_id)
 );
 
+-- 14. Tenant Entitlements (Networking++ and specialized add-ons)
+CREATE TABLE IF NOT EXISTS operational_tenant_entitlements (
+    entitlement_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES operational_tenants(tenant_id) ON DELETE CASCADE,
+    entitlement_key TEXT NOT NULL,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    granted_at TEXT NOT NULL,
+    expires_at_utc TEXT,
+    metadata_json TEXT DEFAULT '{}',
+    UNIQUE(tenant_id, entitlement_key)
+);
+
+-- 15. Token Policies (Configurable token allocation, limits & costs)
+CREATE TABLE IF NOT EXISTS operational_token_policies (
+    policy_id TEXT PRIMARY KEY,
+    scope_type TEXT NOT NULL DEFAULT 'GLOBAL' CHECK(scope_type IN ('GLOBAL', 'TENANT', 'USER')),
+    scope_id TEXT,
+    tier TEXT NOT NULL DEFAULT 'FREE' CHECK(tier IN ('FREE', 'PRO', 'ENTERPRISE', 'CUSTOM')),
+    monthly_token_allocation INTEGER NOT NULL DEFAULT 100000,
+    daily_token_limit INTEGER NOT NULL DEFAULT 10000,
+    networking_plus_enabled INTEGER NOT NULL DEFAULT 0,
+    model_cost_mult_json TEXT NOT NULL DEFAULT '{}',
+    tool_cost_matrix_json TEXT NOT NULL DEFAULT '{}',
+    max_request_size_tokens INTEGER NOT NULL DEFAULT 32768,
+    rate_limit_rpm INTEGER NOT NULL DEFAULT 60,
+    updated_at TEXT NOT NULL,
+    UNIQUE(scope_type, scope_id, tier)
+);
+
+-- 16. Token Balances (Atomic user & tenant token metering)
+CREATE TABLE IF NOT EXISTS operational_token_balances (
+    balance_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES operational_tenants(tenant_id) ON DELETE CASCADE,
+    user_id TEXT,
+    tier TEXT NOT NULL DEFAULT 'FREE',
+    allocated_tokens INTEGER NOT NULL DEFAULT 100000,
+    used_tokens INTEGER NOT NULL DEFAULT 0,
+    period_start_utc TEXT NOT NULL,
+    period_reset_utc TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(tenant_id, user_id)
+);
+
+-- 17. Token Usage Ledger (Granular per-request and per-tool accounting)
+CREATE TABLE IF NOT EXISTS operational_token_usage_ledger (
+    usage_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    user_id TEXT,
+    session_id TEXT,
+    model_name TEXT,
+    feature_name TEXT NOT NULL DEFAULT 'chat',
+    tool_name TEXT,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cached_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    estimated_cost_credits REAL NOT NULL DEFAULT 0.0,
+    timestamp_utc TEXT NOT NULL
+);
+
+-- 18. Centralized Approval Preferences (Always ask, risk levels, auto-approvals)
+CREATE TABLE IF NOT EXISTS operational_approval_preferences (
+    pref_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL REFERENCES operational_tenants(tenant_id) ON DELETE CASCADE,
+    user_id TEXT,
+    policy_mode TEXT NOT NULL DEFAULT 'ASK_HIGH_RISK' CHECK(policy_mode IN ('ALWAYS_ASK', 'ASK_HIGH_RISK', 'AUTO_APPROVE_LOW_RISK', 'CUSTOM')),
+    require_config_deploy_approval INTEGER NOT NULL DEFAULT 1,
+    require_credential_change_approval INTEGER NOT NULL DEFAULT 1,
+    require_user_change_approval INTEGER NOT NULL DEFAULT 1,
+    never_auto_approve_destructive INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL,
+    UNIQUE(tenant_id, user_id)
+);
+
+-- 19. Pending Approvals Queue
+CREATE TABLE IF NOT EXISTS operational_pending_approvals (
+    approval_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    requester_id TEXT NOT NULL,
+    requester_name TEXT NOT NULL,
+    action_name TEXT NOT NULL,
+    risk_level TEXT NOT NULL DEFAULT 'CATEGORY_B' CHECK(risk_level IN ('CATEGORY_A', 'CATEGORY_B', 'CATEGORY_C')),
+    target_resources_json TEXT NOT NULL DEFAULT '[]',
+    params_json TEXT NOT NULL DEFAULT '{}',
+    diff_text TEXT,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED')),
+    reviewer_id TEXT,
+    review_notes TEXT,
+    created_at TEXT NOT NULL,
+    resolved_at TEXT
+);
+
 -- Performance and Tenant Scoping Indexes
 CREATE INDEX IF NOT EXISTS idx_tenant_status ON operational_tenants(status);
 CREATE INDEX IF NOT EXISTS idx_users_tenant ON operational_users(tenant_id, is_active);
@@ -213,14 +307,63 @@ CREATE INDEX IF NOT EXISTS idx_support_tenant ON operational_support_requests(te
 CREATE INDEX IF NOT EXISTS idx_support_requester ON operational_support_requests(requester_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_support_comments ON operational_support_request_comments(request_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_notif_pref ON operational_customer_notification_preferences(tenant_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_entitlements_lookup ON operational_tenant_entitlements(tenant_id, entitlement_key, is_enabled);
+CREATE INDEX IF NOT EXISTS idx_token_policy_scope ON operational_token_policies(scope_type, scope_id);
+CREATE INDEX IF NOT EXISTS idx_token_balance_tenant ON operational_token_balances(tenant_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_token_usage_tenant ON operational_token_usage_ledger(tenant_id, timestamp_utc DESC);
+CREATE INDEX IF NOT EXISTS idx_pending_approvals_tenant ON operational_pending_approvals(tenant_id, status);
 """
 
 
 def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
-    """Idempotently initializes all multi-tenant and identity tables in topology.db."""
+    """Idempotently initializes all multi-tenant, identity, and entitlement tables in topology.db."""
     target_path = Path(db_path or DEFAULT_TOPOLOGY_DB_PATH).resolve()
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     with topology_transaction(target_path, write=True) as conn:
         conn.executescript(TENANT_SCHEMA_SQL)
+        # Safely add auth columns to operational_users if upgrading from older schema
+        for col_def in [
+            "email_verified INTEGER NOT NULL DEFAULT 1",
+            "verification_token_hash TEXT",
+            "reset_token_hash TEXT",
+            "reset_token_expires_at TEXT",
+            "google_id TEXT",
+            "auth_provider TEXT NOT NULL DEFAULT 'LOCAL'",
+        ]:
+            col_name = col_def.split()[0]
+            try:
+                conn.execute(f"ALTER TABLE operational_users ADD COLUMN {col_def}")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+        now_iso = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO operational_tenants (
+                tenant_id, name, slug, status, config_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tenant_default",
+                "Default Organization",
+                "default-org",
+                "ACTIVE",
+                "{}",
+                now_iso,
+                now_iso,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO operational_tenant_subscriptions (
+                subscription_id, tenant_id, tier, max_sites, max_devices, max_gateways, is_active, created_at
+            ) VALUES (?, ?, ?, 10, 100, 10, 1, ?)
+            """,
+            (
+                "sub_default",
+                "tenant_default",
+                "STANDARD",
+                now_iso,
+            ),
+        )
     logger.info("Multi-Tenant schema initialized successfully in %s", target_path)

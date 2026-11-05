@@ -201,3 +201,94 @@ def _single(path, dest, budget, report):
     with SINGLE_OPENERS[suffix](path, "rb") as src:
         size, real = budget.copy(src, target)
     _add(report, str(real.relative_to(dest.resolve())), real, size)
+
+
+def create_zip_archive(
+    source_paths: list[Path | str],
+    dest_zip: Path | str,
+    base_dir: Optional[Path | str] = None,
+    compression: int = zipfile.ZIP_DEFLATED,
+) -> dict[str, Any]:
+    """
+    Creates a valid, verified ZIP archive containing the specified source files and directories.
+    Enforces directory traversal safety, UTF-8 encoding, and runs testzip() validation
+    before reporting success.
+    """
+    dest_path = Path(dest_zip).resolve()
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    base_path = Path(base_dir).resolve() if base_dir else None
+
+    entries_added: list[str] = []
+    total_uncompressed_bytes = 0
+
+    temp_dest = dest_path.with_name(f".tmp_{dest_path.name}")
+    if temp_dest.exists():
+        temp_dest.unlink()
+
+    try:
+        with zipfile.ZipFile(temp_dest, "w", compression=compression, allowZip64=True) as zf:
+            for raw_src in source_paths:
+                src = Path(raw_src).resolve()
+                if not src.exists():
+                    continue
+
+                if src.is_dir():
+                    for root, dirs, files in os.walk(src):
+                        for f in files:
+                            file_p = Path(root) / f
+                            if base_path:
+                                try:
+                                    arcname = str(file_p.relative_to(base_path)).replace("\\", "/")
+                                except ValueError:
+                                    arcname = str(file_p.relative_to(src.parent)).replace("\\", "/")
+                            else:
+                                arcname = str(file_p.relative_to(src.parent)).replace("\\", "/")
+
+                            zf.write(file_p, arcname)
+                            entries_added.append(arcname)
+                            total_uncompressed_bytes += file_p.stat().st_size
+                elif src.is_file():
+                    if base_path:
+                        try:
+                            arcname = str(src.relative_to(base_path)).replace("\\", "/")
+                        except ValueError:
+                            arcname = src.name
+                    else:
+                        arcname = src.name
+
+                    zf.write(src, arcname)
+                    entries_added.append(arcname)
+                    total_uncompressed_bytes += src.stat().st_size
+
+        # Post-creation integrity verification
+        with zipfile.ZipFile(temp_dest, "r") as check_zf:
+            corrupt = check_zf.testzip()
+            if corrupt is not None:
+                raise ValueError(f"ZIP validation failed on corrupt entry: {corrupt}")
+
+        # Atomic replace
+        if dest_path.exists():
+            dest_path.unlink()
+        temp_dest.rename(dest_path)
+
+        return {
+            "success": True,
+            "archive_path": str(dest_path),
+            "filename": dest_path.name,
+            "entries_count": len(entries_added),
+            "entries": entries_added,
+            "uncompressed_bytes": total_uncompressed_bytes,
+            "compressed_bytes": dest_path.stat().st_size,
+        }
+
+    except Exception as exc:
+        if temp_dest.exists():
+            try:
+                temp_dest.unlink()
+            except OSError:
+                pass
+        return {
+            "success": False,
+            "error": f"Gagal membuat arsip ZIP: {exc}",
+            "archive_path": str(dest_path),
+        }

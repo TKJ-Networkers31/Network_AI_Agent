@@ -232,3 +232,79 @@ def files_permissions_grant(payload: GrantPermissionRequest):
 def files_permissions_revoke(payload: MkdirRequest):
     get_permission_engine().revoke(payload.path)
     return {"success": True, "folder": payload.path}
+
+
+# ------------------------------------------------------------------
+# ARCHIVE: ZIP & EXTRACTION
+# ------------------------------------------------------------------
+
+class ZipRequest(BaseModel):
+    paths: list[str]
+    destination_zip: str
+    base_folder: Optional[str] = None
+
+
+class ExtractRequest(BaseModel):
+    archive_path: str
+    destination_folder: str
+
+
+@router.post("/files/zip")
+def files_zip(payload: ZipRequest):
+    """Creates a verified ZIP archive from workspace paths."""
+    from core.file_processing.archive import create_zip_archive
+    workspace = get_workspace_manager()
+
+    try:
+        dest_abs = workspace.resolve(payload.destination_zip)
+        source_abs = [workspace.resolve(p) for p in payload.paths]
+        base_abs = workspace.resolve(payload.base_folder) if payload.base_folder else workspace.root
+    except PathTraversalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    result = create_zip_archive(source_abs, dest_abs, base_dir=base_abs)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Gagal membuat arsip ZIP."))
+
+    return result
+
+
+@router.post("/files/extract")
+def files_extract(payload: ExtractRequest):
+    """Safely extracts an archive within workspace boundaries."""
+    from core.file_processing.archive import extract_archive
+    workspace = get_workspace_manager()
+
+    try:
+        archive_abs = workspace.resolve(payload.archive_path)
+        dest_abs = workspace.resolve(payload.destination_folder)
+    except PathTraversalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if not archive_abs.exists() or not archive_abs.is_file():
+        raise HTTPException(status_code=404, detail=f"File arsip '{payload.archive_path}' tidak ditemukan.")
+
+    report = extract_archive(archive_abs, dest_abs)
+    return {
+        "success": not report.fatal,
+        "entries_count": len(report.entries),
+        "entries": [e.get("path") for e in report.entries],
+        "errors": [err[1] for err in report.errors],
+    }
+
+
+@router.get("/files/download")
+def files_download(path: str = Query(...)):
+    """Downloads a file from the workspace."""
+    from fastapi.responses import FileResponse
+    workspace = get_workspace_manager()
+
+    try:
+        abs_path = workspace.resolve(path)
+    except PathTraversalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if not abs_path.exists() or not abs_path.is_file():
+        raise HTTPException(status_code=404, detail="File tidak ditemukan.")
+
+    return FileResponse(path=str(abs_path), filename=abs_path.name)
