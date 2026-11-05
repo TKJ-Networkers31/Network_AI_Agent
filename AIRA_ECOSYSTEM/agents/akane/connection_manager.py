@@ -40,7 +40,7 @@ from dotenv import load_dotenv
 from tools.ssh.shell import PersistentShell
 from agents.akane.session_state import (
     ConnectionSession, new_session_id,
-    STATUS_BUSY, STATUS_CLOSED, STATUS_CONNECTING, STATUS_ERROR,
+    STATUS_BUSY, STATUS_CLOSED, STATUS_CONNECTED, STATUS_CONNECTING, STATUS_ERROR,
 )
 from core.events import event_bus
 from core.inventory_store import get_inventory_store
@@ -148,6 +148,21 @@ class ConnectionManager:
         with self._lock:
             return self._target_locks.setdefault(host_key, threading.Lock())
 
+    def _evict_stale_session(self, session_id: str) -> None:
+        """
+        Safely evicts a stale or errored session reference from _host_index
+        if and only if _host_index still points to this exact session_id
+        (preventing accidental removal of a newer valid session for the same host).
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return
+            key = self._host_key(session.host, session.port, session.username)
+            if self._host_index.get(key) == session_id:
+                self._host_index.pop(key, None)
+                logger.info("Evicted stale error session %s from _host_index for %s", session_id, key)
+
     @staticmethod
     def _publish(event_name: str, **kwargs) -> None:
         """Event Bus tidak boleh menggagalkan operasi koneksi."""
@@ -215,14 +230,17 @@ class ConnectionManager:
                 existing_id = self._host_index.get(key)
                 if existing_id and existing_id in self._sessions:
                     session = self._sessions[existing_id]
-                    if session.status != STATUS_CLOSED:
+                    if session.status in (STATUS_CLOSED, STATUS_ERROR):
+                        # Evict stale reference safely
+                        if self._host_index.get(key) == existing_id:
+                            self._host_index.pop(key, None)
+                    elif session.is_expired():
                         # If session reached max lifetime, close gracefully to refresh
-                        if session.is_expired():
-                            logger.info("Session %s reached max lifetime (%ds), refreshing connection.", existing_id, MAX_SESSION_LIFETIME_SECONDS)
-                        else:
-                            self._total_sessions_reused += 1
-                            logger.info("Reuse session yang sudah ada untuk %s (session=%s)", key, existing_id)
-                            return {"success": True, "session": session.to_dict(), "reused": True}
+                        logger.info("Session %s reached max lifetime (%ds), refreshing connection.", existing_id, MAX_SESSION_LIFETIME_SECONDS)
+                    else:
+                        self._total_sessions_reused += 1
+                        logger.info("Reuse session yang sudah ada untuk %s (session=%s)", key, existing_id)
+                        return {"success": True, "session": session.to_dict(), "reused": True}
 
                 active_count = sum(1 for s in self._sessions.values() if s.status != STATUS_CLOSED)
                 pending_count = len(self._pending_hosts)
@@ -389,6 +407,10 @@ class ConnectionManager:
         lock = self._get_lock(session_id)
 
         with lock:
+            # Revalidate under session lock to eliminate TOCTOU with reaper
+            if session.status == STATUS_CLOSED:
+                return {"success": False, "error": "Session sudah ditutup."}
+
             if not session.shell.is_alive() and session.status != STATUS_CLOSED:
                 logger.warning("Session %s terputus, mencoba reconnect otomatis...", session_id)
 
@@ -397,6 +419,7 @@ class ConnectionManager:
                 if not creds["success"]:
                     session.status = STATUS_ERROR
                     session.last_error = f"Reconnect gagal: {creds['error']}"
+                    self._evict_stale_session(session_id)
                     self._publish(
                         "connection.error",
                         data={"session_id": session_id, "error": session.last_error},
@@ -409,6 +432,11 @@ class ConnectionManager:
                         username=creds["username"], password=creds.get("password"),
                         key_data=creds.get("key_data"),
                     )
+                    now_ts = time.time()
+                    session.connected_at = now_ts
+                    session.last_activity = now_ts
+                    session.status = STATUS_CONNECTED
+                    session.last_error = None
                     self._publish(
                         "connection.opened",
                         data={"session_id": session_id, **session.to_dict(), "reconnected": True},
@@ -416,6 +444,7 @@ class ConnectionManager:
                 except Exception as exc:
                     session.status = STATUS_ERROR
                     session.last_error = f"Reconnect gagal: {exc}"
+                    self._evict_stale_session(session_id)
                     self._publish(
                         "connection.error",
                         data={"session_id": session_id, "error": session.last_error},
@@ -468,6 +497,7 @@ class ConnectionManager:
             except Exception as exc:
                 session.status = STATUS_ERROR
                 session.last_error = str(exc)
+                self._evict_stale_session(session_id)
 
                 logger.error("Command '%s' gagal di session=%s: %s", command, session_id, exc)
 
@@ -488,10 +518,18 @@ class ConnectionManager:
 
         with self._lock:
             session_id = self._host_index.get(key)
+            session_obj = self._sessions.get(session_id) if session_id else None
+            # RC-02: Evict stale or error session references
+            if session_obj and session_obj.status in (STATUS_CLOSED, STATUS_ERROR):
+                if self._host_index.get(key) == session_id:
+                    self._host_index.pop(key, None)
+                session_id = None
+                session_obj = None
+
             session_alive = (
-                session_id in self._sessions
-                and self._sessions[session_id].status != STATUS_CLOSED
-                and not self._sessions[session_id].is_expired()
+                session_obj is not None
+                and session_obj.status not in (STATUS_CLOSED, STATUS_ERROR)
+                and not session_obj.is_expired()
             )
 
         if not session_alive:
@@ -503,7 +541,21 @@ class ConnectionManager:
             with self._lock:
                 self._total_sessions_reused += 1
 
-        return self.execute(session_id, command, timeout=timeout)
+        res = self.execute(session_id, command, timeout=timeout)
+        # RC-01: Controlled 1-shot retry ONLY if failure is positively identified as concurrent session-closure
+        if not res.get("success") and res.get("error") == "Session sudah ditutup.":
+            logger.warning(
+                "Session %s ditutup bersamaan (TOCTOU race), mencoba 1x retry dengan sesi baru untuk device '%s'...",
+                session_id,
+                device_name,
+            )
+            opened = self.open_connection_for_device(device_name)
+            if not opened.get("success"):
+                return opened
+            new_session_id = opened["session"]["session_id"]
+            return self.execute(new_session_id, command, timeout=timeout)
+
+        return res
 
     def execute_command(
         self,
@@ -522,6 +574,11 @@ class ConnectionManager:
                 return self.execute_for_device(device_name, command, timeout=timeout)
             if not host and ("." in device_name or ":" in device_name):
                 host = device_name
+            elif not host:
+                return {
+                    "success": False,
+                    "error": target.get("error") or f"Device '{device_name}' tidak ditemukan di inventory.",
+                }
 
         if not host:
             return {
@@ -534,10 +591,18 @@ class ConnectionManager:
 
         with self._lock:
             session_id = self._host_index.get(key)
+            session_obj = self._sessions.get(session_id) if session_id else None
+            # RC-02: Evict stale or error session references
+            if session_obj and session_obj.status in (STATUS_CLOSED, STATUS_ERROR):
+                if self._host_index.get(key) == session_id:
+                    self._host_index.pop(key, None)
+                session_id = None
+                session_obj = None
+
             session_alive = (
-                session_id in self._sessions
-                and self._sessions[session_id].status != STATUS_CLOSED
-                and not self._sessions[session_id].is_expired()
+                session_obj is not None
+                and session_obj.status not in (STATUS_CLOSED, STATUS_ERROR)
+                and not session_obj.is_expired()
             )
 
         if not session_alive:
@@ -557,9 +622,85 @@ class ConnectionManager:
                 self._total_sessions_reused += 1
 
         res = self.execute(session_id, command, timeout=timeout)
+        # RC-01: Controlled 1-shot retry ONLY if failure is positively identified as concurrent session-closure
+        if not res.get("success") and res.get("error") == "Session sudah ditutup.":
+            logger.warning(
+                "Session %s ditutup bersamaan (TOCTOU race), mencoba 1x retry dengan sesi baru ke %s...",
+                session_id,
+                host,
+            )
+            opened = self.open_connection(
+                host=host,
+                username=user,
+                password=password,
+                key_data=key_data,
+                port=port,
+                device_name=device_name if device_name and device_name != host else None,
+            )
+            if not opened.get("success"):
+                return opened
+            new_session_id = opened["session"]["session_id"]
+            res = self.execute(new_session_id, command, timeout=timeout)
+
         if res.get("success"):
             res["target"] = device_name or host
         return res
+
+    def execute_batch(
+        self,
+        requests: list[dict[str, Any]],
+        max_concurrency: int = 3,
+        timeout: float = 25.0,
+    ) -> list[dict[str, Any]]:
+        """
+        Executes a batch of read-only commands across multiple devices concurrently.
+        Concurrency is bounded by min(max_concurrency, MAX_CONCURRENT_SESSIONS).
+        Per-device locking guarantees safety even if multiple requests target the same device.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        if not requests:
+            return []
+
+        concurrency = max(1, min(max_concurrency, MAX_CONCURRENT_SESSIONS, len(requests)))
+        results: list[dict[str, Any]] = [{} for _ in requests]
+
+        def _worker(idx: int, req: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+            cmd = req.get("command", "")
+            dev_name = req.get("device_name")
+            host = req.get("host")
+            user = req.get("username")
+            pwd = req.get("password")
+            p = req.get("port", 22)
+            k = req.get("key_data")
+            t = req.get("timeout", timeout)
+            res = self.execute_command(
+                command=cmd,
+                device_name=dev_name,
+                host=host,
+                username=user,
+                password=pwd,
+                port=p,
+                key_data=k,
+                timeout=t,
+            )
+            return idx, res
+
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            future_map = {executor.submit(_worker, i, r): i for i, r in enumerate(requests)}
+            for future in as_completed(future_map):
+                try:
+                    i, res = future.result()
+                    results[i] = res
+                except Exception as exc:
+                    idx = future_map[future]
+                    results[idx] = {
+                        "success": False,
+                        "error": f"Unhandled execution error: {str(exc)}",
+                        "target": requests[idx].get("device_name") or requests[idx].get("host"),
+                    }
+
+        return results
 
     # ------------------------------------------------------------
     # UNIFIED STRUCTURED EVIDENCE CONTRACT INTERFACE
@@ -886,7 +1027,7 @@ class ConnectionManager:
         with self._lock:
             idle_candidates = [
                 s.session_id for s in self._sessions.values()
-                if s.status != STATUS_CLOSED and s.idle_seconds() > IDLE_TIMEOUT_SECONDS
+                if s.status != STATUS_CLOSED and s.status != STATUS_BUSY and s.idle_seconds() > IDLE_TIMEOUT_SECONDS
             ]
             expired_candidates = [
                 s.session_id for s in self._sessions.values()

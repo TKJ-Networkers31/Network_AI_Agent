@@ -1,0 +1,11 @@
+Flags: D - DYNAMIC; A - ACTIVE; c - CONNECT, s - STATIC, v - VPN
+0  As  dst-address=0.0.0.0/0 routing-table=main gateway=10.66.38.1
+       immediate-gw=10.66.38.1%ether1 distance=1 scope=30 target-scope=10
+       suppress-hw-offload=no
+
+1  DAc dst-address=10.66.38.0/24 routing-table=main gateway=ether1
+       immediate-gw=ether1 distance=0 scope=10 suppress-hw-offload=no
+       local-address=10.66.38.30%ether1
+
+2  DAc dst-address=192.168.100.0/24 routing-table=main gateway=ether2
+       immediate-gw=ether2 distance=0 scope=10 suppress-hw-offload=no

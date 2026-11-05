@@ -64,6 +64,10 @@ To prevent ambiguous claims, every requirement across all eight phases is classi
 | **6** | Evidence Correlation & Isolation | `VERIFIED` | `NOT_TESTED` | Correlation ID propagation, multi-target evidence isolation, 7 cross-domain contradiction detectors, freshness policy. | Phase 2, Phase 5 |
 | **7** | Root Cause Analysis & Decision Engine | `VERIFIED` | `BLOCKED` | Deterministic hypothesis ranking, alternative explanation tracking, structured decision engine recommendations. | Phase 2, Phase 6 |
 | **8** | System Integration & Release Readiness | `VERIFIED` | `BLOCKED` | Unified diagnostic workflow, frontend PWA, 958 backend + 247 frontend tests passing, 63 command hardening tests passing, v6 live probed with gaps. | Phases 1–7; Live Lab Hardware |
+| **Net IV** | Multi-Device Route Intelligence | `VERIFIED` | `VERIFIED` | UnifiedRouteParser, canonical NormalizedRoute, LPM, route analytics, route flap detection, cross-device pathing. | Phase 8 |
+| **Net V** | Full Network Management System (NMS) | `VERIFIED` | `VERIFIED` | HardenedNmsScheduler, multi-cadence polling, bandwidth monitoring, metrics decimation, threshold alerting. | Net IV |
+| **Net VI** | Network Intelligence Core | `VERIFIED` | `VERIFIED` | Dynamic knowledge graph, multi-device evidence hub, anomaly detection, moving baselines, causal correlation, RCA. | Net V |
+| **Net VII** | Proactive Network Operations Intelligence | `VERIFIED` | `VERIFIED` | Predictive forecasting, in-memory change impact simulation, service catalog, timezone-aware scheduler, calendar sync, incident lifecycle, React Operations Center. | Net VI |
 
 ---
 
@@ -191,6 +195,87 @@ flowchart TD
 | **Phase 8.3–8.5: Live CHR v7 Diagnostics** | Full Preflight, Evidence, Diagnosis & Non-Mutation | 100% read-only diagnostic commands, 10 evidence types, 0 contradictions, 100% hash match. | `docs/AIRA_N2_CHR_DIAGNOSTIC_VALIDATION_REPORT.md` | None | Low | Live verified | `VERIFIED_LIVE` |
 | **Phase 8.6: RouterOS Compatibility** | Dual v6 / v7 compatibility engine | Live CHR v7 tested, RouterOS v6 command mapping verified, route flag parsing upgraded. | `docs/AIRA_N2_ROUTEROS_V6_V7_COMPATIBILITY_REPORT.md` | None | Low | Complete | `VERIFIED_LIVE` |
 | **Phase Networking II: Final Acceptance** | Full N2.1–N2.10 execution cycle | 958 backend passed, 247 frontend passed, production build valid, zero mutations. | `docs/AIRA_PHASE_NETWORKING_II_FINAL_ACCEPTANCE_REPORT.md` | None | Low | Phase Closed | `PHASE_NETWORKING_II_ACCEPTED_LIVE` |
+
+### 6.9. Phase Networking III — Multi-Device Network Intelligence
+*Mission:* Elevate AIRA OS from a single-device observer into an enterprise-grade multi-device network intelligence platform with cross-device evidence correlation, topology-aware root-cause analysis, and fleet telemetry.
+
+| Requirement | Existing Implementation | Evidence of Implementation | Test Coverage | Remaining Gap | Risk | Next Action | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
+| **N3.1 Multi-Device Inventory** | `core/canonical_network.py`, `core/inventory_store.py` | `CanonicalDevice` enhanced dataclass, batch resolution, schema validation. | `tests/test_networking_iii_inventory.py` (4 passing) | None | Low | Fleet scaling | `VERIFIED_OFFLINE` |
+| **N3.2 Connection Manager** | `agents/akane/connection_manager.py` | `ConnectionState` enum, bounded `ThreadPoolExecutor` (max 4), per-target mutex locking. | `tests/test_networking_iii_connection_manager.py` (3 passing) | None | Low | Production lab binding | `VERIFIED_OFFLINE` |
+| **N3.3 Unified Command Execution** | `core/network_intelligence/command_execution.py` | `UnifiedCommandExecutor`, 10-layer security pipeline enforcement before transport dispatch. | `tests/test_networking_iii_command_execution.py` (4 passing) | None | Low | Enforced across fleet | `VERIFIED_OFFLINE` |
+| **N3.4 Multi-Device Evidence Collection** | `core/network_intelligence/multi_device_collector.py` | `MultiDeviceEvidenceOrchestrator`, partial failure preservation, IP collision detection. | `tests/test_networking_iii_multi_device_collector.py` (3 passing) | None | Low | Batch evidence ready | `VERIFIED_OFFLINE` |
+| **N3.5 Unified Network Data Model** | `core/network_intelligence/network_models.py` | `NormalizedInterface`, `NormalizedIPAddress`, `NormalizedRoute`, `NormalizedLink`, converters. | `tests/test_networking_iii_network_models.py` (4 passing) | None | Low | Multi-vendor ready | `VERIFIED_OFFLINE` |
+| **N3.6 Cross-Device Correlation** | `core/network_intelligence/correlation.py` | `CrossDeviceEvidenceCorrelator`, mutual ARP, subnet overlap (Medium), routed next-hop. | `tests/test_networking_iii_correlation.py` (3 passing) | None | Low | Link inference active | `VERIFIED_OFFLINE` |
+| **N3.7 Topology-Aware RCA** | `core/network_intelligence/investigator.py` | Upstream dependency failure analysis in `run_multi_device_investigation()`. | `tests/test_networking_iii_investigator.py` (1 passing) | None | Low | RCA operational | `VERIFIED_OFFLINE` |
+| **N3.8 NMS Historical Metrics** | `core/network_intelligence/metrics_service.py` | `NmsHistoricalMetricsService`, downsampling, retention pruning, cross-device metric correlation. | `tests/test_networking_iii_metrics.py` (4 passing) | None | Low | Telemetry active | `VERIFIED_OFFLINE` |
+| **N3.9 API & Frontend Integration** | `api/routers/network_intelligence.py`, `NetworkIntelligencePage.jsx` | 4 REST endpoints, multi-device selection bar, related device badges, client methods in `api.js`. | `tests/test_networking_iii_api.py` (4 passing), `npm test` (247 passing), Vite build OK | None | Low | UI operational | `VERIFIED_OFFLINE` |
+| **N3.10 Final Acceptance & Audit** | Full suite execution & documentation | 988 backend tests passed, 247 frontend tests passed, 63 security tests passed, zero regressions. | `docs/NETWORKING_III/` documentation suite | None | Low | Phase Closed | `PHASE_NETWORKING_III_ACCEPTED` |
+
+### 6.10. Phase Stabilization & Intelligent Automation
+*Mission:* Comprehensive platform stabilization and automation upgrade covering NMS background scheduler reliability, WebSocket lifecycle management, VoiceIO arbitration idempotency, DIO interactive form orchestration, and a unified autonomous network diagnostic pipeline.
+
+| Requirement | Existing Implementation | Evidence of Implementation | Test Coverage | Remaining Gap | Risk | Next Action | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
+| **STAB.1 NMS Scheduler Reliability** | `core/nms_engine.py`, `core/nms_models.py` | `NmsSchedulerState` enum (`STOPPED`, `STARTING`, `RUNNING`, `STOPPING`, `FAILED`), atomic `RLock`, responsive `wait_for` wake-up, zero-device backoff. | `tests/test_nms.py` (37 passing) | None | Low | Production background monitoring active | `VERIFIED_OFFLINE` |
+| **STAB.2 WebSocket Lifecycle & Heartbeat** | `hooks/useAiraSocket.js`, `hooks/useAiraSocketPool.js` | Client-side 15s heartbeat ping timer (`{"type": "ping"}`), pong filtering, clean unmount teardown, idle timeout prevention (>45s). | Frontend unit suite (`npm test`), manual soak test | None | Low | Continuous streaming verified | `VERIFIED_OFFLINE` |
+| **STAB.3 VoiceIO Idempotency** | `agents/yuki/voice_io.py`, `hooks/useVoice.js` | Client `micClaimedRef` guard preventing double-resume from `onerror`+`onend`; backend `resume_mic()` idempotent state check. | `tests/test_nms.py`, `npm test` (247 passing) | None | Low | Microphone handoff stabilized | `VERIFIED_OFFLINE` |
+| **STAB.4 DIO Form Orchestration** | `core/dio/models.py`, `agents/rei/dio_tools.py` | `InteractionState` enum, state tracking in `InteractionMemory`, idempotency anti-replay guard, dynamic device choice options. | `tests/test_dio_orchestration.py` (5 passing) | None | Low | Interactive forms production-ready | `VERIFIED_OFFLINE` |
+| **STAB.5 Unified Auto Diagnosis** | `core/network_intelligence/auto_orchestrator.py` | `AutomaticNetworkOrchestrator`, single-device auto-pick (`CHR`), concurrent evidence collection, cross-device correlation, RCA, desired-state plan. | `tests/test_automatic_orchestration.py` (5 passing) | None | Low | 1-step autonomous diagnosis active | `VERIFIED_OFFLINE` |
+| **STAB.6 API & Agent Integration** | `api/routers/network_intelligence.py`, `agents/akane/registry.py` | `POST /api/intelligence/auto-diagnose` REST endpoint, AKANE tool `auto_diagnose_network` with function schema for REI / Chat Copilot. | `tests/test_automatic_orchestration.py`, `tests/test_networking_iii_api.py` | None | Low | Conversational & API trigger ready | `VERIFIED_OFFLINE` |
+| **STAB.7 Workspace UI Integration** | `NetworkIntelligencePage.jsx`, `api.js` | Action banner button `⚡ Diagnostik Otomatis`, integrated execution progress indicator, overview executive summary card with plan link. | `npm test` (247 passing), Vite production build (2.97s) | None | Low | Seamless 1-click diagnostic UX | `VERIFIED_OFFLINE` |
+| **STAB.8 Security & Adversarial Hardening** | `core/network_intelligence/security.py` | Zero mutating commands, delimiter & injection filtering, strict read-only boundary enforcement. | `tests/test_routeros_command_hardening.py` (63 passing) | None | Low | Security verified | `VERIFIED_OFFLINE` |
+| **STAB.9 Final Acceptance & Documentation** | 11 dedicated stabilization reports in `docs/STABILIZATION/` | 998 backend tests passing, 247 frontend tests passing, 63 security tests passing, Vite build successful. | `docs/STABILIZATION/` (11 reports) | None | Low | Phase Closed | `PHASE_STABILIZATION_ACCEPTED` |
+
+### 6.11. Phase Networking IV — Multi-Device Route Intelligence & Topology Routing
+*Mission:* Production-grade multi-device route collection, unified parsing (`UnifiedRouteParser`), canonical normalized routes, LPM, route analytics, route flap detection, and dependency graph path resolution.
+
+| Requirement | Existing Implementation | Evidence of Implementation | Test Coverage | Remaining Gap | Risk | Next Action | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
+| **N4.1 Unified Route Parser** | `core/routing/` | `UnifiedRouteParser`, `NormalizedRoute`, `RouteParseReport`, D1-D10 hardened. | `tests/test_wp_4_6_1_route_collection.py` (14 passing) | None | Low | Fleet parsing active | `VERIFIED_OFFLINE` |
+| **N4.2 Route Analytics & Flap Engine** | `core/routing/` | Route churn detection, route flap damping metrics, ECMP/BGP path evaluations. | `tests/test_wp_4_6_2_route_analytics.py` (13 passing) | None | Low | Production route analytics | `VERIFIED_OFFLINE` |
+| **N4.3 Cross-Device Routing & LPM** | `core/routing/` | Recursive next-hop resolution, multi-device LPM path tracing across subnets. | `tests/test_wp_4_6_3_to_6_5.py` (37 passing) | None | Low | Cross-device routing operational | `VERIFIED_OFFLINE` |
+| **N4.4 Route Auto-Diagnosis** | `core/routing/` | Automated route root cause analysis, blackhole and loop detection. | `tests/test_wp_4_6_6_auto_diagnosis_routing.py` (17 passing) | None | Low | Automated routing RCA active | `VERIFIED_OFFLINE` |
+| **N4.5 Final Acceptance & Audit** | Full suite execution & documentation | 81 route backend tests passing, zero regressions on legacy parsers. | `docs/NETWORKING_IV/` documentation suite | None | Low | Phase Closed | `PHASE_NETWORKING_IV_ACCEPTED` |
+
+### 6.12. Phase Networking V — Full Network Management System (NMS)
+*Mission:* Resource-efficient, topology-aware continuous telemetry monitoring, multi-cadence polling, bandwidth calculation, threshold alerting, and downsampling pipelines.
+
+| Requirement | Existing Implementation | Evidence of Implementation | Test Coverage | Remaining Gap | Risk | Next Action | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
+| **N5.1 Hardened NMS Scheduler** | `core/nms/` | `HardenedNmsScheduler`, thread-safe multi-cadence polling loops, adaptive backoff. | `tests/test_wp_5_2_scheduler.py` (6 passing) | None | Low | Telemetry polling active | `VERIFIED_OFFLINE` |
+| **N5.2 Interface & Device Monitoring** | `core/nms/` | Bandwidth calculations, interface error rates, device reachability monitors. | `tests/test_wp_5_3_monitoring.py` (9 passing) | None | Low | Telemetry ingestion active | `VERIFIED_OFFLINE` |
+| **N5.3 Metrics Decimation Pipeline** | `core/nms/` | Time-series downsampling (raw -> 5m -> 1h -> 1d), retention pruning. | `tests/test_wp_5_4_metrics_pipeline.py` (8 passing) | None | Low | Time-series storage active | `VERIFIED_OFFLINE` |
+| **N5.4 Threshold & Anomaly Alerts** | `core/nms/` | Multi-level threshold alert engine, cooldown suppression, event broadcasting. | `tests/test_wp_5_5_alerts.py` (5 passing) | None | Low | NMS alerting operational | `VERIFIED_OFFLINE` |
+| **N5.5 Final Acceptance & Audit** | Full suite execution & documentation | 37 NMS backend tests passing, resource-conscious memory footprint verified. | `docs/NETWORKING_V/` documentation suite | None | Low | Phase Closed | `PHASE_NETWORKING_V_ACCEPTED` |
+
+### 6.13. Phase Networking VI — Network Intelligence Core
+*Mission:* Multi-device network reasoning, dynamic knowledge graph (`NetworkKnowledgeGraph`), anomaly detection, baseline engineering, automated correlation, and non-destructive failure simulation.
+
+| Requirement | Existing Implementation | Evidence of Implementation | Test Coverage | Remaining Gap | Risk | Next Action | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
+| **N6.1 Knowledge Graph Core** | `core/network_intelligence/knowledge_graph.py` | Directed graph representation, Dijkstra reachability, topological sorting. | `tests/test_networking_vi_core_wp6_1_to_6_5.py` (18 passing) | None | Low | Graph intelligence active | `VERIFIED_OFFLINE` |
+| **N6.2 Multi-Device Evidence Hub** | `core/network_intelligence/evidence_service.py` | `UnifiedEvidenceService`, cluster bundle assembly, device role resolution. | `tests/test_networking_vi_core_wp6_1_to_6_5.py` | None | Low | Unified evidence ready | `VERIFIED_OFFLINE` |
+| **N6.3 Anomaly & Baseline Engines** | `core/network_intelligence/anomaly_engine.py`, `baseline_engine.py` | Statistical z-score outlier detection, diurnal/weekly moving baselines. | `tests/test_networking_vi_wp6_6_health_and_anomalies.py` (4 passing) | None | Low | Anomaly detection active | `VERIFIED_OFFLINE` |
+| **N6.4 Correlation & RCA Engine** | `core/network_intelligence/correlation_engine.py`, `rca_engine.py` | Multi-device symptom clustering, causal hypothesis ranking, alternative tracking. | `tests/test_networking_vi_wp6_7_to_6_15.py` (9 passing) | None | Low | Root cause analysis active | `VERIFIED_OFFLINE` |
+| **N6.5 Failure Simulation Engine** | `core/network_intelligence/failure_simulator.py` | In-memory topology failure simulation, transit cut impact assessment. | `tests/test_networking_vi_wp6_7_to_6_15.py` | None | Low | Simulation operational | `VERIFIED_OFFLINE` |
+| **N6.6 Final Acceptance & Audit** | Full suite execution & documentation | 31 backend intelligence tests passing, verified against RouterOS CHR lab. | `docs/NETWORKING_VI/` documentation suite | None | Low | Phase Closed | `PHASE_NETWORKING_VI_ACCEPTED` |
+
+### 6.14. Phase Networking VII — Proactive Network Operations Intelligence
+*Mission:* Transform AIRA OS from a reactive diagnostic tool into a proactive operations assistant with capacity forecasting, change impact simulation, service dependency mapping, timezone-aware scheduling, calendar sync, proactive incident lifecycle, and React Operations Center.
+
+| Requirement | Existing Implementation | Evidence of Implementation | Test Coverage | Remaining Gap | Risk | Next Action | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
+| **N7.1 Predictive Operations** | `core/operations/predictive_engine.py` | Least-squares regression ($y = mx + c$), saturation horizons, epistemic honesty. | `test_networking_vii_predictive.py` (7 passing) | None | Low | Capacity forecasting active | `VERIFIED_OFFLINE` |
+| **N7.2 Change Impact Intelligence** | `core/operations/change_impact_engine.py` | In-memory graph cloning, node/edge pruning, blast-radius risk scoring. Zero mutations. | `test_networking_vii_change_impact.py` (3 passing) | None | Low | Pre-change simulation active | `VERIFIED_OFFLINE` |
+| **N7.3 Service Dependency Mapping** | `core/operations/service_intelligence.py` | Relational service catalog, knowledge graph integration, HA audits, SPOF discovery. | `test_networking_vii_service_intelligence.py` (4 passing) | None | Low | Service intelligence active | `VERIFIED_OFFLINE` |
+| **N7.4 Operational Job Scheduler** | `core/operations/scheduler.py` | Persistent SQLite job store, `Asia/Jakarta` cron & daily schedules, restart recovery. | `test_networking_vii_scheduler.py` (5 passing) | None | Low | Operational scheduling active | `VERIFIED_OFFLINE` |
+| **N7.5 External Calendar Sync** | `core/operations/calendar/` | RFC 5545 `.ics` export/import, Google Calendar API provider, alert suppression. | `test_networking_vii_calendar.py` (4 passing) | None | Low | Calendar sync active | `VERIFIED_OFFLINE` |
+| **N7.6 Incidents & Notification Hub** | `core/operations/incident_engine.py`, `notification_hub.py` | State machine lifecycle, fingerprint deduplication, `Asia/Jakarta` quiet hours. | `test_networking_vii_incidents_notifications.py` (4 passing) | None | Low | Proactive incidents active | `VERIFIED_OFFLINE` |
+| **N7.7 Operational Reporting** | `core/operations/reporting_engine.py` | Deterministic daily, weekly, monthly reports exported as Markdown, HTML, JSON. | `test_networking_vii_api.py` (1 passing) | None | Low | Deterministic reports active | `VERIFIED_OFFLINE` |
+| **N7.8 Operations REST API** | `api/routers/operations.py` | 14 FastAPI endpoints covering predictions, simulation, services, scheduler, windows. | `test_networking_vii_api.py` (7 passing) | None | Low | Operations API mounted | `VERIFIED_OFFLINE` |
+| **N7.9 React Operations Center** | `OperationsPage.jsx` | 8-tab operations dashboard, capacity gauges, change simulator, service catalog. | `npm run build` OK, `node --test` (275 passing) | None | Low | Operations UX operational | `VERIFIED_OFFLINE` |
+| **N7.10 Final Acceptance & Audit** | Full suite execution & documentation | 35 Networking VII tests passing, 184 backend tests passing, 275 frontend tests passing. | `docs/NETWORKING_VII/` documentation suite | None | Low | Phase Closed | `PHASE_NETWORKING_VII_ACCEPTED` |
 
 ---
 

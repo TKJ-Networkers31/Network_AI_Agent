@@ -1,0 +1,4 @@
+Flags: X - disabled, A - active, D - dynamic, C - connect, S - static
+ 0 A S  dst-address=10.10.10.0/24 gateway=192.168.1.1 distance=1
+ 1  S   dst-address=10.20.20.0/24 gateway=192.168.1.2 distance=2
+ 2 X S  dst-address=10.30.30.0/24 gateway=192.168.1.3 distance=1

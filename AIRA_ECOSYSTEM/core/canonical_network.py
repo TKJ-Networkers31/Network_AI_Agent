@@ -33,17 +33,27 @@ class CanonicalDevice:
     device_id: str
     inventory_name: str = ""
     observed_identity: str = ""
+    hostname: str = ""
     management_ip: str = ""
     management_port: int = 22
+    management_protocol: str = "ssh"
     all_ips: List[str] = field(default_factory=list)
     primary_mac: str = ""
     all_macs: List[str] = field(default_factory=list)
     device_type: str = "mikrotik"
     vendor: str = "MikroTik"
+    manufacturer: str = ""
     model: str = ""
+    platform: str = ""
     os_version: str = ""
+    firmware_version: str = ""
     ros_major_version: Optional[int] = None
     serial_number: str = ""
+    connection_profile_ref: Optional[str] = None
+    connection_status: str = "disconnected"
+    last_successful_connection: Optional[float] = None
+    last_failed_connection: Optional[float] = None
+    last_observed_timestamp: Optional[float] = None
     reachability_status: str = "unknown"
     management_status: str = "not_attempted"
     nms_status: str = "UNKNOWN"
@@ -52,8 +62,30 @@ class CanonicalDevice:
     last_seen: Optional[float] = None
     last_verified: Optional[float] = None
     is_managed: bool = True
+    device_role: str = "unclassified"
+    interfaces: List[Dict[str, Any]] = field(default_factory=list)
+    ip_addresses: List[Dict[str, Any]] = field(default_factory=list)
+    mac_addresses: List[str] = field(default_factory=list)
+    vlans: List[Dict[str, Any]] = field(default_factory=list)
+    routes_summary: Dict[str, Any] = field(default_factory=dict)
+    neighbors: List[Dict[str, Any]] = field(default_factory=list)
+    cpu_utilization: Optional[float] = None
+    memory_utilization: Optional[float] = None
+    uptime_seconds: Optional[int] = None
+    device_availability: str = "unknown"
+    observation_status: str = "unknown"
+    last_health_check: Optional[float] = None
+    tags: List[str] = field(default_factory=list)
+    location: str = ""
+    site: str = ""
+    description: str = ""
+    group: str = ""
+    notes: str = ""
     user_overrides: Dict[str, Any] = field(default_factory=dict)
     raw_metadata: Dict[str, Any] = field(default_factory=dict)
+    discovered_metadata: Dict[str, Any] = field(default_factory=dict)
+    derived_metadata: Dict[str, Any] = field(default_factory=dict)
+    historical_observations_ref: List[str] = field(default_factory=list)
 
     @property
     def display_name(self) -> str:
@@ -78,17 +110,27 @@ class CanonicalDevice:
             "display_name": self.display_name,
             "inventory_name": self.inventory_name,
             "observed_identity": self.observed_identity,
+            "hostname": self.hostname,
             "management_ip": self.management_ip,
             "management_port": self.management_port,
+            "management_protocol": self.management_protocol,
             "all_ips": list(self.all_ips),
             "primary_mac": self.primary_mac,
             "all_macs": list(self.all_macs),
             "device_type": self.device_type,
             "vendor": self.vendor,
+            "manufacturer": self.manufacturer,
             "model": self.model,
+            "platform": self.platform,
             "os_version": self.os_version,
+            "firmware_version": self.firmware_version,
             "ros_major_version": self.ros_major_version,
             "serial_number": self.serial_number,
+            "connection_profile_ref": self.connection_profile_ref,
+            "connection_status": self.connection_status,
+            "last_successful_connection": self.last_successful_connection,
+            "last_failed_connection": self.last_failed_connection,
+            "last_observed_timestamp": self.last_observed_timestamp,
             "reachability_status": self.reachability_status,
             "management_status": self.management_status,
             "nms_status": self.nms_status,
@@ -97,7 +139,28 @@ class CanonicalDevice:
             "last_seen": self.last_seen,
             "last_verified": self.last_verified,
             "is_managed": self.is_managed,
+            "device_role": self.device_role,
+            "interfaces": list(self.interfaces),
+            "ip_addresses": list(self.ip_addresses),
+            "mac_addresses": list(self.mac_addresses),
+            "vlans": list(self.vlans),
+            "routes_summary": dict(self.routes_summary),
+            "neighbors": list(self.neighbors),
+            "cpu_utilization": self.cpu_utilization,
+            "memory_utilization": self.memory_utilization,
+            "uptime_seconds": self.uptime_seconds,
+            "device_availability": self.device_availability,
+            "observation_status": self.observation_status,
+            "last_health_check": self.last_health_check,
+            "tags": list(self.tags),
+            "location": self.location,
+            "site": self.site,
+            "description": self.description,
+            "group": self.group,
+            "notes": self.notes,
             "user_overrides": self.user_overrides,
+            "discovered_metadata": self.discovered_metadata,
+            "derived_metadata": self.derived_metadata,
         }
 
 
@@ -112,6 +175,19 @@ def parse_routeros_major_version(version_str: Optional[str]) -> Optional[int]:
         except ValueError:
             return None
     return None
+
+
+def _parse_ts(val: Any, default: float = 0.0) -> float:
+    if not val:
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        try:
+            from datetime import datetime
+            return datetime.fromisoformat(str(val).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return default
 
 
 class CanonicalNetworkRegistry:
@@ -170,6 +246,24 @@ class CanonicalNetworkRegistry:
                     return dev
 
         return None
+
+    def resolve_devices_batch(self, queries: List[str]) -> List[CanonicalDevice]:
+        """
+        Resolves a batch of queries into CanonicalDevice objects.
+        Preserves ordering, eliminates duplicates, and omits unresolvable queries.
+        """
+        results: List[CanonicalDevice] = []
+        seen_ids = set()
+        for q in queries:
+            dev = self.resolve_device(q)
+            if dev and dev.device_id not in seen_ids:
+                seen_ids.add(dev.device_id)
+                results.append(dev)
+        return results
+
+    def get_device_by_id(self, device_id: str) -> Optional[CanonicalDevice]:
+        """Direct lookup by device_id."""
+        return self.resolve_device(device_id)
 
     def list_devices(self, force_refresh: bool = False) -> List[CanonicalDevice]:
         """
@@ -319,9 +413,9 @@ class CanonicalNetworkRegistry:
         dev.observation_freshness = str(node.get("observation_freshness") or dev.observation_freshness)
 
         if node.get("last_seen"):
-            dev.last_seen = max(dev.last_seen or 0.0, float(node["last_seen"]))
+            dev.last_seen = max(dev.last_seen or 0.0, _parse_ts(node["last_seen"]))
         if node.get("last_verified"):
-            dev.last_verified = max(dev.last_verified or 0.0, float(node["last_verified"]))
+            dev.last_verified = max(dev.last_verified or 0.0, _parse_ts(node["last_verified"]))
 
         overrides = node.get("user_overrides_json")
         if isinstance(overrides, dict):
@@ -377,9 +471,9 @@ class CanonicalNetworkRegistry:
             management_status=str(node.get("management_status") or "not_attempted"),
             nms_status="UNKNOWN",
             observation_freshness=str(node.get("observation_freshness") or "unknown"),
-            first_seen=float(node.get("first_seen") or time.time()),
-            last_seen=float(node.get("last_seen") or time.time()),
-            last_verified=float(node.get("last_verified") or 0.0) if node.get("last_verified") else None,
+            first_seen=_parse_ts(node.get("first_seen"), time.time()),
+            last_seen=_parse_ts(node.get("last_seen"), time.time()),
+            last_verified=_parse_ts(node.get("last_verified"), 0.0) if node.get("last_verified") else None,
             is_managed=False,
             user_overrides=node.get("user_overrides_json") if isinstance(node.get("user_overrides_json"), dict) else {},
             raw_metadata=meta,

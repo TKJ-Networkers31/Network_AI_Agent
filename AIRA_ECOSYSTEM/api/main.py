@@ -27,7 +27,9 @@ BUKAN subsistem baru).
 
 import asyncio
 import logging
+import os
 import threading
+from core.topology_db import init_topology_database, get_write_coordinator
 from pathlib import Path
 
 from core.logger import setup_logging
@@ -44,7 +46,7 @@ from api.routers import (
     chat, providers, memory, devices, sessions, tools, logs, models, persona,
     connections, files, location, settings, selection, attachments,
     vision, workspace_links, capabilities, artifacts, topology, nms, voice,
-    network_intelligence,
+    network_intelligence, operations,
 )
 from api.routers import ws
 from api.ws_bridge import get_ws_bridge
@@ -92,6 +94,13 @@ app.include_router(topology.router)         # The Dude Native Topology Engine
 app.include_router(nms.router)              # Network Management System & Live Telemetry
 app.include_router(voice.router)            # Background Voice Service
 app.include_router(network_intelligence.router)  # Network Intelligence, Playbooks & Config Simulator
+app.include_router(operations.router)            # Proactive Network Operations & Intelligence (Networking VII)
+from api.routers import gateways
+app.include_router(gateways.router)              # Hybrid Edge Gateways (Networking VIII)
+from api.routers import decisions
+app.include_router(decisions.router)             # Operational Decision Intelligence (Networking VIII / Phase C)
+from api.routers import portal
+app.include_router(portal.router)                # Customer Self-Service Portal (Networking VIII / Phase D)
 app.include_router(ws.router)
 
 
@@ -101,6 +110,36 @@ def _warm_host_location() -> None:
     except Exception:
         pass
 
+
+
+@app.on_event("startup")
+def _startup_topology_db_and_concurrency():
+    """
+    Validates single-worker deployment invariant and ensures topology.db access policy
+    (WAL mode, busy_timeout=30s, synchronous=NORMAL) is initialized idempotently.
+    """
+    try:
+        init_topology_database()
+        logger.info("Topology database concurrency and WAL policy initialized successfully.")
+    except Exception as exc:
+        logger.warning("Could not initialize topology database WAL policy on startup: %s", exc)
+
+    web_concurrency = os.getenv("WEB_CONCURRENCY")
+    uvicorn_workers = os.getenv("UVICORN_WORKERS")
+    for var_name, val in [("WEB_CONCURRENCY", web_concurrency), ("UVICORN_WORKERS", uvicorn_workers)]:
+        if val is not None:
+            try:
+                count = int(val)
+                if count > 1:
+                    err_msg = (
+                        f"Unsupported multi-worker deployment: {var_name}={count}. "
+                        "AIRA OS SQLite topology architecture requires single-worker execution (workers=1). "
+                        "Multi-worker process concurrency is not supported and is rejected to protect database integrity."
+                    )
+                    logger.critical(err_msg)
+                    raise RuntimeError(err_msg)
+            except ValueError:
+                pass
 
 
 @app.on_event("startup")
@@ -185,6 +224,27 @@ async def _startup_event_bridge():
 @app.on_event("shutdown")
 async def _shutdown_event_bridge():
     await get_ws_bridge().stop()
+
+
+@app.on_event("startup")
+async def _startup_topology_nms_sync():
+    try:
+        from core.topology_engine import get_topology_engine
+        engine = get_topology_engine()
+        engine.start_nms_sync()
+        logger.info("Topology NMS State Synchronization started successfully on startup.")
+    except Exception as exc:
+        logger.error("Failed to start Topology NMS State Synchronization on startup: %s", exc)
+
+
+@app.on_event("shutdown")
+def _shutdown_topology_nms_sync():
+    try:
+        from core.topology_engine import get_topology_engine
+        get_topology_engine().stop_nms_sync()
+        logger.info("Topology NMS State Synchronization stopped.")
+    except Exception as exc:
+        logger.error("Error stopping Topology NMS State Synchronization on shutdown: %s", exc)
 
 
 @app.on_event("startup")

@@ -56,6 +56,9 @@ logs/
 *.sqlite
 *.sqlite3
 *.db-journal
+*.bak*
+AIRA_ECOSYSTEM/database/backups/
+**/backups/
 
 # =========================
 # AI Models

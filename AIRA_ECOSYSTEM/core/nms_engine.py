@@ -18,9 +18,16 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.events import EventNames, event_bus
+from core.topology_db import (
+    DEFAULT_TOPOLOGY_DB_PATH,
+    get_topology_connection,
+    init_topology_database,
+    get_write_coordinator,
+)
 from core.nms_models import (
     DEFAULT_NMS_SETTINGS,
     NMS_STATUS_VALUES,
+    NmsSchedulerState,
     calculate_traffic_rate,
     determine_device_availability,
     is_check_stale,
@@ -29,6 +36,7 @@ from core.nms_models import (
 )
 from core.nms_snmp import poll_device_snmp_full, snmp_get_multi
 from core.topology_models import bounded_icmp_ping
+from core.network_intelligence.security import execute_safe_readonly_command
 from core.topology_parsers import (
     parse_mikrotik_ethernet,
     parse_mikrotik_identity,
@@ -40,7 +48,7 @@ from core.topology_parsers import (
 logger = logging.getLogger("aira.nms.engine")
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_DB_PATH = BASE_DIR / "database" / "topology.db"
+DEFAULT_DB_PATH = DEFAULT_TOPOLOGY_DB_PATH
 
 _PROFILE_MIGRATION_COLUMNS = [
     ("last_check_at", "REAL"),
@@ -71,11 +79,14 @@ _IFACE_MIGRATION_COLUMNS = [
 class NmsEngine:
     """Centralized NMS Engine maintaining persistent monitoring profiles, metrics, and incident lifecycle."""
 
-    def __init__(self, db_path: Path = DEFAULT_DB_PATH) -> None:
-        self.db_path = Path(db_path)
-        self._lock = threading.RLock()
+    def __init__(self, db_path: Optional[Path | str] = None) -> None:
+        self.db_path = (Path(db_path) if db_path else DEFAULT_DB_PATH).resolve()
+        self._lock = get_write_coordinator(self.db_path)._lock
         self._async_lock = asyncio.Lock()
+        self._state_lock = threading.RLock()
+        self._scheduler_state: NmsSchedulerState = NmsSchedulerState.STOPPED
         self._is_polling = False
+        self._device_in_flight: set[str] = set()
         self._scheduler_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
         self.last_poll_timestamp: Optional[float] = None
@@ -83,15 +94,11 @@ class NmsEngine:
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        return conn
+        return get_topology_connection(self.db_path, timeout=30.0)
 
     def _init_db(self) -> None:
         """Initializes NMS tables and ensures schema migrations are non-destructive."""
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        init_topology_database(self.db_path)
         with self._lock, closing(self._get_connection()) as conn:
             conn.executescript(
                 """
@@ -239,6 +246,11 @@ class NmsEngine:
                 (time.time(),),
             )
             conn.commit()
+        try:
+            from core.nms.metrics_store import init_metrics_tables
+            init_metrics_tables(self.db_path)
+        except Exception as exc:
+            logger.debug("Optional nms_raw_metrics init skipped: %s", exc)
 
     # -----------------------------------------------------------------------
     # Settings Management
@@ -312,6 +324,7 @@ class NmsEngine:
                 "active_incidents": open_incidents,
                 "auto_monitoring_enabled": bool(settings.get("auto_monitoring_enabled", True)),
                 "polling_interval_sec": settings.get("default_interval_sec", 15),
+                "scheduler_state": self.get_scheduler_state(),
                 "is_running": self.is_running(),
                 "last_poll_timestamp": self.last_poll_timestamp,
                 "next_poll_timestamp": self.next_poll_timestamp,
@@ -476,8 +489,8 @@ class NmsEngine:
                     "speed_source": i["speed_source"] if "speed_source" in i.keys() else "unknown",
                     "speed_updated_at": i["speed_updated_at"] if "speed_updated_at" in i.keys() else None,
                     "duplex": i["duplex"] if "duplex" in i.keys() else "unknown",
-                    "rx_rate_bps": i["rx_rate_bps"] or 0.0,
-                    "tx_rate_bps": i["tx_rate_bps"] or 0.0,
+                    "rx_rate_bps": i["rx_rate_bps"],
+                    "tx_rate_bps": i["tx_rate_bps"],
                     "rx_utilization_percent": i["rx_utilization_percent"],
                     "tx_utilization_percent": i["tx_utilization_percent"],
                     "in_octets": i["in_octets"],
@@ -856,7 +869,13 @@ class NmsEngine:
 
         def _exec(cmd: str) -> Tuple[bool, str, str]:
             try:
-                res = mgr.execute_command(cmd, device_name=resolved_dev_name, host=host, timeout=timeout)
+                # Route through centralized safe read-only validator before SSH execution
+                res = execute_safe_readonly_command(
+                    cm=mgr,
+                    device_id=resolved_dev_name,
+                    command=cmd,
+                    timeout=timeout,
+                )
                 if not res.get("success"):
                     return False, "", res.get("error", "Execution failed")
                 return True, res.get("output", ""), ""
@@ -953,6 +972,21 @@ class NmsEngine:
     # Device Polling Execution Cycle
     # -----------------------------------------------------------------------
     async def poll_single_device(
+        self, device_id: str, host: str, profile: Dict[str, Any], settings: Dict[str, Any]
+    ) -> None:
+        """Per-device single-flight wrapper guarding concurrent polls on the same device."""
+        with self._state_lock:
+            if device_id in self._device_in_flight:
+                logger.debug("Skipping overlapping poll for device %s (single-flight active).", device_id)
+                return
+            self._device_in_flight.add(device_id)
+        try:
+            await self._poll_single_device_impl(device_id, host, profile, settings)
+        finally:
+            with self._state_lock:
+                self._device_in_flight.discard(device_id)
+
+    async def _poll_single_device_impl(
         self, device_id: str, host: str, profile: Dict[str, Any], settings: Dict[str, Any]
     ) -> None:
         """Melakukan pemeriksaan health check (ICMP + RouterOS SSH / SNMP) untuk 1 perangkat dan mencatat hasilnya."""
@@ -1132,6 +1166,8 @@ class NmsEngine:
             }
 
         # 6. Update Database: nms_device_profiles AND topology_nodes
+        events_to_publish: List[Tuple[str, Dict[str, Any]]] = []
+        incidents_to_publish: List[Dict[str, Any]] = []
         with self._lock, closing(self._get_connection()) as conn:
             conn.execute(
                 """
@@ -1288,7 +1324,7 @@ class NmsEngine:
 
                     prev_s = conn.execute(
                         """
-                        SELECT timestamp, in_octets, out_octets, speed_bps, negotiated_speed_bps
+                        SELECT timestamp, in_octets, out_octets, speed_bps, negotiated_speed_bps, oper_status
                         FROM nms_interface_metrics
                         WHERE device_id = ? AND interface_name = ?
                         ORDER BY timestamp DESC LIMIT 1
@@ -1300,8 +1336,8 @@ class NmsEngine:
                     speed = iface.get("speed_bps", 0)
                     effective_speed = neg_speed if neg_speed is not None else speed
 
-                    rx_rate = 0.0
-                    tx_rate = 0.0
+                    rx_rate: Optional[float] = None
+                    tx_rate: Optional[float] = None
                     rx_util = None
                     tx_util = None
 
@@ -1365,6 +1401,68 @@ class NmsEngine:
                         ),
                     )
 
+                    curr_oper = iface.get("oper_status", "unknown")
+                    prev_oper = prev_s["oper_status"] if (prev_s and "oper_status" in prev_s.keys()) else None
+                    if prev_oper and prev_oper != curr_oper and curr_oper != "unknown":
+                        events_to_publish.append(
+                            (
+                                EventNames.NMS_INTERFACE_STATUS_CHANGED,
+                                {
+                                    "device_id": device_id,
+                                    "interface_name": iname,
+                                    "oper_status": curr_oper,
+                                    "previous_status": prev_oper,
+                                    "timestamp": now,
+                                    "speed_bps": effective_speed,
+                                    "admin_status": iface.get("admin_status", "enabled"),
+                                },
+                            )
+                        )
+                    else:
+                        if curr_oper != "unknown":
+                            events_to_publish.append(
+                                (
+                                    EventNames.NMS_INTERFACE_OBSERVED,
+                                    {
+                                        "device_id": device_id,
+                                        "interface_name": iname,
+                                        "oper_status": curr_oper,
+                                        "previous_status": prev_oper,
+                                        "timestamp": now,
+                                        "speed_bps": effective_speed,
+                                        "admin_status": iface.get("admin_status", "enabled"),
+                                    },
+                                )
+                            )
+
+            # 6b. Bridge non-null observations into nms_raw_metrics (WP 6.1 N5-C2)
+            if ping_ok:
+                raw_rows: List[Tuple[Any, ...]] = []
+                src_proto = monitoring_method or 'icmp_ping'
+                if latency_ms is not None:
+                    raw_rows.append((device_id, None, 'latency_ms', float(latency_ms), 'ms', 'gauge', 'icmp', 'GOOD', now, now))
+                if metrics_summary.get('cpu_load_percent') is not None:
+                    raw_rows.append((device_id, None, 'cpu_load_percent', float(metrics_summary['cpu_load_percent']), 'percent', 'gauge', src_proto, 'GOOD', now, now))
+                if metrics_summary.get('memory_used_percent') is not None:
+                    raw_rows.append((device_id, None, 'memory_used_percent', float(metrics_summary['memory_used_percent']), 'percent', 'gauge', src_proto, 'GOOD', now, now))
+                if interfaces_to_save:
+                    for iface_s in interfaces_to_save:
+                        inm = iface_s.get('name') or iface_s.get('interface_name')
+                        if not inm:
+                            continue
+                        if iface_s.get('in_errors') is not None:
+                            raw_rows.append((device_id, inm, 'in_errors', float(iface_s['in_errors']), 'packets', 'counter', src_proto, 'GOOD', now, now))
+                        if iface_s.get('out_errors') is not None:
+                            raw_rows.append((device_id, inm, 'out_errors', float(iface_s['out_errors']), 'packets', 'counter', src_proto, 'GOOD', now, now))
+                if raw_rows:
+                    try:
+                        conn.executemany(
+                            """INSERT INTO nms_raw_metrics (device_id, interface_name, metric_name, metric_value, unit, semantic_type, source_protocol, quality, measured_at, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            raw_rows,
+                        )
+                    except sqlite3.OperationalError:
+                        pass
+
             # 7. Incident Handling (Down & Recovery)
             dev_name = resolved_name or profile.get("name") or host
             if new_status == "DOWN" and curr_status != "DOWN":
@@ -1376,6 +1474,14 @@ class NmsEngine:
                     title=f"Perangkat {dev_name} Tidak Terjangkau (DOWN)",
                     details=f"Gagal merespons {new_fails}x check berturut-turut. Error terakhir: {last_error}",
                 )
+                incidents_to_publish.append({
+                    "device_id": device_id,
+                    "device_name": dev_name,
+                    "type": "device_down",
+                    "status": "open",
+                    "severity": "critical",
+                    "timestamp": now,
+                })
             elif new_status == "UP" and curr_status in ("DOWN", "SUSPECTED_DOWN"):
                 self._resolve_incident_if_open(
                     conn,
@@ -1383,57 +1489,46 @@ class NmsEngine:
                     inc_type="device_down",
                     recovery_details=f"Koneksi pulih normal. Latency: {latency_ms:.1f}ms",
                 )
+                incidents_to_publish.append({
+                    "device_id": device_id,
+                    "device_name": dev_name,
+                    "type": "device_down",
+                    "status": "resolved",
+                    "timestamp": now,
+                })
 
             conn.commit()
 
-            # Publish real-time NMS device status event
+        # Publish all real-time events AFTER database transaction commit and lock release
+        for ev_name, ev_data in events_to_publish:
             try:
-                event_bus.publish(
-                    EventNames.NMS_DEVICE_STATUS,
-                    data={
-                        "device_id": device_id,
-                        "name": resolved_name or dev_name,
-                        "ip": host,
-                        "status": new_status,
-                        "previous_status": curr_status,
-                        "latency_ms": latency_ms,
-                        "metrics": metrics_summary,
-                        "timestamp": now,
-                        "monitoring_method": monitoring_method,
-                    },
-                )
+                event_bus.publish(ev_name, data=ev_data)
             except Exception as exc:
-                logger.debug("Failed to publish NMS_DEVICE_STATUS: %s", exc)
+                logger.debug("Failed to publish %s: %s", ev_name, exc)
 
-            if new_status == "DOWN" and curr_status != "DOWN":
-                try:
-                    event_bus.publish(
-                        EventNames.NMS_INCIDENT,
-                        data={
-                            "device_id": device_id,
-                            "device_name": dev_name,
-                            "type": "device_down",
-                            "status": "open",
-                            "severity": "critical",
-                            "timestamp": now,
-                        },
-                    )
-                except Exception:
-                    pass
-            elif new_status == "UP" and curr_status in ("DOWN", "SUSPECTED_DOWN"):
-                try:
-                    event_bus.publish(
-                        EventNames.NMS_INCIDENT,
-                        data={
-                            "device_id": device_id,
-                            "device_name": dev_name,
-                            "type": "device_down",
-                            "status": "resolved",
-                            "timestamp": now,
-                        },
-                    )
-                except Exception:
-                    pass
+        try:
+            event_bus.publish(
+                EventNames.NMS_DEVICE_STATUS,
+                data={
+                    "device_id": device_id,
+                    "name": resolved_name or dev_name,
+                    "ip": host,
+                    "status": new_status,
+                    "previous_status": curr_status,
+                    "latency_ms": latency_ms,
+                    "metrics": metrics_summary,
+                    "timestamp": now,
+                    "monitoring_method": monitoring_method,
+                },
+            )
+        except Exception as exc:
+            logger.debug("Failed to publish NMS_DEVICE_STATUS: %s", exc)
+
+        for inc_data in incidents_to_publish:
+            try:
+                event_bus.publish(EventNames.NMS_INCIDENT, data=inc_data)
+            except Exception:
+                pass
 
     async def poll_all_devices_cycle(self) -> None:
         """Menjalankan 1 siklus polling penuh untuk seluruh perangkat yang aktif."""
@@ -1478,8 +1573,13 @@ class NmsEngine:
                     except Exception as exc:
                         logger.error(f"Error saat polling {dev.get('name')}: {exc}")
 
-            if devices:
-                await asyncio.gather(*[_bounded_poll(d) for d in devices])
+            if not devices:
+                self.last_poll_timestamp = time.time()
+                interval = int(settings.get("default_interval_sec", 15))
+                self.next_poll_timestamp = self.last_poll_timestamp + interval
+                return
+
+            await asyncio.gather(*[_bounded_poll(d) for d in devices])
 
             self.last_poll_timestamp = time.time()
             interval = int(settings.get("default_interval_sec", 15))
@@ -1517,48 +1617,88 @@ class NmsEngine:
     # Background Scheduler Lifecycle
     # -----------------------------------------------------------------------
     def is_running(self) -> bool:
-        return self._scheduler_task is not None and not self._scheduler_task.done()
+        with self._state_lock:
+            return (
+                self._scheduler_state in (NmsSchedulerState.RUNNING, NmsSchedulerState.STARTING)
+                and self._scheduler_task is not None
+                and not self._scheduler_task.done()
+            )
+
+    def get_scheduler_state(self) -> str:
+        with self._state_lock:
+            return self._scheduler_state.value
 
     async def _scheduler_loop(self) -> None:
+        with self._state_lock:
+            self._scheduler_state = NmsSchedulerState.RUNNING
         logger.info("NMS background scheduler loop started.")
-        while not self._stop_event.is_set():
-            try:
-                settings = self.get_settings()
-                if settings.get("auto_monitoring_enabled", True):
-                    await self.poll_all_devices_cycle()
-                interval = max(5, int(settings.get("default_interval_sec", 15)))
-                await asyncio.sleep(interval)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.error(f"Error in NMS scheduler loop: {exc}")
-                await asyncio.sleep(5)
-        logger.info("NMS background scheduler loop stopped.")
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    settings = self.get_settings()
+                    if settings.get("auto_monitoring_enabled", True):
+                        await self.poll_all_devices_cycle()
+                    interval = max(5, int(settings.get("default_interval_sec", 15)))
+                    try:
+                        await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
+                        break
+                    except asyncio.TimeoutError:
+                        pass
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    logger.error(f"Error in NMS scheduler loop: {exc}")
+                    try:
+                        await asyncio.wait_for(self._stop_event.wait(), timeout=5.0)
+                        break
+                    except asyncio.TimeoutError:
+                        pass
+        finally:
+            with self._state_lock:
+                self._scheduler_state = NmsSchedulerState.STOPPED
+                self._scheduler_task = None
+            logger.info("NMS background scheduler loop stopped.")
 
     def start_monitoring(self) -> bool:
-        """Memulai background scheduler jika belum berjalan."""
-        if self.is_running():
-            return True
-        self._stop_event.clear()
+        """Memulai background scheduler jika belum berjalan (idempotent)."""
+        with self._state_lock:
+            if self.is_running() or self._scheduler_state == NmsSchedulerState.STARTING:
+                return True
+            self._scheduler_state = NmsSchedulerState.STARTING
+            self._stop_event.clear()
+
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
             except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        self._scheduler_task = loop.create_task(self._scheduler_loop())
-        return True
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+            self._scheduler_task = loop.create_task(self._scheduler_loop())
+            return True
+        except Exception as exc:
+            with self._state_lock:
+                self._scheduler_state = NmsSchedulerState.FAILED
+            logger.error(f"Gagal memulai NMS scheduler task: {exc}")
+            return False
 
     def stop_monitoring(self) -> bool:
-        """Menghentikan background scheduler."""
-        if self._scheduler_task and not self._scheduler_task.done():
+        """Menghentikan background scheduler (idempotent)."""
+        with self._state_lock:
+            if self._scheduler_state in (NmsSchedulerState.STOPPED, NmsSchedulerState.STOPPING):
+                return False
+            self._scheduler_state = NmsSchedulerState.STOPPING
             self._stop_event.set()
-            self._scheduler_task.cancel()
+            task = self._scheduler_task
             self._scheduler_task = None
-            return True
-        return False
+
+        if task and not task.done():
+            task.cancel()
+        with self._state_lock:
+            self._scheduler_state = NmsSchedulerState.STOPPED
+        return True
 
 
 _GLOBAL_NMS_ENGINE: Optional[NmsEngine] = None

@@ -5,7 +5,11 @@ and deterministic status/confidence calculators for AIRA Topology Fabric V2.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from enum import Enum
+import hashlib
 import ipaddress
+import json
 import platform
 import re
 import subprocess
@@ -396,10 +400,20 @@ def compute_observation_freshness(
     fresh_sec: float = 300.0,
     expire_sec: float = 3600.0,
 ) -> str:
-    if not last_seen or last_seen <= 0:
+    if not last_seen:
+        return "unknown"
+    try:
+        ls_val = float(last_seen)
+    except (TypeError, ValueError):
+        try:
+            from datetime import datetime
+            ls_val = datetime.fromisoformat(str(last_seen).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            return "unknown"
+    if ls_val <= 0:
         return "unknown"
     now_ts = now if now is not None else time.time()
-    age = max(0.0, now_ts - float(last_seen))
+    age = max(0.0, now_ts - ls_val)
     if age <= fresh_sec:
         return "fresh"
     if age <= expire_sec:
@@ -533,3 +547,645 @@ def calculate_deterministic_node_status(
         "availability_reason": reason,
         "legacy_status": legacy_status,
     }
+
+
+# ===========================================================================
+# Phase 4.1: Networking IV Graph Data Models & Normalized Entities
+# ===========================================================================
+
+class RelationshipClass(str, Enum):
+    """Normalized four-class topology relationship taxonomy."""
+    PHYSICAL_ADJACENCY = "physical"
+    LAYER2_ADJACENCY = "layer2"
+    LAYER3_REACHABILITY = "layer3"
+    LOGICAL_RELATIONSHIP = "logical"
+
+
+class EdgeLifecycleState(str, Enum):
+    """Lifecycle states for graph edges to avoid flappiness."""
+    ACTIVE = "active"
+    STALE = "stale"
+    TOMBSTONED = "tombstoned"
+
+
+class TopologyChangeType(str, Enum):
+    """Deterministic change event types for topology graph deltas."""
+    NODE_ADDED = "NODE_ADDED"
+    NODE_REMOVED = "NODE_REMOVED"
+    NODE_MODIFIED = "NODE_MODIFIED"
+    EDGE_ADDED = "EDGE_ADDED"
+    EDGE_REMOVED = "EDGE_REMOVED"
+    EDGE_MODIFIED = "EDGE_MODIFIED"
+    STATUS_CHANGED = "STATUS_CHANGED"
+    EVIDENCE_CHANGED = "EVIDENCE_CHANGED"
+    EVIDENCE_EXPIRED = "EVIDENCE_EXPIRED"
+    FRESHNESS_CHANGED = "FRESHNESS_CHANGED"
+    CONFIDENCE_CHANGED = "CONFIDENCE_CHANGED"
+
+
+class ConfidenceTier(str, Enum):
+    """Hierarchical confidence tiers for topology relationships."""
+    CONFIRMED = "CONFIRMED"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
+RELATIONSHIP_CLASS_VALUES = ("physical", "layer2", "layer3", "logical")
+EDGE_LIFECYCLE_VALUES = ("active", "stale", "tombstoned")
+CONFIDENCE_TIER_VALUES = ("CONFIRMED", "HIGH", "MEDIUM", "LOW")
+TOPOLOGY_CHANGE_TYPE_VALUES = (
+    "NODE_ADDED",
+    "NODE_REMOVED",
+    "NODE_MODIFIED",
+    "EDGE_ADDED",
+    "EDGE_REMOVED",
+    "EDGE_MODIFIED",
+    "STATUS_CHANGED",
+    "EVIDENCE_CHANGED",
+    "EVIDENCE_EXPIRED",
+    "FRESHNESS_CHANGED",
+    "CONFIDENCE_CHANGED",
+)
+
+
+def normalize_relationship_class(val: Any) -> str:
+    """Normalizes and validates relationship class against four explicit classes."""
+    if val is None:
+        raise ValueError("relationship_class cannot be None.")
+    s = str(val).strip().lower()
+    mapping = {
+        "physical": "physical",
+        "physical_adjacency": "physical",
+        "layer2": "layer2",
+        "layer2_adjacency": "layer2",
+        "layer3": "layer3",
+        "layer3_reachability": "layer3",
+        "logical": "logical",
+        "logical_relationship": "logical",
+    }
+    if s in mapping:
+        return mapping[s]
+    raise ValueError(
+        f"Invalid relationship_class '{val}'. Must be one of: "
+        f"{', '.join(RELATIONSHIP_CLASS_VALUES)}."
+    )
+
+
+def normalize_edge_lifecycle_state(val: Any) -> str:
+    """Normalizes and validates edge lifecycle state."""
+    if val is None:
+        raise ValueError("lifecycle_state cannot be None.")
+    s = str(val).strip().lower()
+    if s in EDGE_LIFECYCLE_VALUES:
+        return s
+    raise ValueError(
+        f"Invalid lifecycle_state '{val}'. Must be one of: "
+        f"{', '.join(EDGE_LIFECYCLE_VALUES)}."
+    )
+
+
+def normalize_confidence_tier(val: Any) -> str:
+    """Normalizes and validates confidence tier."""
+    if val is None:
+        raise ValueError("confidence_tier cannot be None.")
+    s = str(val).strip().upper()
+    if s in CONFIDENCE_TIER_VALUES:
+        return s
+    raise ValueError(
+        f"Invalid confidence_tier '{val}'. Must be one of: "
+        f"{', '.join(CONFIDENCE_TIER_VALUES)}."
+    )
+
+
+def normalize_topology_change_type(val: Any) -> str:
+    """Normalizes and validates topology delta change type."""
+    if val is None:
+        raise ValueError("change_type cannot be None.")
+    s = str(val).strip().upper()
+    if s in TOPOLOGY_CHANGE_TYPE_VALUES:
+        return s
+    raise ValueError(
+        f"Invalid change_type '{val}'. Must be one of: "
+        f"{', '.join(TOPOLOGY_CHANGE_TYPE_VALUES)}."
+    )
+
+
+# ===========================================================================
+# Phase 4.2: Evidence Protocol Weights, Half-Life Decay & Mathematical Scoring
+# ===========================================================================
+
+EVIDENCE_PROTOCOL_WEIGHTS: Dict[str, float] = {
+    "operator_confirmation": 1.00,
+    "user_confirmed": 1.00,
+    "manual": 1.00,
+    "bidirectional_l2": 0.95,
+    "mndp_bidirectional": 0.95,
+    "lldp_bidirectional": 0.95,
+    "cdp_bidirectional": 0.95,
+    "single_sided_l2": 0.80,
+    "mndp_neighbor": 0.80,
+    "lldp_neighbor": 0.80,
+    "cdp_neighbor": 0.80,
+    "mndp": 0.80,
+    "lldp": 0.80,
+    "cdp": 0.80,
+    "overlay_tunnel": 0.85,
+    "wireguard_peer": 0.85,
+    "vpn": 0.85,
+    "dedicated_p2p_subnet": 0.75,
+    "routed_p2p": 0.75,
+    "mutual_arp_multiaccess": 0.55,
+    "single_sided_arp": 0.35,
+    "arp_entry": 0.35,
+    "arp": 0.35,
+    "routing_nexthop": 0.30,
+    "route_entry": 0.30,
+    "routing_table": 0.30,
+    "bridge_host_table": 0.25,
+    "bridge_fdb": 0.25,
+    "dhcp_lease": 0.20,
+    "dhcp": 0.20,
+    "randomized_mac": 0.05,
+}
+
+EVIDENCE_HALF_LIVES: Dict[str, float] = {
+    "mndp": 180.0,
+    "lldp": 180.0,
+    "cdp": 180.0,
+    "mndp_neighbor": 180.0,
+    "lldp_neighbor": 180.0,
+    "cdp_neighbor": 180.0,
+    "bidirectional_l2": 180.0,
+    "single_sided_l2": 180.0,
+    "arp": 900.0,
+    "arp_entry": 900.0,
+    "single_sided_arp": 900.0,
+    "mutual_arp_multiaccess": 900.0,
+    "dedicated_p2p_subnet": 900.0,
+    "dhcp": 900.0,
+    "dhcp_lease": 900.0,
+    "bridge_fdb": 900.0,
+    "bridge_host_table": 900.0,
+    "routing_table": 1800.0,
+    "route_entry": 1800.0,
+    "routing_nexthop": 1800.0,
+    "overlay_tunnel": 1800.0,
+    "wireguard_peer": 1800.0,
+    "operator_confirmation": float("inf"),
+    "user_confirmed": float("inf"),
+    "manual": float("inf"),
+}
+
+DEFAULT_HALF_LIFE: float = 900.0
+
+
+def calculate_edge_confidence(
+    evidence_items: List[Any],
+    *,
+    is_bidirectional: bool = False,
+    contradiction_penalty: float = 0.0,
+    now_ts: Optional[float] = None,
+) -> Tuple[float, str, str]:
+    """
+    Computes mathematical confidence score S(e), confidence tier, and qualitative rationale
+    per AIRA-NET-IV-CONFIDENCE-001.
+
+    Formula:
+        S(e) = min(1.0, max(0.0, (sum(W_k * D_k(delta_t))) * C_dir * (1 - P_contra)))
+    """
+    now = now_ts if now_ts is not None else time.time()
+    if not evidence_items:
+        return 0.0, ConfidenceTier.LOW.value, "No empirical evidence observed."
+
+    p_contra = min(1.0, max(0.0, float(contradiction_penalty)))
+    if p_contra >= 1.0:
+        return 0.0, ConfidenceTier.LOW.value, "Physical or operational carrier down; edge confidence collapsed."
+
+    c_dir = 1.0 if is_bidirectional else 1.0
+
+    weighted_sum = 0.0
+    best_effective_w = 0.0
+    primary_rationale = ""
+    is_manual = False
+    has_bidirectional = is_bidirectional
+
+    for item in evidence_items:
+        ev_type = getattr(item, "evidence_type", None) or (item.get("evidence_type") if isinstance(item, dict) else "")
+        proto = getattr(item, "protocol", None) or (item.get("protocol") if isinstance(item, dict) else "")
+        observed_at = getattr(item, "observed_at", None) or (item.get("observed_at") if isinstance(item, dict) else now)
+        custom_explanation = getattr(item, "explanation", None) or (item.get("explanation") if isinstance(item, dict) else "")
+
+        w = EVIDENCE_PROTOCOL_WEIGHTS.get(ev_type)
+        if w is None:
+            w = EVIDENCE_PROTOCOL_WEIGHTS.get(proto, 0.30)
+
+        if ev_type in ("bidirectional_l2", "mndp_bidirectional", "lldp_bidirectional", "cdp_bidirectional"):
+            has_bidirectional = True
+
+        tau = EVIDENCE_HALF_LIVES.get(proto)
+        if tau is None:
+            tau = EVIDENCE_HALF_LIVES.get(ev_type, DEFAULT_HALF_LIFE)
+
+        if tau == float("inf") or ev_type in ("operator_confirmation", "user_confirmed", "manual"):
+            decay = 1.0
+            is_manual = True
+        else:
+            delta_t = max(0.0, now - float(observed_at or now))
+            decay = 2.0 ** (-delta_t / tau)
+
+        effective_w = w * decay
+        weighted_sum += effective_w
+
+        if effective_w > best_effective_w:
+            best_effective_w = effective_w
+            if custom_explanation:
+                primary_rationale = custom_explanation
+
+    raw_score = weighted_sum * c_dir * (1.0 - p_contra)
+    score = round(min(1.0, max(0.0, raw_score)), 3)
+
+    if score >= 0.90 or has_bidirectional or is_manual:
+        tier = ConfidenceTier.CONFIRMED.value
+        if not primary_rationale:
+            primary_rationale = "Bidirectional protocol verification or verified operator manual wiring."
+    elif score >= 0.70:
+        tier = ConfidenceTier.HIGH.value
+        if not primary_rationale:
+            primary_rationale = "Single-sided neighbor protocol or exclusive point-to-point /30 mutual ARP."
+    elif score >= 0.40:
+        tier = ConfidenceTier.MEDIUM.value
+        if not primary_rationale:
+            primary_rationale = "Inferred from shared multi-access subnet, routing next-hop, or tunnel configuration."
+    else:
+        tier = ConfidenceTier.LOW.value
+        if not primary_rationale:
+            primary_rationale = "Single ARP cache entry or randomized MAC address; physical connection unverified."
+
+    return score, tier, primary_rationale
+
+
+@dataclass
+class TopologyEdge:
+    """
+    Phase 4.1 Normalized Multi-Edge Data Model.
+    Supports multiple distinct edges between identical node pairs,
+    strict semantic relationship separation, mandatory qualitative rationale,
+    and granular lifecycle state tracking.
+    """
+    id: str
+    source_node_id: str
+    target_node_id: str
+    source_interface: str = ""
+    target_interface: str = ""
+    relationship_class: str = "physical"
+    relationship_subtype: str = "direct_copper"
+    direction: str = "bidirectional"
+    oper_status: str = "up"
+    admin_status: str = "enabled"
+    verification_status: str = "confirmed"
+    confidence_tier: str = "CONFIRMED"
+    confidence_score: float = 1.0
+    confidence_rationale: str = ""
+    bandwidth_bps: int = 1_000_000_000
+    vlan_id: Optional[int] = None
+    is_lag_member: bool = False
+    lag_parent_edge_id: Optional[str] = None
+    first_seen: float = field(default_factory=time.time)
+    last_seen: float = field(default_factory=time.time)
+    last_verified: Optional[float] = None
+    observation_freshness: str = "fresh"
+    lifecycle_state: str = "active"
+    provenance: str = "discovery_managed"
+    user_overrides: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.id or not str(self.id).strip():
+            raise ValueError("TopologyEdge.id cannot be empty.")
+        if not self.source_node_id or not str(self.source_node_id).strip():
+            raise ValueError("TopologyEdge.source_node_id cannot be empty.")
+        if not self.target_node_id or not str(self.target_node_id).strip():
+            raise ValueError("TopologyEdge.target_node_id cannot be empty.")
+
+        self.relationship_class = normalize_relationship_class(self.relationship_class)
+        self.lifecycle_state = normalize_edge_lifecycle_state(self.lifecycle_state)
+        self.confidence_tier = normalize_confidence_tier(self.confidence_tier)
+
+        try:
+            self.confidence_score = float(self.confidence_score)
+        except (ValueError, TypeError):
+            raise ValueError(f"confidence_score must be a float, got {self.confidence_score}")
+        if not (0.0 <= self.confidence_score <= 1.0):
+            raise ValueError(f"confidence_score must be between 0.0 and 1.0, got {self.confidence_score}")
+
+        if not self.confidence_rationale or not str(self.confidence_rationale).strip():
+            raise ValueError("confidence_rationale must be provided and non-empty.")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "source_node_id": self.source_node_id,
+            "target_node_id": self.target_node_id,
+            "source_interface": self.source_interface,
+            "target_interface": self.target_interface,
+            "relationship_class": self.relationship_class,
+            "relationship_subtype": self.relationship_subtype,
+            "direction": self.direction,
+            "oper_status": self.oper_status,
+            "admin_status": self.admin_status,
+            "verification_status": self.verification_status,
+            "confidence_tier": self.confidence_tier,
+            "confidence_score": self.confidence_score,
+            "confidence_rationale": self.confidence_rationale,
+            "bandwidth_bps": self.bandwidth_bps,
+            "vlan_id": self.vlan_id,
+            "is_lag_member": self.is_lag_member,
+            "lag_parent_edge_id": self.lag_parent_edge_id,
+            "first_seen": self.first_seen,
+            "last_seen": self.last_seen,
+            "last_verified": self.last_verified,
+            "observation_freshness": self.observation_freshness,
+            "lifecycle_state": self.lifecycle_state,
+            "provenance": self.provenance,
+            "user_overrides": self.user_overrides,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> TopologyEdge:
+        payload = dict(data)
+        if "user_overrides_json" in payload and "user_overrides" not in payload:
+            raw = payload.pop("user_overrides_json")
+            payload["user_overrides"] = json.loads(raw) if isinstance(raw, str) and raw else {}
+        if "metadata_json" in payload and "metadata" not in payload:
+            raw = payload.pop("metadata_json")
+            payload["metadata"] = json.loads(raw) if isinstance(raw, str) and raw else {}
+        if "is_lag_member" in payload and isinstance(payload["is_lag_member"], int):
+            payload["is_lag_member"] = bool(payload["is_lag_member"])
+        valid_keys = set(cls.__dataclass_fields__.keys())
+        filtered = {k: v for k, v in payload.items() if k in valid_keys}
+        return cls(**filtered)
+
+
+@dataclass
+class EdgeEvidence:
+    """
+    Phase 4.1 Verifiable Edge Evidence Model.
+    Provides first-class provenance, observing device tracking, sanitized raw excerpts,
+    and TTL-based freshness management.
+    """
+    id: Optional[int] = None
+    edge_id: str = ""
+    evidence_type: str = ""
+    protocol: str = ""
+    observing_device_id: str = ""
+    local_interface: str = ""
+    remote_interface: str = ""
+    remote_chassis_mac: str = ""
+    raw_excerpt: str = ""
+    confidence_contribution: str = "medium"
+    explanation: str = ""
+    observed_at: float = field(default_factory=time.time)
+    expires_at: Optional[float] = None
+    is_active: bool = True
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.edge_id or not str(self.edge_id).strip():
+            raise ValueError("EdgeEvidence.edge_id cannot be empty.")
+        if not self.evidence_type or not str(self.evidence_type).strip():
+            raise ValueError("EdgeEvidence.evidence_type cannot be empty.")
+        if not self.observing_device_id or not str(self.observing_device_id).strip():
+            raise ValueError("EdgeEvidence.observing_device_id cannot be empty.")
+        if self.raw_excerpt:
+            self.raw_excerpt = sanitize_cli_excerpt(self.raw_excerpt, 800)
+        if self.explanation:
+            self.explanation = sanitize_untrusted_text(self.explanation, 400)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "edge_id": self.edge_id,
+            "evidence_type": self.evidence_type,
+            "protocol": self.protocol,
+            "observing_device_id": self.observing_device_id,
+            "local_interface": self.local_interface,
+            "remote_interface": self.remote_interface,
+            "remote_chassis_mac": self.remote_chassis_mac,
+            "raw_excerpt": self.raw_excerpt,
+            "confidence_contribution": self.confidence_contribution,
+            "explanation": self.explanation,
+            "observed_at": self.observed_at,
+            "expires_at": self.expires_at,
+            "is_active": self.is_active,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> EdgeEvidence:
+        payload = dict(data)
+        if "metadata_json" in payload and "metadata" not in payload:
+            raw = payload.pop("metadata_json")
+            payload["metadata"] = json.loads(raw) if isinstance(raw, str) and raw else {}
+        if "is_active" in payload and isinstance(payload["is_active"], int):
+            payload["is_active"] = bool(payload["is_active"])
+        valid_keys = set(cls.__dataclass_fields__.keys())
+        filtered = {k: v for k, v in payload.items() if k in valid_keys}
+        return cls(**filtered)
+
+
+@dataclass
+class TopologySnapshot:
+    """
+    Phase 4.1 Immutable Topology Snapshot Model.
+    Represents an immutable point-in-time state of the network graph
+    protected by SHA-256 cryptographic verification and database triggers.
+    """
+    snapshot_id: str
+    schema_version: str = "4.1"
+    discovery_run_id: Optional[str] = None
+    created_at: float = field(default_factory=time.time)
+    node_count: int = 0
+    edge_count: int = 0
+    graph_json: str = "{}"
+    sha256_hash: str = ""
+    trigger_type: str = "discovery_run"
+    description: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.snapshot_id or not str(self.snapshot_id).strip():
+            raise ValueError("TopologySnapshot.snapshot_id cannot be empty.")
+        if not self.sha256_hash and self.graph_json:
+            self.sha256_hash = self.calculate_checksum()
+
+    def calculate_checksum(self) -> str:
+        return hashlib.sha256(self.graph_json.encode("utf-8")).hexdigest()
+
+    def verify_integrity(self) -> bool:
+        return self.sha256_hash == self.calculate_checksum()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "snapshot_id": self.snapshot_id,
+            "schema_version": self.schema_version,
+            "discovery_run_id": self.discovery_run_id,
+            "created_at": self.created_at,
+            "node_count": self.node_count,
+            "edge_count": self.edge_count,
+            "graph_json": self.graph_json,
+            "sha256_hash": self.sha256_hash,
+            "trigger_type": self.trigger_type,
+            "description": self.description,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> TopologySnapshot:
+        payload = dict(data)
+        if "metadata_json" in payload and "metadata" not in payload:
+            raw = payload.pop("metadata_json")
+            payload["metadata"] = json.loads(raw) if isinstance(raw, str) and raw else {}
+        valid_keys = set(cls.__dataclass_fields__.keys())
+        filtered = {k: v for k, v in payload.items() if k in valid_keys}
+        return cls(**filtered)
+
+
+@dataclass
+class TopologyChange:
+    """
+    Phase 4.1 Topology Delta Change Model.
+    Tracks structural and state modifications across snapshots.
+    """
+    id: Optional[int] = None
+    snapshot_id: Optional[str] = None
+    change_type: str = "STATUS_CHANGED"
+    entity_id: str = ""
+    change_reason: str = ""
+    attribute_name: str = ""
+    before_value_json: str = ""
+    after_value_json: str = ""
+    detected_at: float = field(default_factory=time.time)
+
+    def __post_init__(self) -> None:
+        self.change_type = normalize_topology_change_type(self.change_type)
+        if not self.entity_id or not str(self.entity_id).strip():
+            raise ValueError("TopologyChange.entity_id cannot be empty.")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "snapshot_id": self.snapshot_id,
+            "change_type": self.change_type,
+            "entity_id": self.entity_id,
+            "change_reason": self.change_reason,
+            "attribute_name": self.attribute_name,
+            "before_value_json": self.before_value_json,
+            "after_value_json": self.after_value_json,
+            "detected_at": self.detected_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> TopologyChange:
+        payload = dict(data)
+        valid_keys = set(cls.__dataclass_fields__.keys())
+        filtered = {k: v for k, v in payload.items() if k in valid_keys}
+        return cls(**filtered)
+
+
+def normalize_interface_name(val: Any) -> str:
+    """Normalizes interface identifiers for deterministic fallback comparison."""
+    if not val:
+        return ""
+    s = str(val).strip().lower()
+    return re.sub(r"\s+", "", s)
+
+
+def compute_edge_canonical_key(edge: Dict[str, Any]) -> Tuple[Any, ...]:
+    """
+    Computes deterministic multi-edge fallback canonical identity key.
+    Preserves endpoint-interface tuple pairings (T_A, T_B) and relationship semantics.
+    For layer3 next_hop_reachability, preserves direction (source -> target).
+    """
+    rel_class = normalize_relationship_class(edge.get("relationship_class", "physical"))
+    subtype = str(edge.get("relationship_subtype") or "").strip().lower()
+
+    u = str(edge.get("source_node_id") or "").strip()
+    v = str(edge.get("target_node_id") or "").strip()
+    i_u = normalize_interface_name(edge.get("source_interface") or "")
+    i_v = normalize_interface_name(edge.get("target_interface") or "")
+
+    meta = edge.get("metadata") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+
+    T1 = (u, i_u)
+    T2 = (v, i_v)
+    T_A, T_B = (T1, T2) if T1 <= T2 else (T2, T1)
+
+    if rel_class == "physical":
+        return ("physical", subtype or "ethernet", T_A, T_B)
+    elif rel_class == "layer2":
+        vlan_raw = meta.get("vlan_id") if "vlan_id" in meta else (meta.get("vlan") if "vlan" in meta else 0)
+        try:
+            vlan_id = int(vlan_raw)
+        except (ValueError, TypeError):
+            vlan_id = str(vlan_raw)
+        return ("layer2", subtype or "bridge_domain", T_A, T_B, vlan_id)
+    elif rel_class == "layer3":
+        if subtype == "next_hop_reachability" or edge.get("relationship_subtype") == "next_hop_reachability":
+            # Directed: source -> target MUST be preserved!
+            nexthop = str(meta.get("nexthop_ip") or meta.get("next_hop") or meta.get("ip") or "").strip().lower()
+            return ("layer3", "next_hop_reachability", u, v, nexthop)
+        else:
+            cidr = str(meta.get("subnet_cidr") or meta.get("network_cidr") or meta.get("cidr") or "").strip().lower()
+            return ("layer3", subtype or "routed_point_to_point", T_A, T_B, cidr)
+    elif rel_class == "logical":
+        overlay = str(meta.get("tunnel_id") or meta.get("vni") or meta.get("vpn_id") or meta.get("overlay_id") or "").strip().lower()
+        return ("logical", subtype or "overlay", T_A, T_B, overlay)
+    else:
+        return (rel_class, subtype, T_A, T_B)
+
+
+@dataclass
+class GraphDiffReport:
+    """
+    Phase 4.4A Semantic Graph Diff Report Model.
+    Captures multi-edge, operational, freshness, and evidence deltas across snapshots
+    with epistemic safeguards against false removals.
+    """
+    base_snapshot_id: str
+    target_snapshot_id: str
+    generated_at: float = field(default_factory=time.time)
+    summary: Dict[str, int] = field(default_factory=dict)
+    structural_changes: List[Dict[str, Any]] = field(default_factory=list)
+    operational_changes: List[Dict[str, Any]] = field(default_factory=list)
+    evidence_changes: List[Dict[str, Any]] = field(default_factory=list)
+    freshness_changes: List[Dict[str, Any]] = field(default_factory=list)
+    indeterminate_items: List[Dict[str, Any]] = field(default_factory=list)
+    telemetry: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "base_snapshot_id": self.base_snapshot_id,
+            "target_snapshot_id": self.target_snapshot_id,
+            "generated_at": self.generated_at,
+            "summary": self.summary,
+            "structural_changes": self.structural_changes,
+            "operational_changes": self.operational_changes,
+            "evidence_changes": self.evidence_changes,
+            "freshness_changes": self.freshness_changes,
+            "indeterminate_items": self.indeterminate_items,
+            "telemetry": self.telemetry,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> GraphDiffReport:
+        payload = dict(data)
+        valid_keys = set(cls.__dataclass_fields__.keys())
+        filtered = {k: v for k, v in payload.items() if k in valid_keys}
+        return cls(**filtered)

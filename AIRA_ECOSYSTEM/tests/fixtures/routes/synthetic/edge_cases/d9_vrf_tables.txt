@@ -1,0 +1,2 @@
+0  As  dst-address=10.0.0.0/8 routing-table=vpn-customer-a gateway=10.99.0.1 immediate-gw=10.99.0.1%vlan100 distance=1
+1  As  dst-address=10.0.0.0/8 routing-table=main gateway=10.1.0.1 immediate-gw=10.1.0.1%ether1 distance=1

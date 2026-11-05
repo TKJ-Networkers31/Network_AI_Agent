@@ -7,15 +7,42 @@ Connection Engine, Phase 2.2).
 import time
 import uuid
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Optional
 
 from tools.ssh.shell import PersistentShell
 
-STATUS_CONNECTING = "connecting"
-STATUS_CONNECTED = "connected"
-STATUS_BUSY = "busy"
-STATUS_CLOSED = "closed"
-STATUS_ERROR = "error"
+
+class ConnectionState(str, Enum):
+    DISCONNECTED = "disconnected"
+    CONNECTING = "connecting"
+    CONNECTED = "connected"
+    BUSY = "busy"
+    AUTHENTICATION_FAILED = "authentication_failed"
+    CONNECTION_TIMEOUT = "connection_timeout"
+    CONNECTION_ERROR = "connection_error"
+    SESSION_EXPIRED = "session_expired"
+    CLOSING = "closing"
+    CLOSED = "closed"
+
+
+class ManagementProtocol(str, Enum):
+    SSH = "ssh"
+    HTTPS = "https"
+    REST = "rest"
+    SNMP = "snmp"
+    WINBOX = "winbox"
+
+
+# Backward compatible aliases
+STATUS_CONNECTING = ConnectionState.CONNECTING.value
+STATUS_CONNECTED = ConnectionState.CONNECTED.value
+STATUS_BUSY = ConnectionState.BUSY.value
+STATUS_CLOSED = ConnectionState.CLOSED.value
+STATUS_ERROR = ConnectionState.CONNECTION_ERROR.value
+STATUS_TIMEOUT = ConnectionState.CONNECTION_TIMEOUT.value
+STATUS_AUTH_FAILED = ConnectionState.AUTHENTICATION_FAILED.value
+STATUS_EXPIRED = ConnectionState.SESSION_EXPIRED.value
 
 
 @dataclass

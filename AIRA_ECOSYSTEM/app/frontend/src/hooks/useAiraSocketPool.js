@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const MAX_BACKOFF_MS = 15000;
 const BASE_BACKOFF_MS = 1000;
+const HEARTBEAT_INTERVAL_MS = 15000;
 
 function buildWsUrl(sessionId) {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -57,12 +58,24 @@ export function useAiraSocketPool({ activeId, keepAliveIds = [], onEvent } = {})
         if (entry.ws !== ws) return;
         entry.retry = 0;
         setStatus(sid, "open");
+
+        if (entry.heartbeatTimer) clearInterval(entry.heartbeatTimer);
+        entry.heartbeatTimer = setInterval(() => {
+          if (entry.ws && entry.ws.readyState === WebSocket.OPEN) {
+            try {
+              entry.ws.send(JSON.stringify({ type: "ping" }));
+            } catch {
+              // abaikan
+            }
+          }
+        }, HEARTBEAT_INTERVAL_MS);
       };
 
       ws.onmessage = (event) => {
         if (entry.ws !== ws) return;
         try {
           const parsed = JSON.parse(event.data);
+          if (parsed.type === "pong") return;
           onEventRef.current?.(parsed);
         } catch {
           // abaikan payload non-JSON
@@ -70,6 +83,10 @@ export function useAiraSocketPool({ activeId, keepAliveIds = [], onEvent } = {})
       };
 
       ws.onclose = () => {
+        if (entry.heartbeatTimer) {
+          clearInterval(entry.heartbeatTimer);
+          entry.heartbeatTimer = null;
+        }
         if (entry.ws !== ws) return;
 
         setStatus(sid, "closed");
@@ -86,6 +103,10 @@ export function useAiraSocketPool({ activeId, keepAliveIds = [], onEvent } = {})
       };
 
       ws.onerror = () => {
+        if (entry.heartbeatTimer) {
+          clearInterval(entry.heartbeatTimer);
+          entry.heartbeatTimer = null;
+        }
         ws.close();
       };
     },
@@ -98,6 +119,10 @@ export function useAiraSocketPool({ activeId, keepAliveIds = [], onEvent } = {})
 
     entry.closedByUser = true;
     clearTimeout(entry.timer);
+    if (entry.heartbeatTimer) {
+      clearInterval(entry.heartbeatTimer);
+      entry.heartbeatTimer = null;
+    }
 
     const ws = entry.ws;
     if (ws) {

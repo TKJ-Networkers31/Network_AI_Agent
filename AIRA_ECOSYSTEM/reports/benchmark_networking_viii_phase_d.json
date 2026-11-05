@@ -1,0 +1,70 @@
+{
+  "benchmark_name": "Networking VIII Phase D \u2014 Customer Self-Service Portal",
+  "timestamp_utc": "2026-11-04T15:06:44.545225+00:00",
+  "environment": {
+    "device": "ThinkPad X270",
+    "cpu": "Intel Core i7-7500U (2 cores / 4 threads, 2.70 GHz - 3.50 GHz)",
+    "ram_total_gb": 8.0,
+    "os": "Windows 11",
+    "execution_mode": "CPU-Only"
+  },
+  "metrics": {
+    "scale_profile": {
+      "total_tenants": 50,
+      "total_sites": 50,
+      "total_devices": 250,
+      "total_gateways": 50,
+      "total_sla_policies": 50,
+      "total_support_tickets": 50,
+      "total_support_comments": 100
+    },
+    "authentication_and_session": {
+      "avg_login_latency_ms": 239.98,
+      "p95_login_latency_ms": 316.04,
+      "token_validation_throughput_ops_sec": 246.0
+    },
+    "dashboard_overview_latency": {
+      "tenants_10": {
+        "avg_ms": 78.48,
+        "p95_ms": 88.85
+      },
+      "tenants_25": {
+        "avg_ms": 75.0,
+        "p95_ms": 89.88
+      },
+      "tenants_50": {
+        "avg_ms": 81.91,
+        "p95_ms": 99.29
+      }
+    },
+    "anti_idor_scope_isolation": {
+      "legitimate_scoped_lookup_ms": 3.442,
+      "adversarial_rejection_ms": 3.389,
+      "idor_overhead_ms": 0.054
+    },
+    "support_desk_throughput": {
+      "total_operations": 300,
+      "total_duration_seconds": 4.65,
+      "throughput_ops_per_second": 64.5
+    },
+    "sla_availability_reporting": {
+      "avg_report_calc_latency_ms": 20.95,
+      "p95_report_calc_latency_ms": 27.61
+    },
+    "system_resources": {
+      "sqlite_database_size_kb": 856.0,
+      "sqlite_database_size_mb": 0.84,
+      "python_ram_peak_mb": 0.11,
+      "python_ram_delta_mb": 0.11
+    },
+    "acceptance_criteria_verification": {
+      "overview_latency_sub_100ms_avg": true,
+      "overview_latency_sub_200ms_p95": true,
+      "token_validation_sub_10ms": true,
+      "auth_login_sub_500ms": true,
+      "anti_idor_overhead_sub_5ms": true,
+      "ram_delta_sub_50mb": true,
+      "all_benchmarks_passed": true
+    }
+  }
+}

@@ -543,3 +543,34 @@ class DesiredStateIn(BaseModel):
     change_type: str = Field(..., description="E.g. ADD_VLAN, ADD_STATIC_ROUTE, CONFIGURE_NAT, OSPF_PEER, BGP_PEER, FIREWALL_RULE")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Change attributes (vlan_id, subnet, gateway, etc.)")
     incident_id: Optional[str] = Field(None, description="Optional incident ID correlating this change")
+
+
+class BatchCollectIn(BaseModel):
+    targets: List[str] = Field(..., description="List of target device names or IPs")
+    required_types: Optional[List[str]] = Field(None, description="Optional observation types to collect")
+
+
+class CorrelationIn(BaseModel):
+    targets: List[str] = Field(..., description="List of target device names or IPs to correlate")
+    required_types: Optional[List[str]] = Field(None, description="Optional observation types to collect")
+
+
+class MultiDeviceInvestigationIn(BaseModel):
+    primary_device: str = Field(..., description="Primary device experiencing symptoms")
+    related_devices: List[str] = Field(default_factory=list, description="Related or upstream devices to inspect")
+    symptom_description: str = Field(..., description="Natural language description of problem")
+    incident_type: Optional[IncidentType] = Field(None, description="Incident classification")
+    severity: SeverityLevel = Field(SeverityLevel.MEDIUM, description="Reported severity")
+    target_ip: Optional[str] = Field(None, description="Target destination or client IP under test")
+    correlation_id: Optional[str] = Field(None, description="Optional correlation ID")
+
+
+class AutoDiagnoseIn(BaseModel):
+    target_devices: Optional[List[str]] = Field(default=None, description="Optional list of target devices. If omitted, automatically selects available devices.")
+    symptom: Optional[str] = Field(default=None, description="Reported network symptom or problem description")
+    target_ip: Optional[str] = Field(default=None, description="Optional target destination or client IP")
+    routing_table: str = Field(default="main", max_length=64, description="Routing table or VRF name")
+    auto_plan: bool = Field(default=True, description="Whether to automatically construct a non-mutating remediation plan if an issue is detected")
+    require_dio_validation: bool = Field(default=False, description="Validate missing required parameters via DIO before running")
+    reuse_fresh_sec: float = Field(default=30.0, ge=0.0, le=300.0, description="Reuse fresh evidence collected within this window (seconds)")
+    persist_route_snapshot: bool = Field(default=False, description="Optionally persist immutable route snapshot during diagnosis")

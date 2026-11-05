@@ -34,6 +34,7 @@ export default function TopologyNodeInspector({
   nodesMap,
   onClose,
   onSelectNode,
+  onSelectEdge,
   onEditNode,
   onDeleteNode,
   onOpenAddLink,
@@ -46,6 +47,7 @@ export default function TopologyNodeInspector({
   pinging,
   troubleshooting,
   pushToast,
+  readOnly = false,
 }) {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
@@ -134,12 +136,12 @@ export default function TopologyNodeInspector({
         body: JSON.stringify({
           link_id: linkId,
           verification_status: "confirmed",
-          reason: `Confirmed physical wiring on ${node.name} by administrator.`,
+          reason: `Konfirmasi administratif adjacency fisik pada ${node.name} oleh administrator.`,
         }),
       });
       const json = await res.json();
       if (json.success) {
-        pushToast("Kabel dikonfirmasi sebagai Physical Link terverifikasi!", "success");
+        pushToast("Link dikonfirmasi secara administratif sebagai Physical Link terverifikasi!", "success");
         onRefreshTopology();
       } else {
         pushToast(json.detail || "Gagal memverifikasi link.", "error");
@@ -166,20 +168,29 @@ export default function TopologyNodeInspector({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          <button
-            onClick={() => onEditNode({ ...node })}
-            className="w-7 h-7 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-white/10 transition"
-            title="Edit detail perangkat"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => onDeleteNode(node.id)}
-            className="w-7 h-7 rounded-full flex items-center justify-center text-red-400/80 hover:text-red-400 hover:bg-red-500/10 transition"
-            title="Hapus perangkat"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          {readOnly && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+              Snapshot
+            </span>
+          )}
+          {!readOnly && onEditNode && (
+            <button
+              onClick={() => onEditNode({ ...node })}
+              className="w-7 h-7 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-white/10 transition"
+              title="Edit detail perangkat"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {!readOnly && onDeleteNode && (
+            <button
+              onClick={() => onDeleteNode(node.id)}
+              className="w-7 h-7 rounded-full flex items-center justify-center text-red-400/80 hover:text-red-400 hover:bg-red-500/10 transition"
+              title="Hapus perangkat"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             onClick={onClose}
             className="w-7 h-7 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-white/10 transition"
@@ -347,130 +358,137 @@ export default function TopologyNodeInspector({
       </div>
 
       {/* Quick Governance Actions */}
-      <div className="mb-3 bg-white/5 border border-white/10 rounded-xl p-2.5 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-secondary flex items-center gap-1">
-            <Shield className="w-3 h-3 text-sky-400" /> Ownership & Scope Governance
-          </span>
-          <button
-            onClick={() => setClassifyOpen((v) => !v)}
-            className="text-[10px] text-sky-400 hover:text-sky-300"
-          >
-            {classifyOpen ? "Tutup Form" : "Custom Override"}
-          </button>
+      {readOnly ? (
+        <div className="mb-3 bg-purple-950/20 border border-purple-500/30 rounded-xl p-2.5 text-[11px] text-purple-300">
+          <span className="font-semibold block text-purple-200">Mode Riwayat Terisolasi (Read-Only)</span>
+          Perangkat ini ditampilkan dari rekaman snapshot historis. Perubahan tata kelola dan klasifikasi dinonaktifkan.
         </div>
-
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            disabled={savingClass}
-            onClick={() =>
-              applyClassification(
-                {
-                  ownership_status: "owned",
-                  topology_scope: "enterprise_internal",
-                  trust_zone: "internal",
-                  is_isp_boundary: false,
-                  reason: "Confirmed company-owned internal device by administrator.",
-                },
-                `${node.name} ditandai sebagai Company-Owned Internal.`
-              )
-            }
-            className="px-2.5 py-1 rounded-pill bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 text-[10px] font-medium flex items-center gap-1"
-          >
-            <CheckCircle2 className="w-3 h-3" /> Confirm Owned
-          </button>
-
-          <button
-            disabled={savingClass}
-            onClick={() =>
-              applyClassification(
-                {
-                  ownership_status: "third_party",
-                  topology_scope: "isp_upstream",
-                  trust_zone: "isp",
-                  is_isp_boundary: true,
-                  reason: "Marked as ISP upstream boundary device.",
-                },
-                `${node.name} ditandai sebagai ISP Boundary.`
-              )
-            }
-            className="px-2.5 py-1 rounded-pill bg-cyan-500/15 text-cyan-200 border border-cyan-400/30 hover:bg-cyan-500/25 text-[10px] font-medium flex items-center gap-1"
-          >
-            <Globe className="w-3 h-3" /> Mark ISP
-          </button>
-
-          <button
-            disabled={savingClass}
-            onClick={() =>
-              applyClassification(
-                {
-                  excluded_from_discovery: true,
-                  reason: "Excluded from recursive topology discovery by administrator.",
-                },
-                `${node.name} dikecualikan dari recursive discovery.`
-              )
-            }
-            className="px-2.5 py-1 rounded-pill bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25 text-[10px] font-medium"
-          >
-            Exclude Scan
-          </button>
-        </div>
-
-        {classifyOpen && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              applyClassification(classForm, "Custom override klasifikasi disimpan.");
-            }}
-            className="pt-2 border-t border-white/10 space-y-2 text-[11px]"
-          >
-            <div className="grid grid-cols-2 gap-1.5">
-              <div>
-                <label className="text-text-secondary block mb-0.5 text-[10px]">Ownership</label>
-                <select
-                  value={classForm.ownership_status}
-                  onChange={(e) => setClassForm({ ...classForm, ownership_status: e.target.value })}
-                  className="w-full bg-black border border-white/15 rounded-lg px-2 py-1 text-text-primary"
-                >
-                  <option value="owned">owned</option>
-                  <option value="managed_external">managed_external</option>
-                  <option value="third_party">third_party</option>
-                  <option value="unknown">unknown</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-text-secondary block mb-0.5 text-[10px]">Scope</label>
-                <select
-                  value={classForm.topology_scope}
-                  onChange={(e) => setClassForm({ ...classForm, topology_scope: e.target.value })}
-                  className="w-full bg-black border border-white/15 rounded-lg px-2 py-1 text-text-primary"
-                >
-                  <option value="enterprise_internal">enterprise_internal</option>
-                  <option value="enterprise_edge">enterprise_edge</option>
-                  <option value="isp_upstream">isp_upstream</option>
-                  <option value="external">external</option>
-                  <option value="vpn_remote">vpn_remote</option>
-                  <option value="unclassified">unclassified</option>
-                </select>
-              </div>
-            </div>
-            <input
-              type="text"
-              placeholder="Alasan audit (opsional)..."
-              value={classForm.reason}
-              onChange={(e) => setClassForm({ ...classForm, reason: e.target.value })}
-              className="w-full bg-black/60 border border-white/15 rounded-lg px-2.5 py-1 text-text-primary"
-            />
+      ) : (
+        <div className="mb-3 bg-white/5 border border-white/10 rounded-xl p-2.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-text-secondary flex items-center gap-1">
+              <Shield className="w-3 h-3 text-sky-400" /> Ownership & Scope Governance
+            </span>
             <button
-              type="submit"
-              disabled={savingClass}
-              className="w-full py-1.5 rounded-pill bg-sky-500 text-black font-semibold text-[11px]"
+              onClick={() => setClassifyOpen((v) => !v)}
+              className="text-[10px] text-sky-400 hover:text-sky-300"
             >
-              Simpan Override Klasifikasi
+              {classifyOpen ? "Tutup Form" : "Custom Override"}
             </button>
-          </form>
-        )}
-      </div>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              disabled={savingClass}
+              onClick={() =>
+                applyClassification(
+                  {
+                    ownership_status: "owned",
+                    topology_scope: "enterprise_internal",
+                    trust_zone: "internal",
+                    is_isp_boundary: false,
+                    reason: "Confirmed company-owned internal device by administrator.",
+                  },
+                  `${node.name} ditandai sebagai Company-Owned Internal.`
+                )
+              }
+              className="px-2.5 py-1 rounded-pill bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 text-[10px] font-medium flex items-center gap-1"
+            >
+              <CheckCircle2 className="w-3 h-3" /> Confirm Owned
+            </button>
+
+            <button
+              disabled={savingClass}
+              onClick={() =>
+                applyClassification(
+                  {
+                    ownership_status: "third_party",
+                    topology_scope: "isp_upstream",
+                    trust_zone: "isp",
+                    is_isp_boundary: true,
+                    reason: "Marked as ISP upstream boundary device.",
+                  },
+                  `${node.name} ditandai sebagai ISP Boundary.`
+                )
+              }
+              className="px-2.5 py-1 rounded-pill bg-cyan-500/15 text-cyan-200 border border-cyan-400/30 hover:bg-cyan-500/25 text-[10px] font-medium flex items-center gap-1"
+            >
+              <Globe className="w-3 h-3" /> Mark ISP
+            </button>
+
+            <button
+              disabled={savingClass}
+              onClick={() =>
+                applyClassification(
+                  {
+                    excluded_from_discovery: true,
+                    reason: "Excluded from recursive topology discovery by administrator.",
+                  },
+                  `${node.name} dikecualikan dari recursive discovery.`
+                )
+              }
+              className="px-2.5 py-1 rounded-pill bg-rose-500/15 text-rose-300 border border-rose-500/30 hover:bg-rose-500/25 text-[10px] font-medium"
+            >
+              Exclude Scan
+            </button>
+          </div>
+
+          {classifyOpen && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                applyClassification(classForm, "Custom override klasifikasi disimpan.");
+              }}
+              className="pt-2 border-t border-white/10 space-y-2 text-[11px]"
+            >
+              <div className="grid grid-cols-2 gap-1.5">
+                <div>
+                  <label className="text-text-secondary block mb-0.5 text-[10px]">Ownership</label>
+                  <select
+                    value={classForm.ownership_status}
+                    onChange={(e) => setClassForm({ ...classForm, ownership_status: e.target.value })}
+                    className="w-full bg-black border border-white/15 rounded-lg px-2 py-1 text-text-primary"
+                  >
+                    <option value="owned">owned</option>
+                    <option value="managed_external">managed_external</option>
+                    <option value="third_party">third_party</option>
+                    <option value="unknown">unknown</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-text-secondary block mb-0.5 text-[10px]">Scope</label>
+                  <select
+                    value={classForm.topology_scope}
+                    onChange={(e) => setClassForm({ ...classForm, topology_scope: e.target.value })}
+                    className="w-full bg-black border border-white/15 rounded-lg px-2 py-1 text-text-primary"
+                  >
+                    <option value="enterprise_internal">enterprise_internal</option>
+                    <option value="enterprise_edge">enterprise_edge</option>
+                    <option value="isp_upstream">isp_upstream</option>
+                    <option value="external">external</option>
+                    <option value="vpn_remote">vpn_remote</option>
+                    <option value="unclassified">unclassified</option>
+                  </select>
+                </div>
+              </div>
+              <input
+                type="text"
+                placeholder="Alasan audit (opsional)..."
+                value={classForm.reason}
+                onChange={(e) => setClassForm({ ...classForm, reason: e.target.value })}
+                className="w-full bg-black/60 border border-white/15 rounded-lg px-2.5 py-1 text-text-primary"
+              />
+              <button
+                type="submit"
+                disabled={savingClass}
+                className="w-full py-1.5 rounded-pill bg-sky-500 text-black font-semibold text-[11px]"
+              >
+                Simpan Override Klasifikasi
+              </button>
+            </form>
+          )}
+        </div>
+      )}
 
       {/* Supporting Evidence Viewer */}
       <div className="mb-3 bg-white/5 border border-white/10 rounded-xl overflow-hidden">
@@ -521,13 +539,15 @@ export default function TopologyNodeInspector({
           <span className="text-[10px] font-semibold uppercase text-text-secondary tracking-wider">
             Links & Wiring ({connectedLinks.length})
           </span>
-          <button
-            onClick={onOpenAddLink}
-            className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center gap-1 transition"
-          >
-            <Plus className="w-3 h-3" />
-            <span>Manual Link</span>
-          </button>
+          {!readOnly && onOpenAddLink && (
+            <button
+              onClick={onOpenAddLink}
+              className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center gap-1 transition"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Manual Link</span>
+            </button>
+          )}
         </div>
 
         <div className="space-y-1.5">
@@ -564,26 +584,34 @@ export default function TopologyNodeInspector({
                     >
                       {vs} • {link.link_type}
                     </span>
-                    {vs !== "confirmed" && vs !== "manual" && (
+                    {!readOnly && vs !== "confirmed" && vs !== "manual" && (
                       <button
                         onClick={() => handleVerifyLink(link.id)}
                         className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-[9px]"
-                        title="Konfirmasi sebagai kabel fisik terverifikasi"
+                        title="Konfirmasi administratif sebagai kabel fisik"
                       >
                         ✓
                       </button>
                     )}
-                    <button
-                      onClick={() => onDeleteLink(link.id)}
-                      className="w-5 h-5 rounded flex items-center justify-center text-red-400/70 hover:text-red-400 hover:bg-red-500/10"
-                      title="Hapus link"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    {!readOnly && onDeleteLink && (
+                      <button
+                        onClick={() => onDeleteLink(link.id)}
+                        className="w-5 h-5 rounded flex items-center justify-center text-red-400/70 hover:text-red-400 hover:bg-red-500/10"
+                        title="Hapus link"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-[10px] font-mono text-text-secondary">
+                <div
+                  onClick={() => onSelectEdge && onSelectEdge(link)}
+                  className={`flex items-center justify-between text-[10px] font-mono text-text-secondary ${
+                    onSelectEdge ? "cursor-pointer hover:text-sky-300 transition" : ""
+                  }`}
+                  title={onSelectEdge ? "Klik untuk melihat detail multi-layer & bukti empiris relasi" : undefined}
+                >
                   <span>
                     {localPort || "? local"} ➔ {remotePort || "? unspecified"}
                   </span>

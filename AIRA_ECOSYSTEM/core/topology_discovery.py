@@ -234,6 +234,10 @@ class TopologyDiscoveryMixin:
             if dname:
                 inv_by_name[dname] = d
 
+        nodes_processed = 0
+        links_processed = 0
+        edges_processed = 0
+
         # 1. Normalize Seed / Interrogated Device Identity & Hardware Info
         clean_source_name = sanitize_untrusted_text(source_name or "Seed-Router", 64)
         clean_source_ip = normalize_ip(source_ip)
@@ -776,6 +780,33 @@ class TopologyDiscoveryMixin:
                     },
                     now=now,
                 )
+                self._reconcile_discovered_edge(
+                    source_id=source_node_id,
+                    target_id=gw_node_id,
+                    relationship_class="layer3",
+                    source_interface=rt_if,
+                    target_interface="",
+                    relationship_subtype="default_gateway_transit",
+                    direction="directed",
+                    verification_status="inferred",
+                    confidence_tier="MEDIUM" if rt.get("active") else "LOW",
+                    confidence_score=0.50 if rt.get("active") else 0.30,
+                    confidence_rationale="Logical next-hop relationship from routing table (0.0.0.0/0); does not prove direct physical cabling.",
+                    oper_status="up" if rt.get("active") else "down",
+                    bandwidth_bps=1000000000,
+                    evidence_item={
+                        "evidence_type": "route_entry",
+                        "protocol": "routing_table",
+                        "local_interface": rt_if,
+                        "remote_interface": "",
+                        "confidence": "medium" if rt.get("active") else "low",
+                        "explanation": f"Inferred next-hop reachability to {gw_ip or gw_label}.",
+                        "raw_excerpt": rt.get("raw", ""),
+                    },
+                    now=now,
+                )
+                links_processed += 1
+                edges_processed += 1
                 if gw_ip:
                     seen_ips.add(gw_ip)
 
@@ -910,8 +941,6 @@ class TopologyDiscoveryMixin:
                 })
 
         # 6. Persist Reconciled Child Nodes & Classified Links
-        nodes_processed = 0
-        links_processed = 0
         total_children = len(child_render_queue)
 
         for idx, item in enumerate(child_render_queue):
@@ -1022,6 +1051,97 @@ class TopologyDiscoveryMixin:
             )
             links_processed += 1
 
+            # Phase 4.2: Reconcile Multi-Layer Edge into topology_edges & topology_edge_evidence
+            if ls.get("is_arp_only"):
+                if ls.get("has_bridge_port"):
+                    e_rc = "layer2"
+                    e_sub = "bridge_port_member"
+                    e_tier = "LOW"
+                    e_score = 0.25
+                    e_rationale = "MAC address learned on multi-port bridge forwarding table."
+                else:
+                    e_rc = "layer3"
+                    e_sub = "routed_multiaccess"
+                    rand_mac = item.get("metadata", {}).get("randomized_mac")
+                    e_tier = "LOW"
+                    e_score = 0.05 if rand_mac else (0.35 if "DHCP" in str(item.get("metadata", {}).get("discovery_protocol", "")) else 0.30)
+                    e_rationale = (
+                        "Locally-administered/randomized MAC detected; candidate endpoint."
+                        if rand_mac
+                        else "Observed via Layer 3 ARP table; ownership and physical switch port are unverified."
+                    )
+            elif ls.get("is_vpn"):
+                e_rc = "logical"
+                e_sub = "overlay_tunnel"
+                e_tier = "HIGH" if inv_match else "MEDIUM"
+                e_score = 0.85 if inv_match else 0.70
+                e_rationale = f"Observed over logical VPN/tunnel interface '{ls['local_port']}'."
+            elif ls.get("is_wireless"):
+                e_rc = "layer2"
+                e_sub = "shared_switch_domain"
+                e_tier = "MEDIUM" if ls["remote_port"] else "LOW"
+                e_score = 0.50 if ls["remote_port"] else 0.30
+                e_rationale = "Observed wireless neighbor association."
+            else:
+                # MNDP / LLDP / CDP Layer 2 neighbor
+                ports_physical = any(p in (ls["local_port"] or "").lower() for p in ("ether", "sfp")) and (
+                    not ls["remote_port"] or any(p in (ls["remote_port"] or "").lower() for p in ("ether", "sfp"))
+                )
+                if ls["remote_port"] and not ls.get("is_bridge_only") and ports_physical:
+                    e_rc = "layer2"  # Single-sided candidate; will be upgraded to 'physical' upon reverse corroboration
+                    e_sub = "direct_copper" if "ether" in (ls["local_port"] or "").lower() else "direct_fiber"
+                    e_tier = "HIGH"
+                    e_score = 0.80
+                    e_rationale = (
+                        f"Single-sided {ls['protocol'].upper()} neighbor observation reporting "
+                        f"{ls['local_port']} <-> {ls['remote_port']} (awaiting reverse confirmation)."
+                    )
+                elif not ls["remote_port"]:
+                    e_rc = "layer2"
+                    e_sub = "shared_switch_domain"
+                    e_tier = "LOW"
+                    e_score = 0.35
+                    e_rationale = (
+                        f"Neighbor observed on local port '{ls['local_port']}' via {ls['protocol'].upper()}, "
+                        "but remote port identifier is missing."
+                    )
+                else:
+                    e_rc = "layer2"
+                    e_sub = "bridge_port_member"
+                    e_tier = "LOW"
+                    e_score = 0.25
+                    e_rationale = (
+                        f"Neighbor observed on multipoint bridge '{ls['local_port']}' without physical bridge-port mapping."
+                    )
+
+            self._reconcile_discovered_edge(
+                source_id=source_node_id,
+                target_id=cid,
+                relationship_class=e_rc,
+                source_interface=ls["local_port"],
+                target_interface=ls["remote_port"],
+                relationship_subtype=e_sub,
+                direction="bidirectional",
+                oper_status="up",
+                admin_status="enabled",
+                verification_status="inferred" if ls.get("is_arp_only") else "observed",
+                confidence_tier=e_tier,
+                confidence_score=e_score,
+                confidence_rationale=e_rationale,
+                bandwidth_bps=10000000000 if "10" in bw else 1000000000,
+                evidence_item={
+                    "evidence_type": ls["ev_type"],
+                    "protocol": ls["protocol"],
+                    "local_interface": ls["local_port"],
+                    "remote_interface": ls["remote_port"],
+                    "confidence": e_tier.lower(),
+                    "explanation": e_rationale,
+                    "raw_excerpt": ls.get("raw_excerpt", ""),
+                },
+                now=now,
+            )
+            edges_processed += 1
+
         return {
             "success": True,
             "source_node": source_node_id,
@@ -1029,6 +1149,7 @@ class TopologyDiscoveryMixin:
             "arp_hosts_found": len(arp_entries),
             "new_nodes_added": nodes_processed,
             "links_added": links_processed,
+            "edges_added": edges_processed,
             "wan_interface": primary_wan_iface,
             "wan_active": wan_active,
             "downstream_candidates": downstream_candidates,

@@ -1,0 +1,6 @@
+Flags: D - DYNAMIC; A - ACTIVE; c - CONNECT, s - STATIC, o - OSPF
+Columns: DST-ADDRESS, GATEWAY, DISTANCE
+#     DST-ADDRESS        GATEWAY       DISTANCE
+0 DAc 10.0.0.0/24        ether1               0
+1 DAo 172.16.0.0/16      10.0.0.2           110
+2  As 192.168.0.0/16     10.0.0.3             1

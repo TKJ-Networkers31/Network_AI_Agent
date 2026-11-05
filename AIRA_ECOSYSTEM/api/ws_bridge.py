@@ -79,6 +79,7 @@ NMS_WS_EVENT_MAP: dict[str, str] = {
     EventNames.NMS_DEVICE_STATUS: "nms_device_status",
     EventNames.NMS_CYCLE_COMPLETED: "nms_cycle_completed",
     EventNames.NMS_INCIDENT: "nms_incident",
+    EventNames.NMS_INTERFACE_STATUS_CHANGED: "nms_interface_status_changed",
 }
 
 Sender = Callable[[str, dict], Awaitable[None]]

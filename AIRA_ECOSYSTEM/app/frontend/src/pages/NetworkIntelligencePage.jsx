@@ -9,6 +9,15 @@ import React, { useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { api } from "../api.js";
 import { useToast } from "../components/Toast.jsx";
+import RouteHistoryModal from "../components/topology/RouteHistoryModal.jsx";
+import OverviewTab from "../components/network-intelligence/OverviewTab.jsx";
+import InvestigatorTab from "../components/network-intelligence/InvestigatorTab.jsx";
+import KnowledgeGraphTab from "../components/network-intelligence/KnowledgeGraphTab.jsx";
+import PathAnalysisTab from "../components/network-intelligence/PathAnalysisTab.jsx";
+import RcaTimelineTab from "../components/network-intelligence/RcaTimelineTab.jsx";
+import HistoricalIntelligenceTab from "../components/network-intelligence/HistoricalIntelligenceTab.jsx";
+import EvidenceInspectorTab from "../components/network-intelligence/EvidenceInspectorTab.jsx";
+import { Activity } from "lucide-react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -18,6 +27,7 @@ import {
   Code2,
   Cpu,
   FileText,
+  GitBranch,
   HelpCircle,
   History,
   Layers,
@@ -45,12 +55,25 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
   const [activePlaybookRun, setActivePlaybookRun] = useState(null);
   const [loading, setLoading] = useState(false);
   const [advancingPlaybook, setAdvancingPlaybook] = useState(false);
+  const [runningAutoDiag, setRunningAutoDiag] = useState(false);
+  const [autoDiagResult, setAutoDiagResult] = useState(null);
+  const [autoDiagQuery, setAutoDiagQuery] = useState("");
+  const [autoDiagTargetIp, setAutoDiagTargetIp] = useState("");
+  const [autoDiagTable, setAutoDiagTable] = useState("main");
+  const [routeHistoryOpen, setRouteHistoryOpen] = useState(false);
+  const [overviewData, setOverviewData] = useState(null);
+  const [graphData, setGraphData] = useState(null);
+  const [pathResult, setPathResult] = useState(null);
+  const [historicalData, setHistoricalData] = useState(null);
+  const [activeInvestigation, setActiveInvestigation] = useState(null);
+  const [investigating, setInvestigating] = useState(false);
 
   // New incident form state
   const [devices, setDevices] = useState([]);
   const [showNewIncidentModal, setShowNewIncidentModal] = useState(false);
   const [newIncidentForm, setNewIncidentForm] = useState({
     device_identity: "",
+    related_devices: [],
     incident_type: "LAN_NO_INTERNET",
     symptoms: "",
     user_description: "",
@@ -71,6 +94,92 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
     subnet: "192.168.100.1/24",
   });
   const [planning, setPlanning] = useState(false);
+
+  const fetchOverview = async () => {
+    try {
+      const res = await api.intelligence.getOverview();
+      if (res?.overview) setOverviewData(res.overview);
+    } catch (e) {
+      console.warn("Overview fetch:", e);
+    }
+  };
+
+  const fetchGraph = async (layer = null) => {
+    try {
+      const res = await api.intelligence.getGraph({ layer });
+      if (res?.graph) setGraphData(res.graph);
+    } catch (e) {
+      console.warn("Graph fetch:", e);
+    }
+  };
+
+  const fetchHistorical = async () => {
+    try {
+      const res = await api.intelligence.getHistory();
+      if (res?.history) setHistoricalData(res.history);
+    } catch (e) {
+      console.warn("History fetch:", e);
+    }
+  };
+
+  const handleRunInvestigation = async (body) => {
+    setInvestigating(true);
+    try {
+      const res = await api.intelligence.investigateNL(body);
+      if (res?.investigation) {
+        setActiveInvestigation(res.investigation);
+        notify({ type: "success", message: "Penyelidikan selesai! Hasil dan hipotesis tersedia." });
+        if (res.investigation.path) setPathResult(res.investigation.path);
+      }
+    } catch (err) {
+      notify({ type: "error", message: `Investigasi gagal: ${err.message}` });
+    } finally {
+      setInvestigating(false);
+    }
+  };
+
+  const handleCancelInvestigation = async (invId) => {
+    try {
+      await api.intelligence.cancelNLInvestigation(invId);
+      notify({ type: "info", message: "Permintaan pembatalan dikirim." });
+    } catch (err) {
+      notify({ type: "error", message: `Gagal membatalkan: ${err.message}` });
+    }
+  };
+
+  const handleRunPathAnalysis = async ({ destinationIp, sourceDeviceId, routingTable }) => {
+    setLoading(true);
+    try {
+      const res = await api.intelligence.getPathAnalysis({
+        destinationIp,
+        sourceDeviceId,
+        routingTable,
+      });
+      if (res?.path_analysis) {
+        setPathResult(res.path_analysis);
+        notify({ type: "success", message: "LPM dan path hop-by-hop berhasil dievaluasi." });
+      }
+    } catch (err) {
+      notify({ type: "error", message: `Analisis rute gagal: ${err.message}` });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCompareSnapshots = async (older, newer) => {
+    setLoading(true);
+    try {
+      const res = await api.intelligence.getHistory({ olderSnapshotId: older, newerSnapshotId: newer });
+      if (res?.history) {
+        setHistoricalData(res.history);
+        notify({ type: "success", message: "Perbandingan snapshot selesai." });
+      }
+    } catch (err) {
+      notify({ type: "error", message: `Perbandingan gagal: ${err.message}` });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const loadInitialData = async () => {
     setLoading(true);
@@ -104,6 +213,33 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
     }
   };
 
+  const handleRunAutoDiagnose = async () => {
+    setRunningAutoDiag(true);
+    try {
+      notify({ type: "info", message: "Menjalankan pipeline diagnostik routing & jaringan otomatis..." });
+      const res = await api.intelligence.autoDiagnose({
+        symptom: autoDiagQuery || undefined,
+        target_ip: autoDiagTargetIp || undefined,
+        routing_table: autoDiagTable || "main",
+      });
+      if (res.success) {
+        setAutoDiagResult(res);
+        await loadInitialData();
+        if (res.incident?.incident_id) {
+          await loadIncidentDetail(res.incident.incident_id);
+        }
+        setActiveTab("overview");
+        notify({ type: "success", message: "Diagnostik otomatis selesai! Akar masalah, jalur rute & rekomendasi dirangkum." });
+      } else {
+        notify({ type: "error", message: res.error || "Diagnostik otomatis gagal." });
+      }
+    } catch (err) {
+      notify({ type: "error", message: err.message || "Gagal menjalankan diagnostik otomatis." });
+    } finally {
+      setRunningAutoDiag(false);
+    }
+  };
+
   const loadIncidentDetail = async (incidentId) => {
     try {
       const res = await api.intelligence.getIncident(incidentId);
@@ -118,6 +254,9 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
 
   useEffect(() => {
     loadInitialData();
+    fetchOverview();
+    fetchGraph();
+    fetchHistorical();
   }, []);
 
   const handleCreateIncident = async (e) => {
@@ -132,19 +271,34 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
         ? newIncidentForm.symptoms.split(",").map((s) => s.trim()).filter(Boolean)
         : [];
 
-      const res = await api.intelligence.createIncident({
-        device_identity: newIncidentForm.device_identity,
-        incident_type: newIncidentForm.incident_type,
-        symptoms: symptomsArray,
-        user_description: newIncidentForm.user_description,
-        target_ip: newIncidentForm.target_ip || undefined,
-        severity: "HIGH",
-      });
+      let res;
+      if (newIncidentForm.related_devices && newIncidentForm.related_devices.length > 0) {
+        res = await api.intelligence.createMultiDeviceInvestigation({
+          primary_device: newIncidentForm.device_identity,
+          related_devices: newIncidentForm.related_devices,
+          symptom_description: newIncidentForm.user_description || newIncidentForm.incident_type,
+          incident_type: newIncidentForm.incident_type,
+          target_ip: newIncidentForm.target_ip || undefined,
+          severity: "HIGH",
+        });
+      } else {
+        res = await api.intelligence.createIncident({
+          device_identity: newIncidentForm.device_identity,
+          incident_type: newIncidentForm.incident_type,
+          symptoms: symptomsArray,
+          user_description: newIncidentForm.user_description,
+          target_ip: newIncidentForm.target_ip || undefined,
+          severity: "HIGH",
+        });
+      }
 
       if (res.success) {
         notify({ type: "success", message: "Investigasi insiden selesai dianalisis." });
         setShowNewIncidentModal(false);
         loadInitialData();
+    fetchOverview();
+    fetchGraph();
+    fetchHistorical();
         setSelectedIncident(res.incident);
         setActiveTab("overview");
       }
@@ -257,13 +411,51 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={autoDiagQuery}
+            onChange={(e) => setAutoDiagQuery(e.target.value)}
+            placeholder="Tanya rute / gejala (mis. Mengapa LAN tidak bisa ke 10.10.10.0/24?)"
+            className="bg-black/40 border border-white/15 rounded-lg px-3 py-1.5 text-xs text-white w-64 outline-none focus:border-cyan-400"
+          />
+          <input
+            type="text"
+            value={autoDiagTargetIp}
+            onChange={(e) => setAutoDiagTargetIp(e.target.value)}
+            placeholder="Target IP/CIDR (opsional)"
+            className="bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono w-36 outline-none focus:border-cyan-400"
+          />
+          <input
+            type="text"
+            value={autoDiagTable}
+            onChange={(e) => setAutoDiagTable(e.target.value)}
+            placeholder="VRF (main)"
+            className="bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono w-24 outline-none focus:border-cyan-400"
+          />
+          <button
+            onClick={handleRunAutoDiagnose}
+            disabled={runningAutoDiag}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold shadow-lg shadow-cyan-500/20 transition disabled:opacity-50"
+          >
+            <Zap size={14} className={runningAutoDiag ? "animate-spin" : ""} />
+            <span>{runningAutoDiag ? "Menjalankan Pipeline..." : "⚡ Diagnostik Otomatis"}</span>
+          </button>
+
+          <button
+            onClick={() => setRouteHistoryOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/10 transition"
+          >
+            <History size={14} />
+            <span>Riwayat Rute</span>
+          </button>
+
           <button
             onClick={() => setShowNewIncidentModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-semibold transition"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/10 transition"
           >
             <Search size={14} />
-            <span>Investigasi Baru</span>
+            <span>Investigasi Manual</span>
           </button>
 
           <button
@@ -344,12 +536,15 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
           {/* Tab Navigation */}
           <div className="flex items-center gap-1 bg-card border border-border p-1.5 rounded-xl">
             {[
-              { id: "overview", label: "A. Overview Insiden", icon: AlertCircle },
-              { id: "evidence", label: `B. Bukti Observasi (${evidenceItems.length})`, icon: Layers },
-              { id: "hypotheses", label: `C. Hipotesis (${selectedIncident?.inferred_hypotheses?.length || 0})`, icon: Zap },
-              { id: "playbook", label: "D. Diagnostic Playbook", icon: Terminal },
-              { id: "planner", label: `E. Configuration Planner (${plans.length})`, icon: Code2 },
-              { id: "timeline", label: "F. Audit Timeline", icon: History },
+              { id: "overview", label: "A. Overview", icon: Activity },
+              { id: "investigator", label: "B. Investigator", icon: Zap },
+              { id: "graph", label: "C. Knowledge Graph", icon: Network },
+              { id: "paths", label: "D. Path Analysis", icon: GitBranch },
+              { id: "rca", label: "E. RCA Timeline", icon: ShieldAlert },
+              { id: "history", label: "F. Historical", icon: History },
+              { id: "evidence", label: `G. Bukti (${(activeInvestigation?.evidence_items?.length || evidenceItems.length || overviewData?.total_evidence_records) || 0})`, icon: Layers },
+              { id: "playbook", label: "Diagnostic Playbook", icon: Terminal },
+              { id: "planner", label: `Planner (${plans.length})`, icon: Code2 },
             ].map((tab) => {
               const Icon = tab.icon;
               return (
@@ -371,8 +566,67 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
 
           {/* Tab Content */}
           <div className="bg-card border border-border rounded-xl2 p-6 min-h-[520px]">
-            {/* A. INCIDENT OVERVIEW */}
+            {/* A. NETWORK INTELLIGENCE OVERVIEW */}
             {activeTab === "overview" && (
+              <OverviewTab overview={overviewData} loading={loading} onRefresh={fetchOverview} />
+            )}
+
+            {/* B. NETWORK INVESTIGATOR (NATURAL LANGUAGE) */}
+            {activeTab === "investigator" && (
+              <InvestigatorTab
+                onRunInvestigation={handleRunInvestigation}
+                onCancelInvestigation={handleCancelInvestigation}
+                activeInvestigation={activeInvestigation}
+                loading={investigating}
+              />
+            )}
+
+            {/* C. KNOWLEDGE GRAPH EXPLORER */}
+            {activeTab === "graph" && (
+              <KnowledgeGraphTab
+                graphData={graphData}
+                loading={loading}
+                onRefreshGraph={fetchGraph}
+              />
+            )}
+
+            {/* D. PATH INTELLIGENCE & LPM */}
+            {activeTab === "paths" && (
+              <PathAnalysisTab
+                pathResult={pathResult}
+                loading={loading}
+                onRunPathAnalysis={handleRunPathAnalysis}
+                devices={devices}
+              />
+            )}
+
+            {/* E. 14-STEP RCA TIMELINE */}
+            {activeTab === "rca" && (
+              <RcaTimelineTab
+                rcaReport={activeInvestigation?.rca}
+                correlations={activeInvestigation?.correlations || []}
+              />
+            )}
+
+            {/* F. HISTORICAL INTELLIGENCE */}
+            {activeTab === "history" && (
+              <HistoricalIntelligenceTab
+                historicalData={historicalData}
+                loading={loading}
+                onCompareSnapshots={handleCompareSnapshots}
+                onRefreshHistory={fetchHistorical}
+              />
+            )}
+
+            {/* G. EVIDENCE INSPECTOR */}
+            {activeTab === "evidence" && (
+              <EvidenceInspectorTab
+                evidenceItems={activeInvestigation?.evidence_items?.length ? activeInvestigation.evidence_items : evidenceItems}
+              />
+            )}
+
+            {/* LEGACY INCIDENT VIEW */}
+            {activeTab === "legacy_incident" && (
               <div className="space-y-6">
                 {!selectedIncident ? (
                   <div className="text-center py-16 text-white/40 text-xs">Pilih insiden untuk melihat overview.</div>
@@ -400,6 +654,199 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
                         </span>
                       </div>
                     </div>
+
+                    {selectedIncident.related_devices?.length > 0 && (
+                      <div className="flex items-center gap-2 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs">
+                        <Layers size={14} className="shrink-0" />
+                        <span><strong>Multi-Device Topology Aware:</strong> Melibatkan perangkat terkait: {selectedIncident.related_devices.join(", ")}</span>
+                      </div>
+                    )}
+
+                    {autoDiagResult && (
+                      <div className="p-4 rounded-xl bg-gradient-to-r from-cyan-950/40 to-blue-950/30 border border-cyan-500/30 space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Zap size={16} className="text-cyan-400" />
+                            <span className="text-xs font-semibold text-white">
+                              Ringkasan Pipeline Diagnostik Otomatis ({autoDiagResult.routing_intent || "MULTI_DEVICE"})
+                            </span>
+                            {autoDiagResult.epistemic_classification && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
+                                {autoDiagResult.epistemic_classification}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">
+                            {autoDiagResult.pipeline_id} · VRF: {autoDiagResult.routing_table || "main"}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-white/80 whitespace-pre-line leading-relaxed">
+                          {autoDiagResult.summary}
+                        </p>
+
+                        {/* Per-Device Evidence Collection Status */}
+                        {autoDiagResult.collection_status && Object.keys(autoDiagResult.collection_status).length > 0 && (
+                          <div className="space-y-1.5">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-cyan-300/80">
+                              Status Koleksi Bukti Rute Multi-Perangkat
+                            </span>
+                            <div className="flex flex-wrap gap-2">
+                              {Object.entries(autoDiagResult.collection_status).map(([devId, st]) => (
+                                <span
+                                  key={devId}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-mono border ${
+                                    st.completeness === "COMPLETE"
+                                      ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-200"
+                                      : "bg-amber-500/15 border-amber-500/30 text-amber-200"
+                                  }`}
+                                >
+                                  {devId}: {st.completeness} ({st.active_route_count}/{st.route_count} rute)
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Partial Evidence Warnings */}
+                        {autoDiagResult.partial_evidence_warnings?.length > 0 && (
+                          <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 space-y-1">
+                            <div className="font-semibold flex items-center gap-1.5">
+                              <AlertTriangle size={13} /> Peringatan Bukti Parsial
+                            </div>
+                            <ul className="list-disc pl-4 space-y-0.5">
+                              {autoDiagResult.partial_evidence_warnings.map((w, i) => (
+                                <li key={i}>{w}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {/* Reconstructed Route Path Visualization */}
+                        {autoDiagResult.route_intelligence?.path_evaluation?.primary_hops?.length > 0 && (
+                          <div className="p-3 rounded-xl bg-black/30 border border-white/10 space-y-2">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-semibold text-cyan-300 flex items-center gap-1">
+                                <GitBranch size={13} /> Rekonstruksi Jalur Rute ({autoDiagResult.destination})
+                              </span>
+                              <span className="font-mono text-[10px] text-white/70">
+                                State: {autoDiagResult.route_intelligence.path_evaluation.state} · Conf:{" "}
+                                {Math.round((autoDiagResult.route_intelligence.path_evaluation.confidence || 0) * 100)}%
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+                              {autoDiagResult.route_intelligence.path_evaluation.primary_hops.map((hop, idx) => (
+                                <React.Fragment key={idx}>
+                                  <div className="px-2.5 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/25 text-white">
+                                    <div className="font-bold text-cyan-200">
+                                      #{hop.hop_index} {hop.device_id}
+                                    </div>
+                                    <div className="text-[10px] text-white/60">
+                                      {hop.matched_prefix || "no-route"} → {hop.gateway || hop.hop_state} ({hop.egress_interface || "—"})
+                                    </div>
+                                  </div>
+                                  {idx < autoDiagResult.route_intelligence.path_evaluation.primary_hops.length - 1 && (
+                                    <ArrowRight size={14} className="text-cyan-400" />
+                                  )}
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Dependency & Historical Summary */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+                          {autoDiagResult.route_intelligence?.dependency_summary && (
+                            <div className="p-2.5 rounded-lg bg-black/30 border border-white/10">
+                              <div className="font-semibold text-purple-300">Inspeksi Dependensi Rute & Rekursif</div>
+                              <div className="text-white/70 font-mono text-[10px] mt-1">
+                                Nodes: {autoDiagResult.route_intelligence.dependency_summary.nodes_count} · Edges:{" "}
+                                {autoDiagResult.route_intelligence.dependency_summary.edges_count} · Unresolved:{" "}
+                                {autoDiagResult.route_intelligence.dependency_summary.unresolved_routes?.length || 0}
+                              </div>
+                            </div>
+                          )}
+                          <div className="p-2.5 rounded-lg bg-black/30 border border-white/10 flex items-center justify-between">
+                            <div>
+                              <div className="font-semibold text-sky-300">Perbandingan Riwayat Rute</div>
+                              <div className="text-white/70 font-mono text-[10px] mt-1">
+                                Perubahan tercatat:{" "}
+                                {autoDiagResult.route_intelligence?.historical_comparison?.total_recorded_changes ?? 0}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => setRouteHistoryOpen(true)}
+                              className="px-2.5 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 text-sky-200 text-[10px] font-semibold"
+                            >
+                              Buka Diff
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Structured Root Causes with Confidence & Alternative Hypotheses */}
+                        {autoDiagResult.root_causes?.length > 0 && (
+                          <div className="space-y-2">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-cyan-300/80">
+                              Analisis Akar Masalah Terstruktur ({autoDiagResult.root_causes.length})
+                            </span>
+                            {autoDiagResult.root_causes.slice(0, 4).map((rc) => (
+                              <div key={rc.root_cause_id} className="p-3 rounded-lg bg-black/35 border border-white/10 text-xs space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-white">
+                                    {rc.affected_device} ({rc.affected_prefix})
+                                  </span>
+                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-200">
+                                    {rc.epistemic_tier} · {Math.round((rc.confidence || 0) * 100)}%
+                                  </span>
+                                </div>
+                                <p className="text-white/80 text-[11px]">{rc.description}</p>
+                                {rc.alternative_explanations?.length > 0 && (
+                                  <p className="text-[10px] text-white/50">
+                                    <strong>Hipotesis Alternatif:</strong> {rc.alternative_explanations.join(" | ")}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Read-Only Verification Recommendations */}
+                        {autoDiagResult.verification_recommendations?.length > 0 && (
+                          <div className="space-y-1.5">
+                            <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-300/90">
+                              Rekomendasi Perintah Verifikasi Aman (100% Read-Only)
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {autoDiagResult.verification_recommendations.map((vr, i) => (
+                                <code
+                                  key={i}
+                                  className="px-2 py-1 rounded bg-black/50 border border-emerald-500/25 text-emerald-300 text-[10px] font-mono"
+                                >
+                                  {vr.command}
+                                </code>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {autoDiagResult.recommended_plan && (
+                          <div className="pt-2 border-t border-cyan-500/20 flex items-center justify-between">
+                            <span className="text-xs text-cyan-300 font-medium">
+                              Proposal Rencana Non-Mutating: {autoDiagResult.recommended_plan.plan_id}
+                            </span>
+                            <button
+                              onClick={() => {
+                                setSelectedPlan(autoDiagResult.recommended_plan);
+                                setActiveTab("planner");
+                              }}
+                              className="text-xs text-cyan-400 underline hover:text-cyan-300"
+                            >
+                              Lihat Rencana di Planner &rarr;
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="p-4 rounded-xl bg-white/[0.02] border border-border">
@@ -966,6 +1413,12 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
           </div>
         </div>
       )}
+
+      <RouteHistoryModal
+        open={routeHistoryOpen}
+        onClose={() => setRouteHistoryOpen(false)}
+        pushToast={(msg, type) => notify({ type: type || "info", message: msg })}
+      />
     </div>
   );
 }

@@ -1,0 +1,18 @@
+{
+  "device_identifier": "dev_chr",
+  "hardware_model": "CHR innotek GmbH VirtualBox",
+  "routeros_version": "7.23.8 (long-term)",
+  "architecture": "x86_64",
+  "provenance": "real_device_capture",
+  "sanitization_status": "sanitized_lab_ips",
+  "files": {
+    "ip_route_tabular.txt": {
+      "command": "/ip route print",
+      "sha256": "9cd2e75adb1920fbeaab0aa0318c8f431ea988e5488d9e27ffa43e64d3780f46"
+    },
+    "ip_route_detail.txt": {
+      "command": "/ip route print detail",
+      "sha256": "e636fcdbcf0dec3ddb67b89aa6c34c4ca2d928ca052d8021788a6cd2c9239db4"
+    }
+  }
+}

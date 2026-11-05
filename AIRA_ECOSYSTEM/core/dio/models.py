@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+from enum import Enum
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
+
+
+class InteractionState(str, Enum):
+    PENDING_INPUT = "PENDING_INPUT"
+    FORM_PRESENTED = "FORM_PRESENTED"
+    SUBMITTED = "SUBMITTED"
+    VALIDATING = "VALIDATING"
+    READY_TO_CONTINUE = "READY_TO_CONTINUE"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
 
 
 def _new_id(prefix: str) -> str:
@@ -138,6 +149,7 @@ class InteractionSchema:
     sections: list[Section] = field(default_factory=list)
     actions: list[Action] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    state: InteractionState = InteractionState.FORM_PRESENTED
     version: str = "1.0"
     created_at: float = field(default_factory=time.time)
 
@@ -148,6 +160,7 @@ class InteractionSchema:
             "title": self.title,
             "description": self.description,
             "mode": self.mode,
+            "state": self.state.value if hasattr(self.state, "value") else str(self.state),
             "sections": [s.to_dict() for s in self.sections],
             "actions": [a.to_dict() for a in self.actions],
             "metadata": self.metadata,

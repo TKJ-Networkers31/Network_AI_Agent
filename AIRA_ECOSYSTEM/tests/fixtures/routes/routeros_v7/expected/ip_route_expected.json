@@ -1,0 +1,35 @@
+[
+  {
+    "destination": "0.0.0.0/0",
+    "gateway": "10.66.38.1",
+    "immediate_gw": "10.66.38.1%ether1",
+    "interface": "ether1",
+    "distance": 1,
+    "active": true,
+    "dynamic": false,
+    "protocol": "static",
+    "routing_table": "main"
+  },
+  {
+    "destination": "10.66.38.0/24",
+    "gateway": "ether1",
+    "immediate_gw": "ether1",
+    "interface": "ether1",
+    "distance": 0,
+    "active": true,
+    "dynamic": true,
+    "protocol": "connected",
+    "routing_table": "main"
+  },
+  {
+    "destination": "192.168.100.0/24",
+    "gateway": "ether2",
+    "immediate_gw": "ether2",
+    "interface": "ether2",
+    "distance": 0,
+    "active": true,
+    "dynamic": true,
+    "protocol": "connected",
+    "routing_table": "main"
+  }
+]

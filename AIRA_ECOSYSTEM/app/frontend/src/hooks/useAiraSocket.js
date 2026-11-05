@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const MAX_BACKOFF_MS = 15000;
 const BASE_BACKOFF_MS = 1000;
+const HEARTBEAT_INTERVAL_MS = 15000;
 
 function buildWsUrl(sessionId) {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -32,6 +33,7 @@ export function useAiraSocket(sessionId, { onEvent } = {}) {
   const retryRef = useRef(0);
   const closedByUserRef = useRef(false);
   const reconnectTimerRef = useRef(null);
+  const heartbeatTimerRef = useRef(null);
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
 
@@ -42,6 +44,13 @@ export function useAiraSocket(sessionId, { onEvent } = {}) {
     }
   }, []);
 
+  const clearHeartbeatTimer = useCallback(() => {
+    if (heartbeatTimerRef.current) {
+      clearInterval(heartbeatTimerRef.current);
+      heartbeatTimerRef.current = null;
+    }
+  }, []);
+
   const connect = useCallback(() => {
     if (!sessionId) return;
 
@@ -49,6 +58,7 @@ export function useAiraSocket(sessionId, { onEvent } = {}) {
     if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
       return;
     }
+    clearHeartbeatTimer();
     if (existing) {
       existing.onclose = null;
       existing.onmessage = null;
@@ -68,12 +78,24 @@ export function useAiraSocket(sessionId, { onEvent } = {}) {
       if (wsRef.current !== ws) return;
       retryRef.current = 0;
       setStatus("open");
+
+      clearHeartbeatTimer();
+      heartbeatTimerRef.current = setInterval(() => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          try {
+            wsRef.current.send(JSON.stringify({ type: "ping" }));
+          } catch {
+            // abaikan
+          }
+        }
+      }, HEARTBEAT_INTERVAL_MS);
     };
 
     ws.onmessage = (event) => {
       if (wsRef.current !== ws) return;
       try {
         const parsed = JSON.parse(event.data);
+        if (parsed.type === "pong") return; // Keepalive ACK
         onEventRef.current?.(parsed);
       } catch {
         // abaikan payload non-JSON
@@ -81,6 +103,7 @@ export function useAiraSocket(sessionId, { onEvent } = {}) {
     };
 
     ws.onclose = () => {
+      clearHeartbeatTimer();
       if (wsRef.current !== ws) return;
 
       setStatus("closed");
@@ -97,9 +120,10 @@ export function useAiraSocket(sessionId, { onEvent } = {}) {
     };
 
     ws.onerror = () => {
+      clearHeartbeatTimer();
       ws.close();
     };
-  }, [sessionId, clearReconnectTimer]);
+  }, [sessionId, clearReconnectTimer, clearHeartbeatTimer]);
 
   useEffect(() => {
     closedByUserRef.current = false;
@@ -114,6 +138,7 @@ export function useAiraSocket(sessionId, { onEvent } = {}) {
     return () => {
       closedByUserRef.current = true;
       clearReconnectTimer();
+      clearHeartbeatTimer();
 
       const ws = wsRef.current;
       if (ws) {

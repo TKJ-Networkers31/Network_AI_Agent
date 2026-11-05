@@ -52,6 +52,7 @@ AKANE_TOOLS: dict = {
     "diagnose_network_route": nt.diagnose_network_route,
     "audit_network_firewall": nt.audit_network_firewall,
     "audit_network_vlan": nt.audit_network_vlan,
+    "auto_diagnose_network": nt.auto_diagnose_network,
 }
 
 AKANE_DANGEROUS_TOOLS: set[str] = {"apply_config", "disconnect_device"}
@@ -90,6 +91,7 @@ AKANE_TOOL_CATEGORY: dict[str, str] = {
     "diagnose_network_route": "mikrotik",
     "audit_network_firewall": "mikrotik",
     "audit_network_vlan": "mikrotik",
+    "auto_diagnose_network": "network",
 }
 
 AKANE_TOOL_SCHEMAS = [
@@ -313,4 +315,20 @@ AKANE_TOOL_SCHEMAS = [
         "parameters": {"type": "object", "properties": {
             "device_name": {"type": "string", "description": "Nama perangkat MikroTik di inventory (misal 'R1')."}
         }, "required": ["device_name"]}}},
+    {"type": "function", "function": {
+        "name": "auto_diagnose_network",
+        "description": (
+            "Menjalankan pipeline diagnostik otomatis end-to-end (Single-Router maupun Multi-Router): "
+            "analisis routing pada seluruh router terdaftar, penyebab LAN tidak bisa ke internet, "
+            "pencarian dependensi upstream/rekursif router, verifikasi default route, pelacakan rute ke prefix/IP, "
+            "verifikasi keterjangkauan gateway, deteksi inkonsistensi routing antar-router & VRF, perbandingan "
+            "snapshot riwayat rute sebelum gangguan, korelasi topologi, dan rekomendasi verifikasi aman (100% Read-Only)."
+        ),
+        "parameters": {"type": "object", "properties": {
+            "device_name": {"type": "string", "description": "Nama perangkat sasaran utama (opsional; kosongkan untuk menganalisis seluruh router terdaftar)."},
+            "target_devices": {"type": "array", "items": {"type": "string"}, "description": "Daftar nama router spesifik jika multi-router (opsional)."},
+            "symptom": {"type": "string", "description": "Pertanyaan natural language atau deskripsi gejala routing/jaringan."},
+            "target_ip": {"type": "string", "description": "Alamat IP atau prefix CIDR tujuan/gateway pengujian (opsional)."},
+            "routing_table": {"type": "string", "description": "Nama tabel routing atau VRF (default: 'main').", "default": "main"},
+        }}}},
 ]

@@ -1,0 +1,72 @@
+{
+  "enrollment_1_gateways": {
+    "count": 1,
+    "total_sec": 0.0563,
+    "avg_ms": 56.35,
+    "peak_ram_kb": 7.1
+  },
+  "enrollment_10_gateways": {
+    "count": 10,
+    "total_sec": 0.5034,
+    "avg_ms": 50.34,
+    "peak_ram_kb": 16.3
+  },
+  "enrollment_50_gateways": {
+    "count": 50,
+    "total_sec": 2.745,
+    "avg_ms": 54.9,
+    "peak_ram_kb": 51.9
+  },
+  "heartbeats_1_gateways": {
+    "total_heartbeats": 20,
+    "duration_sec": 0.2716,
+    "throughput_hb_per_sec": 73.6,
+    "avg_latency_ms": 13.581
+  },
+  "heartbeats_10_gateways": {
+    "total_heartbeats": 200,
+    "duration_sec": 2.9405,
+    "throughput_hb_per_sec": 68.0,
+    "avg_latency_ms": 14.703
+  },
+  "heartbeats_50_gateways": {
+    "total_heartbeats": 1000,
+    "duration_sec": 13.5987,
+    "throughput_hb_per_sec": 73.5,
+    "avg_latency_ms": 13.599
+  },
+  "ingestion_1_gateways": {
+    "total_samples": 100,
+    "duration_sec": 0.0894,
+    "throughput_samples_per_sec": 1118.2,
+    "peak_ram_kb": 17.3
+  },
+  "ingestion_10_gateways": {
+    "total_samples": 1000,
+    "duration_sec": 0.9103,
+    "throughput_samples_per_sec": 1098.6,
+    "peak_ram_kb": 18.8
+  },
+  "ingestion_50_gateways": {
+    "total_samples": 5000,
+    "duration_sec": 3.7187,
+    "throughput_samples_per_sec": 1344.6,
+    "peak_ram_kb": 18.7
+  },
+  "deduplication": {
+    "duplicate_envelopes": 100,
+    "rejection_time_ms": 14.99,
+    "rate_per_sec": 6670.9
+  },
+  "edge_buffer": {
+    "enqueue_rate_sec": 86.0,
+    "dropped_samples_verified": 500,
+    "drained_samples": 1000,
+    "drain_rate_sec": 3220.1,
+    "final_queue_depth": 0
+  },
+  "storage_footprint": {
+    "central_db_kb": 2724.0,
+    "edge_buffer_db_kb": 248.0
+  }
+}

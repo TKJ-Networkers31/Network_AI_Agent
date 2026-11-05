@@ -1,0 +1,18 @@
+{
+  "device_identifier": "dev_r-1",
+  "hardware_model": "RB952Ui-5ac2nD (hAP ac lite)",
+  "routeros_version": "6.49.18",
+  "architecture": "mipsbe",
+  "provenance": "real_device_capture",
+  "sanitization_status": "sanitized_lab_ips",
+  "files": {
+    "ip_route_tabular.txt": {
+      "command": "/ip route print",
+      "sha256": "cac348373dccc32ab3f18e9e3f53570307301636a11081a3cfd8427c6ead031d"
+    },
+    "ip_route_detail.txt": {
+      "command": "/ip route print detail",
+      "sha256": "8ef33e0b76f9661e007cb268b390530427fd7ef33cdef7a4fc9fa6b924c9e929"
+    }
+  }
+}

@@ -616,32 +616,32 @@ export function TopologyLegendOverlay({ open, onToggle }) {
 
       <div className="space-y-1.5">
         <span className="text-[10px] uppercase tracking-wider text-text-secondary block font-semibold">
-          Link Verification & Type
+          Multi-Layer Taxonomy (Phase 4.5)
         </span>
         <div className="flex items-center gap-2">
-          <span className="w-8 h-0.5 bg-gradient-to-r from-sky-400 to-purple-500 inline-block" />
-          <span className="text-emerald-300 font-mono">✓ Verified / Manual</span>
-          <span className="text-text-secondary ml-auto">Physical</span>
+          <span className="w-8 h-0.5 bg-emerald-500 inline-block rounded" />
+          <span className="text-emerald-300 font-mono text-[10px]">Physical</span>
+          <span className="text-text-secondary ml-auto text-[10px]">Kabel Fisik / Direct</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-8 h-0.5 bg-sky-400 inline-block" />
-          <span className="text-sky-300 font-mono">Observed (?)</span>
-          <span className="text-text-secondary ml-auto">1-Sided L2</span>
+          <span className="w-8 h-0.5 bg-sky-400 inline-block rounded" />
+          <span className="text-sky-300 font-mono text-[10px]">Layer 2</span>
+          <span className="text-text-secondary ml-auto text-[10px]">Bridge / VLAN / Switch</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-8 border-t border-dashed border-slate-400 inline-block" />
-          <span className="text-slate-300 font-mono">Inferred / Routed</span>
-          <span className="text-text-secondary ml-auto">ARP / L3</span>
+          <span className="w-8 border-t-2 border-dashed border-purple-400 inline-block" />
+          <span className="text-purple-300 font-mono text-[10px]">Layer 3 (➔)</span>
+          <span className="text-text-secondary ml-auto text-[10px]">Routed Next-Hop</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-8 border-t-2 border-dotted border-purple-400 inline-block" />
-          <span className="text-purple-300 font-mono">VPN</span>
-          <span className="text-text-secondary ml-auto">Tunnel</span>
+          <span className="w-8 border-t-2 border-dotted border-amber-400 inline-block" />
+          <span className="text-amber-300 font-mono text-[10px]">Logical</span>
+          <span className="text-text-secondary ml-auto text-[10px]">VPN / Overlay Tunnel</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-8 border-t-2 border-dashed border-rose-500 inline-block" />
-          <span className="text-rose-400 font-mono">⚠ Conflict</span>
-          <span className="text-text-secondary ml-auto">Port Mismatch</span>
+          <span className="text-rose-400 font-mono text-[10px]">Down / Conflict</span>
+          <span className="text-text-secondary ml-auto text-[10px]">Mismatch / Error</span>
         </div>
       </div>
 

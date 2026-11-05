@@ -7,6 +7,7 @@ import TopBar from "../components/TopBar.jsx";
 import { useToast } from "../components/Toast.jsx";
 import { inventoryApi } from "../inventoryApi.js";
 import TopologyNodeInspector from "../components/topology/TopologyNodeInspector.jsx";
+import TopologyEdgeInspector from "../components/topology/TopologyEdgeInspector.jsx";
 import SnmpSetupWizardModal from "../components/nms/SnmpSetupWizardModal.jsx";
 import DeviceDetailModal from "../components/nms/DeviceDetailModal.jsx";
 import {
@@ -16,16 +17,21 @@ import {
 } from "../components/topology/TopologyGovernanceModals.jsx";
 import {
   API_BASE,
+  CONFIDENCE_TIERS,
   DEVICE_COLORS,
   DEVICE_ICONS,
   DISCOVERY_MODES,
   FRESHNESS_BADGES,
   OWNERSHIP_BADGES,
+  RELATIONSHIP_CLASSES,
   SCOPE_LABELS,
   STATUS_CONFIG,
   VIEW_MODES,
+  computeCurvedEdgePath,
   formatRelativeTime,
   getLinkVisualConfig,
+  getMultiLayerEdgeVisualConfig,
+  normalizeEdge,
 } from "../components/topology/topologyConstants.js";
 import {
   Activity,
@@ -33,6 +39,9 @@ import {
   ArrowRight,
   CheckCircle2,
   Eye,
+  GitBranch,
+  History,
+  Layers,
   Link2,
   Loader2,
   Network,
@@ -46,6 +55,14 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import TopologyHistoryModal from "../components/topology/TopologyHistoryModal.jsx";
+import { getSnapshot } from "../components/topology/topologyHistoryApi.js";
+import RouteHistoryModal from "../components/topology/RouteHistoryModal.jsx";
+import MultiDeviceRouteInspector from "../components/topology/MultiDeviceRouteInspector.jsx";
+import {
+  fetchTopologyRouteOverlay,
+  getOverlaySegmentVisualStyle,
+} from "../components/topology/routeOverlayApi.js";
 
 export default function TopologyPage({ onOpenMenu }) {
   const { pushToast, notify } = useToast();
@@ -72,7 +89,57 @@ export default function TopologyPage({ onOpenMenu }) {
   const [zoom, setZoom] = useState(1);
   const [legendOpen, setLegendOpen] = useState(false);
 
+  // Phase 4.5: Multi-Layer Topology States
+  const [layerFilters, setLayerFilters] = useState({
+    physical: true,
+    layer2: true,
+    layer3: true,
+    logical: true,
+  });
+  const [operStatusFilter, setOperStatusFilter] = useState("all");
+  const [confidenceFilter, setConfidenceFilter] = useState("all");
+  const [selectedEdge, setSelectedEdge] = useState(null);
+
   // Modals
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [routeHistoryModalOpen, setRouteHistoryModalOpen] = useState(false);
+  const [activeSnapshotView, setActiveSnapshotView] = useState(null);
+  const activeSnapshotViewRef = useRef(activeSnapshotView);
+  activeSnapshotViewRef.current = activeSnapshotView;
+
+  // WP 4.6.5: Non-Destructive Multi-Device Route Overlay States
+  const [routeOverlayOpen, setRouteOverlayOpen] = useState(false);
+  const [routeOverlaySource, setRouteOverlaySource] = useState("");
+  const [routeOverlayDest, setRouteOverlayDest] = useState("");
+  const [routeOverlayTable, setRouteOverlayTable] = useState("main");
+  const [routeOverlayLoading, setRouteOverlayLoading] = useState(false);
+  const [routeOverlayData, setRouteOverlayData] = useState(null);
+  const [selectedRouteSegment, setSelectedRouteSegment] = useState(null);
+  const routeOverlayReqRef = useRef(0);
+
+  const handleLoadRouteOverlay = useCallback(async (overrideParams = {}) => {
+    const reqId = ++routeOverlayReqRef.current;
+    setRouteOverlayLoading(true);
+    try {
+      const payload = await fetchTopologyRouteOverlay({
+        sourceDevice: overrideParams.sourceDevice ?? routeOverlaySource,
+        destination: overrideParams.destination ?? routeOverlayDest,
+        routingTable: overrideParams.routingTable ?? routeOverlayTable,
+      });
+      if (reqId !== routeOverlayReqRef.current) return;
+      setRouteOverlayData(payload);
+      const segs = payload?.overlay?.segments || [];
+      setSelectedRouteSegment(segs.length > 0 ? segs[0] : null);
+    } catch (err) {
+      if (reqId === routeOverlayReqRef.current) {
+        showToast(err.message || "Gagal memuat analisis jalur rute lintas-router.", "error");
+      }
+    } finally {
+      if (reqId === routeOverlayReqRef.current) {
+        setRouteOverlayLoading(false);
+      }
+    }
+  }, [routeOverlaySource, routeOverlayDest, routeOverlayTable, showToast]);
   const [policyModalOpen, setPolicyModalOpen] = useState(false);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [troubleshootModal, setTroubleshootModal] = useState(null);
@@ -133,6 +200,10 @@ export default function TopologyPage({ onOpenMenu }) {
 
   const fetchTopology = useCallback(
     async (silent = false, overrideView = null) => {
+      // Historical Snapshot Mode Isolation: Silent background polling must never overwrite snapshot canvas
+      if (activeSnapshotViewRef.current && silent) {
+        return;
+      }
       if (!silent) setLoading(true);
       const vm = overrideView || viewMode;
       try {
@@ -182,7 +253,7 @@ export default function TopologyPage({ onOpenMenu }) {
 
     async function scheduleNext() {
       if (!mounted) return;
-      if (!document.hidden && !draggingRef.current && !inFlight) {
+      if (!document.hidden && !draggingRef.current && !inFlight && !activeSnapshotViewRef.current) {
         inFlight = true;
         try {
           await fetchTopology(true, viewMode);
@@ -220,6 +291,10 @@ export default function TopologyPage({ onOpenMenu }) {
   }, [data.nodes]);
 
   const handleRefreshStatuses = async () => {
+    if (activeSnapshotViewRef.current) {
+      showToast("Refresh status dinonaktifkan dalam mode riwayat snapshot (Read-only).", "warning");
+      return;
+    }
     setRefreshingStatus(true);
     try {
       await fetch(`${API_BASE}/refresh-status`, { method: "POST" });
@@ -233,6 +308,10 @@ export default function TopologyPage({ onOpenMenu }) {
   };
 
   const handleClearTopology = async () => {
+    if (activeSnapshotViewRef.current) {
+      showToast("Topologi tidak dapat dikosongkan dalam mode riwayat snapshot (Read-only).", "warning");
+      return;
+    }
     if (!window.confirm("Kosongkan seluruh peta topologi, bukti observasi, dan antrean konflik?")) return;
     try {
       setLoading(true);
@@ -253,6 +332,10 @@ export default function TopologyPage({ onOpenMenu }) {
   };
 
   const handleSeedDemo = async () => {
+    if (activeSnapshotViewRef.current) {
+      showToast("Seed demo tidak dapat dimuat dalam mode riwayat snapshot (Read-only).", "warning");
+      return;
+    }
     try {
       setLoading(true);
       const res = await fetch(`${API_BASE}/seed-demo`, { method: "POST" });
@@ -269,6 +352,10 @@ export default function TopologyPage({ onOpenMenu }) {
   };
 
   const handleDiscover = async () => {
+    if (activeSnapshotViewRef.current) {
+      showToast("Auto Discover dinonaktifkan dalam mode riwayat snapshot (Read-only).", "warning");
+      return;
+    }
     setDiscovering(true);
     try {
       const payload = { mode: discoveryMode };
@@ -343,6 +430,10 @@ export default function TopologyPage({ onOpenMenu }) {
 
   const handleCreateNode = async (e) => {
     e.preventDefault();
+    if (activeSnapshotViewRef.current) {
+      showToast("Tidak dapat menambahkan node dalam mode riwayat snapshot (Read-only).", "warning");
+      return;
+    }
     if (!newNodeForm.name) {
       pushToast("Nama perangkat wajib diisi.", "warning");
       return;
@@ -391,6 +482,10 @@ export default function TopologyPage({ onOpenMenu }) {
 
   const handleCreateLink = async (e) => {
     e.preventDefault();
+    if (activeSnapshotViewRef.current) {
+      showToast("Tidak dapat menambah link dalam mode riwayat snapshot (Read-only).", "warning");
+      return;
+    }
     if (!newLinkForm.source_id || !newLinkForm.target_id) {
       pushToast("Pilih perangkat asal dan tujuan kabel.", "warning");
       return;
@@ -417,6 +512,10 @@ export default function TopologyPage({ onOpenMenu }) {
   };
 
   const handleDeleteLink = async (linkId) => {
+    if (activeSnapshotViewRef.current) {
+      showToast("Tidak dapat menghapus link dalam mode riwayat snapshot (Read-only).", "warning");
+      return;
+    }
     if (!window.confirm("Putuskan link interkoneksi ini?")) return;
     try {
       const res = await fetch(`${API_BASE}/links?link_id=${encodeURIComponent(linkId)}`, {
@@ -425,6 +524,7 @@ export default function TopologyPage({ onOpenMenu }) {
       const json = await res.json();
       if (json.success) {
         pushToast("Link berhasil dihapus.", "success");
+        if (selectedEdge?.id === linkId) setSelectedEdge(null);
         fetchTopology();
       }
     } catch {
@@ -433,6 +533,10 @@ export default function TopologyPage({ onOpenMenu }) {
   };
 
   const handleDeleteNode = async (nodeId) => {
+    if (activeSnapshotViewRef.current) {
+      showToast("Tidak dapat menghapus node dalam mode riwayat snapshot (Read-only).", "warning");
+      return;
+    }
     if (!window.confirm("Hapus perangkat ini beserta link terhubung dari topologi?")) return;
     try {
       const res = await fetch(`${API_BASE}/nodes/${encodeURIComponent(nodeId)}`, { method: "DELETE" });
@@ -449,6 +553,10 @@ export default function TopologyPage({ onOpenMenu }) {
 
   const handleSaveNodeEdit = async (e) => {
     e.preventDefault();
+    if (activeSnapshotViewRef.current) {
+      showToast("Tidak dapat mengedit node dalam mode riwayat snapshot (Read-only).", "warning");
+      return;
+    }
     try {
       const res = await fetch(`${API_BASE}/nodes/${encodeURIComponent(editNodeModal.id)}`, {
         method: "PUT",
@@ -490,7 +598,8 @@ export default function TopologyPage({ onOpenMenu }) {
     if (!draggingNodeId) return;
     const movedNode = data.nodes.find((n) => n.id === draggingNodeId);
     setDraggingNodeId(null);
-    if (movedNode) {
+    // In historical snapshot mode, dragging only updates local visual coordinates and does not mutate live positions
+    if (movedNode && !activeSnapshotViewRef.current) {
       try {
         await fetch(`${API_BASE}/nodes/${encodeURIComponent(movedNode.id)}/position`, {
           method: "PUT",
@@ -548,6 +657,44 @@ export default function TopologyPage({ onOpenMenu }) {
     }
   };
 
+  const handleLoadSnapshotOntoCanvas = async (snapshotId) => {
+    try {
+      const res = await getSnapshot(snapshotId, { include_graph: true });
+      if (res.success && res.snapshot && res.snapshot.graph) {
+        const graph = res.snapshot.graph;
+        setData((prev) => ({
+          ...prev,
+          nodes: graph.nodes || [],
+          links: graph.edges || [],
+          edges: graph.edges || [],
+          historicalEvidence: graph.evidence || [],
+        }));
+        const snapView = {
+          snapshot_id: res.snapshot.snapshot_id,
+          description: res.snapshot.description,
+          created_at: res.snapshot.created_at,
+        };
+        activeSnapshotViewRef.current = snapView;
+        setActiveSnapshotView(snapView);
+        setSelectedNode(null);
+        setSelectedEdge(null);
+        setHistoryModalOpen(false);
+        showToast(`Menampilkan snapshot ${snapshotId} di kanvas (Read-only).`, "info");
+      }
+    } catch (err) {
+      showToast(`Gagal memuat snapshot ke kanvas: ${err.message}`, "error");
+    }
+  };
+
+  const handleReturnToLiveTopology = async () => {
+    activeSnapshotViewRef.current = null;
+    setActiveSnapshotView(null);
+    setSelectedNode(null);
+    setSelectedEdge(null);
+    await fetchTopology(false);
+    showToast("Kembali ke topologi jaringan aktif (live).", "success");
+  };
+
   const filteredNodes = useMemo(() => {
     return data.nodes.filter((n) => {
       const matchType = filterType === "all" || n.device_type === filterType;
@@ -569,6 +716,105 @@ export default function TopologyPage({ onOpenMenu }) {
     });
     return map;
   }, [filteredNodes]);
+
+  // Multi-Layer Normalized Edges (Phase 4.5)
+  const allNormalizedEdges = useMemo(() => {
+    const rawList = data.edges && data.edges.length > 0 ? data.edges : data.links || [];
+    const normalized = [];
+    const seenIds = new Set();
+
+    for (const item of rawList) {
+      const norm = normalizeEdge(item);
+      if (!norm || !norm.id) continue;
+      if (!seenIds.has(norm.id)) {
+        seenIds.add(norm.id);
+        normalized.push(norm);
+      }
+    }
+
+    if (data.links && data.edges && data.edges.length > 0) {
+      for (const item of data.links) {
+        const norm = normalizeEdge(item);
+        if (!norm || !norm.id) continue;
+        if (!seenIds.has(norm.id)) {
+          seenIds.add(norm.id);
+          normalized.push(norm);
+        }
+      }
+    }
+
+    return normalized;
+  }, [data.edges, data.links]);
+
+  // Layer Edge Counters for Control Badges
+  const layerCounts = useMemo(() => {
+    const counts = { physical: 0, layer2: 0, layer3: 0, logical: 0, total: 0 };
+    for (const edge of allNormalizedEdges) {
+      const srcId = edge.source_node_id || edge.source;
+      const dstId = edge.target_node_id || edge.target;
+      if (!nodesMap[srcId] || !nodesMap[dstId]) continue;
+      const c = edge.relationship_class || RELATIONSHIP_CLASSES.PHYSICAL;
+      if (counts[c] !== undefined) counts[c]++;
+      counts.total++;
+    }
+    return counts;
+  }, [allNormalizedEdges, nodesMap]);
+
+  // Filtered Edges based on Layer, Operational Status, and Confidence Filters
+  const visibleEdges = useMemo(() => {
+    return allNormalizedEdges.filter((edge) => {
+      const srcId = edge.source_node_id || edge.source;
+      const dstId = edge.target_node_id || edge.target;
+      if (!nodesMap[srcId] || !nodesMap[dstId]) return false;
+
+      const relClass = edge.relationship_class || RELATIONSHIP_CLASSES.PHYSICAL;
+      if (layerFilters[relClass] === false) return false;
+
+      if (operStatusFilter !== "all") {
+        const op = (edge.operational_status || edge.oper_status || edge.status || "up").toLowerCase();
+        if (operStatusFilter === "up" && op !== "up") return false;
+        if (operStatusFilter === "down" && op !== "down") return false;
+        if (operStatusFilter === "degraded" && op !== "degraded" && op !== "warning") return false;
+      }
+
+      if (confidenceFilter !== "all") {
+        const tier = (edge.confidence_tier || "medium").toLowerCase();
+        if (confidenceFilter === "confirmed" && tier !== "confirmed") return false;
+        if (confidenceFilter === "high" && tier !== "high") return false;
+        if (confidenceFilter === "medium" && tier !== "medium") return false;
+        if (confidenceFilter === "low_inferred" && tier !== "low" && tier !== "inferred") return false;
+      }
+
+      return true;
+    });
+  }, [allNormalizedEdges, nodesMap, layerFilters, operStatusFilter, confidenceFilter]);
+
+  // Parallel Multi-Layer Edge Bundles for Non-Overlapping Bezier Curves
+  const bundledEdges = useMemo(() => {
+    const groups = new Map();
+    for (const edge of visibleEdges) {
+      const srcId = edge.source_node_id || edge.source;
+      const dstId = edge.target_node_id || edge.target;
+      const pairKey = [srcId, dstId].sort().join("---");
+      if (!groups.has(pairKey)) {
+        groups.set(pairKey, []);
+      }
+      groups.get(pairKey).push(edge);
+    }
+
+    const result = [];
+    for (const [, edges] of groups.entries()) {
+      const bundleSize = edges.length;
+      edges.forEach((edge, bundleIndex) => {
+        result.push({
+          edge,
+          bundleIndex,
+          bundleSize,
+        });
+      });
+    }
+    return result;
+  }, [visibleEdges]);
 
   const reviewBadgeCount =
     (data.stats?.pending_review_nodes || 0) + (data.stats?.open_conflicts || 0);
@@ -615,9 +861,13 @@ export default function TopologyPage({ onOpenMenu }) {
 
             <button
               onClick={handleDiscover}
-              disabled={discovering}
+              disabled={discovering || !!activeSnapshotView}
               className="text-xs font-medium px-3 py-1.5 rounded-pill bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25 hover:shadow-glow-cyan transition flex items-center gap-1.5 disabled:opacity-40"
-              title="Jalankan interogasi read-only berbasis bukti dari Seed Router"
+              title={
+                activeSnapshotView
+                  ? "Tidak tersedia dalam mode riwayat snapshot (Read-only)"
+                  : "Jalankan interogasi read-only berbasis bukti dari Seed Router"
+              }
             >
               <RefreshCw className={`w-3.5 h-3.5 ${discovering ? "animate-spin" : ""}`} />
               <span className="hidden sm:inline">{discovering ? "Scanning..." : "Auto Discover"}</span>
@@ -638,6 +888,15 @@ export default function TopologyPage({ onOpenMenu }) {
             </button>
 
             <button
+              onClick={() => setHistoryModalOpen(true)}
+              className="text-xs font-medium px-2.5 py-1.5 rounded-pill bg-purple-500/10 text-purple-300 border border-purple-500/25 hover:bg-purple-500/20 transition flex items-center gap-1.5"
+              title="Buka Timeline Snapshot & Semantic Graph Diff"
+            >
+              <History className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden sm:inline">History</span>
+            </button>
+
+            <button
               onClick={() => setPolicyModalOpen(true)}
               className="text-xs font-medium px-2.5 py-1.5 rounded-pill bg-white/5 text-text-primary border border-white/10 hover:bg-white/10 transition flex items-center gap-1.5"
               title="Atur ISP Boundary, Subnet Internal, dan Kebijakan Discovery"
@@ -648,8 +907,13 @@ export default function TopologyPage({ onOpenMenu }) {
 
             <button
               onClick={() => setAddNodeModal(true)}
-              className="text-xs font-medium px-2.5 py-1.5 rounded-pill bg-white/5 text-text-primary border border-white/10 hover:bg-white/10 transition flex items-center gap-1"
-              title="Tambah perangkat secara manual"
+              disabled={!!activeSnapshotView}
+              className="text-xs font-medium px-2.5 py-1.5 rounded-pill bg-white/5 text-text-primary border border-white/10 hover:bg-white/10 transition flex items-center gap-1 disabled:opacity-40"
+              title={
+                activeSnapshotView
+                  ? "Tidak tersedia dalam mode riwayat snapshot (Read-only)"
+                  : "Tambah perangkat secara manual"
+              }
             >
               <Plus className="w-3.5 h-3.5 text-sky-400" />
               <span className="hidden xl:inline">Node</span>
@@ -657,6 +921,7 @@ export default function TopologyPage({ onOpenMenu }) {
 
             <button
               onClick={() => {
+                if (activeSnapshotView) return;
                 if (data.nodes.length < 2) {
                   pushToast("Dibutuhkan minimal 2 perangkat untuk wiring manual.", "warning");
                   return;
@@ -668,8 +933,13 @@ export default function TopologyPage({ onOpenMenu }) {
                 }));
                 setAddLinkModal(true);
               }}
-              className="text-xs font-medium px-2.5 py-1.5 rounded-pill bg-white/5 text-text-primary border border-white/10 hover:bg-white/10 transition flex items-center gap-1"
-              title="Hubungkan kabel fisik secara manual"
+              disabled={!!activeSnapshotView}
+              className="text-xs font-medium px-2.5 py-1.5 rounded-pill bg-white/5 text-text-primary border border-white/10 hover:bg-white/10 transition flex items-center gap-1 disabled:opacity-40"
+              title={
+                activeSnapshotView
+                  ? "Tidak tersedia dalam mode riwayat snapshot (Read-only)"
+                  : "Hubungkan kabel fisik secara manual"
+              }
             >
               <Link2 className="w-3.5 h-3.5 text-purple-400" />
               <span className="hidden xl:inline">Wiring</span>
@@ -678,15 +948,26 @@ export default function TopologyPage({ onOpenMenu }) {
             {data.nodes.length > 0 ? (
               <button
                 onClick={handleClearTopology}
-                className="text-xs font-medium px-2.5 py-1.5 rounded-pill bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition flex items-center gap-1"
-                title="Kosongkan seluruh peta topologi (memerlukan konfirmasi)"
+                disabled={!!activeSnapshotView}
+                className="text-xs font-medium px-2.5 py-1.5 rounded-pill bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition flex items-center gap-1 disabled:opacity-40"
+                title={
+                  activeSnapshotView
+                    ? "Tidak tersedia dalam mode riwayat snapshot (Read-only)"
+                    : "Kosongkan seluruh peta topologi (memerlukan konfirmasi)"
+                }
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             ) : (
               <button
                 onClick={handleSeedDemo}
-                className="text-xs font-medium px-3 py-1.5 rounded-pill bg-purple-500/10 text-purple-300 border border-purple-500/25 hover:bg-purple-500/20 transition flex items-center gap-1.5"
+                disabled={!!activeSnapshotView}
+                className="text-xs font-medium px-3 py-1.5 rounded-pill bg-purple-500/10 text-purple-300 border border-purple-500/25 hover:bg-purple-500/20 transition flex items-center gap-1.5 disabled:opacity-40"
+                title={
+                  activeSnapshotView
+                    ? "Tidak tersedia dalam mode riwayat snapshot (Read-only)"
+                    : "Muat sampel demo"
+                }
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Demo V2</span>
@@ -695,6 +976,24 @@ export default function TopologyPage({ onOpenMenu }) {
           </div>
         }
       />
+
+      {/* READ-ONLY HISTORICAL SNAPSHOT BANNER */}
+      {activeSnapshotView && (
+        <div className="flex items-center justify-between px-4 py-2 bg-purple-950/40 border-b border-purple-500/30 text-xs text-purple-200 shrink-0">
+          <div className="flex items-center gap-2">
+            <History className="w-4 h-4 text-purple-400 shrink-0" />
+            <span>
+              Menampilkan Titik Waktu Snapshot: <strong className="font-mono text-purple-300">{activeSnapshotView.snapshot_id}</strong> ({activeSnapshotView.description}) — Mode Read-Only
+            </span>
+          </div>
+          <button
+            onClick={handleReturnToLiveTopology}
+            className="px-2.5 py-1 rounded-pill bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-white font-medium transition shrink-0"
+          >
+            Kembali ke Topologi Live
+          </button>
+        </div>
+      )}
 
       {/* GOVERNANCE & TELEMETRY CONTROL BAR */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.08] bg-black/75 backdrop-blur-md overflow-x-auto text-[11px] shrink-0">
@@ -797,19 +1096,240 @@ export default function TopologyPage({ onOpenMenu }) {
         </div>
       </div>
 
+      {/* MULTI-LAYER TAXONOMY & RELATIONSHIP CONTROL BAR (PHASE 4.5) */}
+      <div className="flex items-center justify-between px-4 py-1.5 border-b border-white/[0.06] bg-black/60 backdrop-blur-sm overflow-x-auto text-[11px] shrink-0 gap-3">
+        {/* Layer Filters */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="text-[10px] uppercase font-bold tracking-wider text-text-secondary mr-1 flex items-center gap-1">
+            <Layers className="w-3 h-3 text-sky-400" /> Layers:
+          </span>
+
+          <button
+            onClick={() => {
+              const allActive = Object.values(layerFilters).every(Boolean);
+              setLayerFilters({
+                physical: !allActive,
+                layer2: !allActive,
+                layer3: !allActive,
+                logical: !allActive,
+              });
+            }}
+            className={`px-2 py-0.5 rounded-pill text-[10px] font-medium border transition ${
+              Object.values(layerFilters).every(Boolean)
+                ? "bg-white/15 text-white border-white/20"
+                : "bg-white/5 text-text-secondary border-white/10 hover:text-text-primary"
+            }`}
+          >
+            All ({layerCounts.total})
+          </button>
+
+          <button
+            onClick={() => setLayerFilters((prev) => ({ ...prev, physical: !prev.physical }))}
+            className={`px-2 py-0.5 rounded-pill text-[10px] font-medium border transition flex items-center gap-1 ${
+              layerFilters.physical
+                ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-semibold"
+                : "bg-white/5 text-text-secondary/60 border-white/5 hover:text-text-secondary line-through"
+            }`}
+            title="Kabel Fisik Terkonfirmasi (Copper/Fiber)"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+            Physical ({layerCounts.physical})
+          </button>
+
+          <button
+            onClick={() => setLayerFilters((prev) => ({ ...prev, layer2: !prev.layer2 }))}
+            className={`px-2 py-0.5 rounded-pill text-[10px] font-medium border transition flex items-center gap-1 ${
+              layerFilters.layer2
+                ? "bg-sky-500/20 text-sky-300 border-sky-500/40 font-semibold"
+                : "bg-white/5 text-text-secondary/60 border-white/5 hover:text-text-secondary line-through"
+            }`}
+            title="Layer 2 Adjacency (Bridge / VLAN / Switch-port)"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-400 inline-block" />
+            Layer 2 ({layerCounts.layer2})
+          </button>
+
+          <button
+            onClick={() => setLayerFilters((prev) => ({ ...prev, layer3: !prev.layer3 }))}
+            className={`px-2 py-0.5 rounded-pill text-[10px] font-medium border transition flex items-center gap-1 ${
+              layerFilters.layer3
+                ? "bg-purple-500/20 text-purple-300 border-purple-500/40 font-semibold"
+                : "bg-white/5 text-text-secondary/60 border-white/5 hover:text-text-secondary line-through"
+            }`}
+            title="Layer 3 Reachability (Routed Next-Hop / Gateway)"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 inline-block" />
+            Layer 3 ({layerCounts.layer3})
+          </button>
+
+          <button
+            onClick={() => setLayerFilters((prev) => ({ ...prev, logical: !prev.logical }))}
+            className={`px-2 py-0.5 rounded-pill text-[10px] font-medium border transition flex items-center gap-1 ${
+              layerFilters.logical
+                ? "bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold"
+                : "bg-white/5 text-text-secondary/60 border-white/5 hover:text-text-secondary line-through"
+            }`}
+            title="Logical Relationship (VPN / Overlay Tunnel / VRRP)"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
+            Logical ({layerCounts.logical})
+          </button>
+        </div>
+
+        {/* Operational Status & Confidence Dropdown / Toggles */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-text-secondary">Status:</span>
+            <select
+              value={operStatusFilter}
+              onChange={(e) => setOperStatusFilter(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-pill px-2 py-0.5 text-[10px] text-text-primary outline-none focus:border-sky-500/40"
+            >
+              <option value="all">Semua Status</option>
+              <option value="up">Up Saja</option>
+              <option value="down">Down (Error)</option>
+              <option value="degraded">Degraded / Warning</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-text-secondary">Confidence:</span>
+            <select
+              value={confidenceFilter}
+              onChange={(e) => setConfidenceFilter(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-pill px-2 py-0.5 text-[10px] text-text-primary outline-none focus:border-sky-500/40"
+            >
+              <option value="all">Semua Confidence</option>
+              <option value="confirmed">Confirmed Only</option>
+              <option value="high">High (&gt;=85%)</option>
+              <option value="medium">Medium (&gt;=65%)</option>
+              <option value="low_inferred">Low / Inferred</option>
+            </select>
+          </div>
+
+          {/* Toggle Route Overlay (WP 4.6.5) */}
+          <button
+            onClick={() => {
+              const nextOpen = !routeOverlayOpen;
+              setRouteOverlayOpen(nextOpen);
+              if (nextOpen && !routeOverlayData) {
+                handleLoadRouteOverlay();
+              }
+            }}
+            className={`px-2.5 py-0.5 rounded-pill text-[10px] font-medium border transition flex items-center gap-1 ${
+              routeOverlayOpen
+                ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40 font-semibold"
+                : "bg-white/5 text-text-secondary border-white/10 hover:text-text-primary"
+            }`}
+            title="Tampilkan Overlay Jalur Rute Lintas-Router (Tanpa Mengubah Kabel Fisik)"
+          >
+            <GitBranch className="w-3 h-3" />
+            <span>Route Overlay</span>
+          </button>
+
+          {/* Open Route History Modal (WP 4.6.4) */}
+          <button
+            onClick={() => setRouteHistoryModalOpen(true)}
+            className="px-2.5 py-0.5 rounded-pill text-[10px] font-medium border bg-white/5 text-text-secondary border-white/10 hover:text-text-primary transition flex items-center gap-1"
+            title="Riwayat Snapshot & Perubahan Tabel Routing"
+          >
+            <History className="w-3 h-3 text-purple-400" />
+            <span>Route History</span>
+          </button>
+
+          {/* Toggle Legend */}
+          <button
+            onClick={() => setLegendOpen((v) => !v)}
+            className={`px-2.5 py-0.5 rounded-pill text-[10px] font-medium border transition flex items-center gap-1 ${
+              legendOpen
+                ? "bg-sky-500/20 text-sky-300 border-sky-500/40"
+                : "bg-white/5 text-text-secondary border-white/10 hover:text-text-primary"
+            }`}
+            title="Tampilkan Legend Simbol Multi-Layer"
+          >
+            <Eye className="w-3 h-3" />
+            <span>Legend</span>
+          </button>
+        </div>
+      </div>
+
+      {/* FOCUSED ROUTE OVERLAY QUERY BAR (WP 4.6.5) */}
+      {routeOverlayOpen && (
+        <div className="flex flex-wrap items-center gap-2 px-4 py-1.5 border-b border-cyan-500/20 bg-cyan-950/20 text-[11px] shrink-0">
+          <span className="font-semibold text-cyan-300 flex items-center gap-1">
+            <GitBranch className="w-3.5 h-3.5" /> Cross-Device Route Path:
+          </span>
+          <select
+            value={routeOverlaySource}
+            onChange={(e) => setRouteOverlaySource(e.target.value)}
+            className="bg-black/60 border border-white/15 rounded-pill px-2.5 py-0.5 text-[10px] text-white outline-none"
+          >
+            <option value="">Semua Router (Summary)</option>
+            {data.nodes.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.name || n.id} ({n.ip || "no-ip"})
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            placeholder="Destination IP/Prefix (mis. 8.8.8.8 atau 10.20.0.0/24)"
+            value={routeOverlayDest}
+            onChange={(e) => setRouteOverlayDest(e.target.value)}
+            className="bg-black/60 border border-white/15 rounded-pill px-3 py-0.5 text-[10px] text-white w-56 outline-none focus:border-cyan-400/50"
+          />
+          <input
+            type="text"
+            placeholder="VRF / Table (main)"
+            value={routeOverlayTable}
+            onChange={(e) => setRouteOverlayTable(e.target.value)}
+            className="bg-black/60 border border-white/15 rounded-pill px-2.5 py-0.5 text-[10px] text-white w-28 outline-none"
+          />
+          <button
+            onClick={() => handleLoadRouteOverlay()}
+            disabled={routeOverlayLoading}
+            className="px-3 py-0.5 rounded-pill bg-cyan-500/25 hover:bg-cyan-500/35 border border-cyan-400/40 text-cyan-200 font-semibold text-[10px] flex items-center gap-1 transition"
+          >
+            {routeOverlayLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
+            <span>Evaluasi Jalur</span>
+          </button>
+          {routeOverlayData && (
+            <span className="text-[10px] font-mono text-cyan-200/80 ml-1">
+              State: <strong>{routeOverlayData?.overlay?.path_state}</strong> · Segments:{" "}
+              {routeOverlayData?.overlay?.segments_count ?? 0} · Inconsistencies:{" "}
+              {routeOverlayData?.inconsistencies?.length ?? 0}
+            </span>
+          )}
+          <button
+            onClick={() => {
+              setRouteOverlayData(null);
+              setSelectedRouteSegment(null);
+              setRouteOverlayOpen(false);
+            }}
+            className="ml-auto text-[10px] text-text-secondary hover:text-white px-2 py-0.5"
+          >
+            Tutup Overlay
+          </button>
+        </div>
+      )}
+
       {/* MAIN INTERACTIVE CANVAS */}
       <div
         ref={canvasRef}
         className="relative flex-1 bg-black overflow-hidden cursor-grab active:cursor-grabbing"
         onMouseMove={handleCanvasMouseMove}
         onMouseUp={handleCanvasMouseUp}
-        onClick={() => setSelectedNode(null)}
+        onClick={() => {
+          setSelectedNode(null);
+          setSelectedEdge(null);
+          setSelectedRouteSegment(null);
+        }}
         style={{
           backgroundImage: "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.06) 1px, transparent 0)",
           backgroundSize: "28px 28px",
         }}
       >
-        {/* SVG LINKS LAYER */}
+        {/* SVG MULTI-LAYER LINKS & EDGES */}
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none"
           style={{ transform: `scale(${zoom})`, transformOrigin: "0 0" }}
@@ -826,90 +1346,268 @@ export default function TopologyPage({ onOpenMenu }) {
                 <feMergeNode in="SourceGraphic" />
               </feMerge>
             </filter>
+            <filter id="glow-edge-selected" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="3.5" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            {/* Arrow marker for Layer 3 (purple) */}
+            <marker
+              id="arrow-layer3"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#8b5cf6" />
+            </marker>
+            {/* Arrow marker for Logical overlay (amber) */}
+            <marker
+              id="arrow-logical"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#f59e0b" />
+            </marker>
+            {/* Arrow markers for Ephemeral Route Path Overlay (WP 4.6.5) */}
+            <marker
+              id="arrow-route-inferred"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#22d3ee" />
+            </marker>
+            <marker
+              id="arrow-route-recursive"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#c084fc" />
+            </marker>
+            <marker
+              id="arrow-route-uncertain"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#fbbf24" />
+            </marker>
           </defs>
 
-          {data.links.map((link) => {
-            const src = nodesMap[link.source];
-            const dst = nodesMap[link.target];
+          {bundledEdges.map(({ edge, bundleIndex, bundleSize }) => {
+            const srcId = edge.source_node_id || edge.source;
+            const dstId = edge.target_node_id || edge.target;
+            const src = nodesMap[srcId];
+            const dst = nodesMap[dstId];
             if (!src || !dst) return null;
 
             const x1 = src.pos_x + 92;
             const y1 = src.pos_y + 42;
             const x2 = dst.pos_x + 92;
             const y2 = dst.pos_y + 42;
-            const mx = (x1 + x2) / 2;
-            const my = (y1 + y2) / 2;
 
-            const vis = getLinkVisualConfig(link, src, dst);
+            const isSelected = selectedEdge?.id === edge.id;
+            const vis = getMultiLayerEdgeVisualConfig(edge, src, dst, isSelected);
+            const curved = computeCurvedEdgePath(x1, y1, x2, y2, bundleIndex, bundleSize);
+
             const showRemoteQuestion =
-              !link.target_port &&
-              (link.link_type === "layer2_adjacency" || link.link_type === "physical");
+              !edge.target_interface_name &&
+              !edge.target_port &&
+              (edge.relationship_class === RELATIONSHIP_CLASSES.PHYSICAL ||
+                edge.relationship_class === RELATIONSHIP_CLASSES.LAYER2);
+
+            const localPortLabel = edge.source_interface_name || edge.source_port;
+            const remotePortLabel = edge.target_interface_name || edge.target_port;
 
             return (
-              <g key={link.id} className="transition-all duration-300">
-                <line
-                  x1={x1}
-                  y1={y1}
-                  x2={x2}
-                  y2={y2}
+              <g key={edge.id} className="transition-all duration-300">
+                {/* Visual Stroke Path */}
+                <path
+                  d={curved.pathD}
                   stroke={vis.stroke}
                   strokeWidth={vis.strokeWidth}
                   strokeDasharray={vis.strokeDasharray}
                   strokeOpacity={vis.opacity}
-                  filter={vis.glow ? "url(#glow-cyan)" : undefined}
+                  fill="none"
+                  markerEnd={vis.markerEnd}
+                  filter={isSelected ? "url(#glow-edge-selected)" : (vis.glow ? "url(#glow-cyan)" : undefined)}
                 />
 
-                {/* Midpoint Verification Pill (accessible non-color-only label) */}
-                <rect
-                  x={mx - 31}
-                  y={my - 8}
-                  width="62"
-                  height="15"
-                  rx="7"
-                  fill="#050810"
-                  stroke={vis.dotColor}
-                  strokeOpacity="0.45"
-                  strokeWidth="1"
-                />
-                <text
-                  x={mx}
-                  y={my + 2.5}
-                  fill={vis.dotColor}
-                  fontSize="8"
-                  fontFamily="monospace"
-                  textAnchor="middle"
+                {/* Wide transparent click hitbox for smooth selection */}
+                <path
+                  d={curved.pathD}
+                  stroke="transparent"
+                  strokeWidth={20}
+                  fill="none"
+                  className="pointer-events-auto cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedEdge(edge);
+                    setSelectedNode(null);
+                  }}
                 >
-                  {vis.badge}
-                </text>
+                  <title>{`${vis.label}: ${src.name} ➔ ${dst.name} (${edge.bandwidth || "1 Gbps"})`}</title>
+                </path>
 
-                {/* Honest Port Labels (NEVER invent eth0 / NIC when absent) */}
-                {link.source_port && (
+                {/* Midpoint Verification & Layer Pill Badge */}
+                <g
+                  className="pointer-events-auto cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedEdge(edge);
+                    setSelectedNode(null);
+                  }}
+                >
+                  <rect
+                    x={curved.labelX - 32}
+                    y={curved.labelY - 8}
+                    width="64"
+                    height="16"
+                    rx="8"
+                    fill="#050810"
+                    stroke={isSelected ? "#38bdf8" : vis.dotColor}
+                    strokeOpacity={isSelected ? 0.9 : 0.6}
+                    strokeWidth={isSelected ? 1.5 : 1}
+                  />
                   <text
-                    x={(x1 * 2 + x2) / 3}
-                    y={(y1 * 2 + y2) / 3 - 7}
+                    x={curved.labelX}
+                    y={curved.labelY + 3.5}
+                    fill={isSelected ? "#38bdf8" : vis.dotColor}
+                    fontSize="8"
+                    fontFamily="monospace"
+                    fontWeight="bold"
+                    textAnchor="middle"
+                  >
+                    {vis.badge}
+                  </text>
+                </g>
+
+                {/* Honest Port Labels (Never invent port names when absent) */}
+                {localPortLabel && (
+                  <text
+                    x={(x1 * 2 + curved.labelX) / 3}
+                    y={(y1 * 2 + curved.labelY) / 3 - 6}
                     fill="#38bdf8"
                     fontSize="9"
                     fontFamily="monospace"
                     textAnchor="middle"
                   >
-                    {link.source_port}
+                    {localPortLabel}
                   </text>
                 )}
-                {(link.target_port || showRemoteQuestion) && (
+                {(remotePortLabel || showRemoteQuestion) && (
                   <text
-                    x={(x1 + x2 * 2) / 3}
-                    y={(y1 + y2 * 2) / 3 - 7}
-                    fill={link.target_port ? "#c084fc" : "#fbbf24"}
+                    x={(curved.labelX + x2 * 2) / 3}
+                    y={(curved.labelY + y2 * 2) / 3 - 6}
+                    fill={remotePortLabel ? "#c084fc" : "#fbbf24"}
                     fontSize="9"
                     fontFamily="monospace"
                     textAnchor="middle"
                   >
-                    {link.target_port || "?"}
+                    {remotePortLabel || "?"}
                   </text>
                 )}
               </g>
             );
           })}
+
+          {/* EPHEMERAL MULTI-DEVICE ROUTE PATH OVERLAY (WP 4.6.5 — NON-DESTRUCTIVE) */}
+          {routeOverlayOpen &&
+            (routeOverlayData?.overlay?.segments || []).map((seg, idx) => {
+              const src = nodesMap[seg.source_device_id];
+              const dst = seg.target_device_id ? nodesMap[seg.target_device_id] : null;
+              if (!src || !dst) return null;
+
+              const x1 = src.pos_x + 92;
+              const y1 = src.pos_y + 42;
+              const x2 = dst.pos_x + 92;
+              const y2 = dst.pos_y + 42;
+              const isSegSelected = selectedRouteSegment?.segment_id === seg.segment_id;
+              const styleCfg = getOverlaySegmentVisualStyle(seg, isSegSelected);
+              // Offset curve slightly from physical edges so both remain clearly visible
+              const curved = computeCurvedEdgePath(x1, y1, x2, y2, 1, 2);
+
+              return (
+                <g key={`route_ov_${seg.segment_id}_${idx}`}>
+                  <path
+                    d={curved.pathD}
+                    stroke={styleCfg.stroke}
+                    strokeWidth={styleCfg.strokeWidth}
+                    strokeDasharray={styleCfg.strokeDasharray}
+                    strokeOpacity={styleCfg.opacity}
+                    fill="none"
+                    markerEnd={styleCfg.markerEnd}
+                    filter={isSegSelected ? "url(#glow-edge-selected)" : "url(#glow-cyan)"}
+                  />
+                  <path
+                    d={curved.pathD}
+                    stroke="transparent"
+                    strokeWidth={18}
+                    fill="none"
+                    className="pointer-events-auto cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedRouteSegment(seg);
+                      setSelectedEdge(null);
+                      setSelectedNode(null);
+                    }}
+                  >
+                    <title>{`${styleCfg.label}: ${seg.source_device_id} → ${seg.next_device_hypothesis} (${seg.destination_prefix})`}</title>
+                  </path>
+                  <g
+                    className="pointer-events-auto cursor-pointer"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedRouteSegment(seg);
+                      setSelectedEdge(null);
+                      setSelectedNode(null);
+                    }}
+                  >
+                    <rect
+                      x={curved.labelX - 42}
+                      y={curved.labelY - 22}
+                      width="84"
+                      height="15"
+                      rx="7"
+                      fill="#041019"
+                      stroke={styleCfg.dotColor}
+                      strokeOpacity={0.85}
+                      strokeWidth={isSegSelected ? 1.5 : 1}
+                    />
+                    <text
+                      x={curved.labelX}
+                      y={curved.labelY - 12}
+                      fill={styleCfg.dotColor}
+                      fontSize="7.5"
+                      fontFamily="monospace"
+                      fontWeight="bold"
+                      textAnchor="middle"
+                    >
+                      {styleCfg.badge}
+                    </text>
+                  </g>
+                </g>
+              );
+            })}
         </svg>
 
         {/* NODES LAYER */}
@@ -1011,8 +1709,8 @@ export default function TopologyPage({ onOpenMenu }) {
             <div className="flex flex-wrap items-center justify-center gap-2">
               <button
                 onClick={handleDiscover}
-                disabled={discovering}
-                className="text-xs px-4 py-2 rounded-pill bg-sky-500 text-black font-semibold shadow-glow-cyan hover:bg-sky-400 transition flex items-center gap-1.5 disabled:opacity-50"
+                disabled={discovering || !!activeSnapshotView}
+                className="text-xs px-4 py-2 rounded-pill bg-sky-500 text-black font-semibold shadow-glow-cyan hover:bg-sky-400 transition flex items-center gap-1.5 disabled:opacity-40"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${discovering ? "animate-spin" : ""}`} />
                 <span>{discovering ? "Memindai..." : "Auto Discover (Evidence-Based)"}</span>
@@ -1026,7 +1724,8 @@ export default function TopologyPage({ onOpenMenu }) {
               </button>
               <button
                 onClick={handleSeedDemo}
-                className="text-xs px-4 py-2 rounded-pill bg-purple-500/15 text-purple-300 border border-purple-500/30 font-medium hover:bg-purple-500/25 transition flex items-center gap-1.5"
+                disabled={!!activeSnapshotView}
+                className="text-xs px-4 py-2 rounded-pill bg-purple-500/15 text-purple-300 border border-purple-500/30 font-medium hover:bg-purple-500/25 transition flex items-center gap-1.5 disabled:opacity-40"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Muat Sampel Demo V2</span>
@@ -1069,7 +1768,14 @@ export default function TopologyPage({ onOpenMenu }) {
         links={data.links}
         nodesMap={nodesMap}
         onClose={() => setSelectedNode(null)}
-        onSelectNode={setSelectedNode}
+        onSelectNode={(node) => {
+          setSelectedNode(node);
+          setSelectedEdge(null);
+        }}
+        onSelectEdge={(edge) => {
+          setSelectedEdge(edge);
+          setSelectedNode(null);
+        }}
         onEditNode={setEditNodeModal}
         onDeleteNode={handleDeleteNode}
         onOpenAddLink={() => {
@@ -1090,7 +1796,41 @@ export default function TopologyPage({ onOpenMenu }) {
         pinging={pinging}
         troubleshooting={troubleshooting}
         pushToast={pushToast}
+        readOnly={!!activeSnapshotView}
       />
+
+      {/* MULTI-LAYER EDGE & EVIDENCE INSPECTOR (PHASE 4.5) */}
+      {selectedEdge && (
+        <TopologyEdgeInspector
+          edge={selectedEdge}
+          nodesMap={nodesMap}
+          onClose={() => setSelectedEdge(null)}
+          onSelectNode={(node) => {
+            setSelectedNode(node);
+            setSelectedEdge(null);
+          }}
+          onDeleteEdge={(edgeId) => {
+            handleDeleteLink(edgeId);
+            setSelectedEdge(null);
+          }}
+          onTroubleshoot={handleTroubleshoot}
+          onRefreshTopology={() => fetchTopology(true)}
+          pushToast={pushToast}
+          readOnly={!!activeSnapshotView}
+          historicalEvidence={data.historicalEvidence || []}
+        />
+      )}
+
+      {/* MULTI-DEVICE ROUTE OVERLAY SEGMENT INSPECTOR (WP 4.6.5) */}
+      {routeOverlayOpen && selectedRouteSegment && (
+        <MultiDeviceRouteInspector
+          segment={selectedRouteSegment}
+          overlayPayload={routeOverlayData}
+          nodesMap={nodesMap}
+          onClose={() => setSelectedRouteSegment(null)}
+          onSelectSegment={(seg) => setSelectedRouteSegment(seg)}
+        />
+      )}
 
       {/* GOVERNANCE MODALS */}
       <PolicySettingsModal
@@ -1629,6 +2369,21 @@ export default function TopologyPage({ onOpenMenu }) {
           pushToast={pushToast}
         />
       )}
+
+      {/* HISTORICAL TOPOLOGY & CHANGE DETECTION MODAL */}
+      <TopologyHistoryModal
+        open={historyModalOpen}
+        onClose={() => setHistoryModalOpen(false)}
+        onLoadOntoCanvas={handleLoadSnapshotOntoCanvas}
+        pushToast={showToast}
+      />
+
+      {/* HISTORICAL ROUTE ANALYTICS MODAL (WP 4.6.4) */}
+      <RouteHistoryModal
+        open={routeHistoryModalOpen}
+        onClose={() => setRouteHistoryModalOpen(false)}
+        pushToast={showToast}
+      />
     </div>
   );
 }

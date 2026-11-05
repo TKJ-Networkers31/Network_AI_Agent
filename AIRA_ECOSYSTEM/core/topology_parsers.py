@@ -475,69 +475,14 @@ def parse_mikrotik_addresses(raw_output: str) -> List[Dict[str, Any]]:
 
 
 def parse_mikrotik_routes(raw_output: str) -> List[Dict[str, Any]]:
-    """Parses '/ip route print detail' or tabular '/ip route print'."""
-    routes: List[Dict[str, Any]] = []
-    if not raw_output:
-        return routes
-
-    for it in _parse_kv_blocks(raw_output):
-        flags = it.get("_flags", "")
-        dst = it.get("dst-address", "")
-        gw = it.get("gateway", "")
-        gw_status = it.get("gateway-status", "") or it.get("immediate-gw", "")
-        active = ("A" in flags) or ("active" in gw_status.lower()) or ("reachable" in gw_status.lower())
-        connected = ("C" in flags) or ("connect" in flags.lower())
-
-        iface = it.get("interface", "")
-        # Extract egress interface from gateway-status ("192.168.1.1 reachable via ether1") or immediate-gw ("192.168.1.1%ether1")
-        if not iface:
-            m_via = re.search(r"(?:via|%)\s*([a-zA-Z0-9_.\-]+)", gw_status + " " + gw)
-            if m_via:
-                iface = m_via.group(1)
-            elif gw and not normalize_ip(gw):
-                iface = gw.split(",")[0].strip()
-
-        routes.append({
-            "dst": dst,
-            "gateway_ip": normalize_ip(gw),
-            "gateway_raw": gw,
-            "interface": sanitize_untrusted_text(iface, 64),
-            "active": active,
-            "connected": connected,
-            "raw": it.get("_raw", ""),
-        })
-    if routes:
-        return routes
-
-    # Tabular fallback
-    for line in raw_output.splitlines():
-        s = line.strip()
-        if not s or s.startswith("Flags:") or s.startswith("#"):
-            continue
-        m_def = re.search(r"^\d+\s+([A-Za-z+]*)\s+(\S+)\s+(\S+)", s)
-        if m_def:
-            flags, dst, gw = m_def.groups()
-            gw_ip = normalize_ip(gw)
-            iface = ""
-            m_if = re.search(r"(?:via|%)\s*([a-zA-Z0-9_.\-]+)", s)
-            if m_if:
-                iface = m_if.group(1)
-            elif not gw_ip and "/" not in gw:
-                iface = gw
-            else:
-                m_tail = re.search(r"\b(wlan\d+|ether\d+|sfp\S*|pppoe\S*|lte\d+|wg\S*|ovpn\S*|l2tp\S*)\b", s, re.IGNORECASE)
-                if m_tail:
-                    iface = m_tail.group(1)
-            routes.append({
-                "dst": dst,
-                "gateway_ip": gw_ip,
-                "gateway_raw": gw,
-                "interface": sanitize_untrusted_text(iface, 64),
-                "active": "A" in flags or "reachable" in s.lower(),
-                "connected": "C" in flags,
-                "raw": sanitize_cli_excerpt(s, 240),
-            })
-    return routes
+    """
+    Parses '/ip route print detail' or tabular '/ip route print'.
+    Delegates to authoritative UnifiedRouteParser (Phase 4.6 / WP 4.6.0).
+    """
+    from core.routing.unified_route_parser import UnifiedRouteParser
+    parser = UnifiedRouteParser()
+    routes = parser.parse(raw_output)
+    return [r.to_topology_dict() for r in routes]
 
 
 def parse_mikrotik_bridge_ports(raw_output: str) -> Dict[str, Dict[str, Any]]:

@@ -218,14 +218,16 @@ class VoiceIO:
             return {"success": True, "state": STATE_PAUSED, "reason": reason}
 
     def resume_mic(self) -> Dict[str, Any]:
-        """Melanjutkan penangkapan mikrofon kembali jika service aktif."""
+        """Melanjutkan penangkapan mikrofon kembali jika service aktif (idempotent)."""
         with self._lock:
+            if not self._paused.is_set():
+                return {"success": True, "state": self._state, "resumed": False}
             self._paused.clear()
             self._pause_reason = None
             new_st = STATE_LISTENING if self._active.is_set() else STATE_STOPPED
             self._state = new_st
             logger.info("VoiceIO | Mic listening dilanjutkan kembali.")
-            return {"success": True, "state": new_st}
+            return {"success": True, "state": new_st, "resumed": True}
 
     def enable_fusion(self):
         self._fusion_enabled.set()

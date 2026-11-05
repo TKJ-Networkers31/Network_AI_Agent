@@ -16,6 +16,10 @@ import {
   ScrollText,
   Settings,
   ShieldCheck,
+  Compass,
+  Radio,
+  CheckSquare,
+  Building,
 } from "lucide-react";
 
 export const NAV_GROUPS = [
@@ -33,6 +37,10 @@ export const NAV_GROUPS = [
     items: [
       { id: "topology", label: "Topology", icon: Network },
       { id: "nms", label: "Monitoring NMS", icon: Activity },
+      { id: "operations", label: "Operations Center", icon: Compass },
+      { id: "gateways", label: "Edge Gateways", icon: Radio },
+      { id: "decisions", label: "Decision Center", icon: CheckSquare },
+      { id: "portal", label: "Customer Portal", icon: Building },
       { id: "devices", label: "Devices", icon: Server },
       { id: "intelligence", label: "Investigasi & Planning", icon: ShieldCheck },
       { id: "akane", label: "AKANE", icon: Cable },

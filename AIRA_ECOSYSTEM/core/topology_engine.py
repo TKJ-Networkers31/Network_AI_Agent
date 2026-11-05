@@ -13,6 +13,8 @@ Supports:
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -20,10 +22,11 @@ import sqlite3
 import threading
 import time
 import uuid
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from core.events import Event, EventBus, EventNames, event_bus
 from core.nms_models import is_check_stale
 from core.topology_discovery import TopologyDiscoveryMixin
 from core.topology_models import (
@@ -44,14 +47,40 @@ from core.topology_models import (
     sanitize_cli_excerpt,
     sanitize_untrusted_text,
     validate_subnet_list,
+    ConfidenceTier,
+    EdgeEvidence,
+    EdgeLifecycleState,
+    GraphDiffReport,
+    RelationshipClass,
+    TopologyChange,
+    TopologyChangeType,
+    TopologyEdge,
+    TopologySnapshot,
+    compute_edge_canonical_key,
+    normalize_confidence_tier,
+    normalize_edge_lifecycle_state,
+    normalize_interface_name,
+    normalize_relationship_class,
+    normalize_topology_change_type,
+    calculate_edge_confidence,
+    EVIDENCE_HALF_LIVES,
+    DEFAULT_HALF_LIFE,
 )
 from core.topology_parsers import parse_mikrotik_arp, parse_mikrotik_neighbors
+from core.topology_db import (
+    DEFAULT_TOPOLOGY_DB_PATH,
+    get_topology_connection,
+    init_topology_database,
+    get_write_coordinator,
+    execute_with_retry,
+    topology_transaction,
+)
 
 logger = logging.getLogger("aira.topology")
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATABASE_DIR = BASE_DIR / "database"
-DEFAULT_DB_FILE = DATABASE_DIR / "topology.db"
+DEFAULT_DB_FILE = DEFAULT_TOPOLOGY_DB_PATH
 
 _NODE_MIGRATION_COLUMNS: List[Tuple[str, str]] = [
     ("discovery_status", "TEXT DEFAULT 'discovered'"),
@@ -113,18 +142,28 @@ class TopologyEngine(TopologyDiscoveryMixin):
     parse_mikrotik_neighbors = staticmethod(parse_mikrotik_neighbors)
     parse_mikrotik_arp = staticmethod(parse_mikrotik_arp)
 
-    def __init__(self, db_path: Optional[Path] = None):
-        self.db_path = Path(db_path) if db_path else DEFAULT_DB_FILE
-        self._lock = threading.RLock()
+    def __init__(self, db_path: Optional[Path | str] = None):
+        self.db_path = (Path(db_path) if db_path else DEFAULT_TOPOLOGY_DB_PATH).resolve()
+        self._coordinator = get_write_coordinator(self.db_path)
+        self._lock = self._coordinator._lock
         self._discovery_lock = threading.Lock()
         self._active_job_id: Optional[str] = None
+        # Phase 4.3 Stale Decayer & NMS synchronization attributes
+        self._stale_threshold_sec: float = 60.0
+        self._decayer_interval_sec: float = 60.0
+        self._decayer_stop_event = asyncio.Event()
+        self._decayer_task: Optional[asyncio.Task] = None
+        self._decayer_lock = threading.Lock()
+        self._subscriber_token: Optional[str] = None
+        self._dev_subscriber_token: Optional[str] = None
+        self._obs_subscriber_token: Optional[str] = None
+        self._subscriber_lock = threading.Lock()
+        self._target_bus: Optional[EventBus] = None
+        init_topology_database(self.db_path)
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=15.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+    def _get_connection(self, read_only: bool = False) -> sqlite3.Connection:
+        return get_topology_connection(self.db_path, read_only=read_only, timeout=30.0)
 
     def _init_db(self) -> None:
         """Creates base tables and runs non-destructive column migrations preserving existing user data."""
@@ -252,14 +291,1454 @@ class TopologyEngine(TopologyDiscoveryMixin):
                     ("default", json.dumps(DEFAULT_TOPOLOGY_POLICY), time.time()),
                 )
 
+            # ------------------------------------------------------------------
+            # Phase 4.1: Normalized Graph Data Model & SQLite Foundation
+            # ------------------------------------------------------------------
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS topology_edges (
+                    id TEXT PRIMARY KEY,
+                    source_node_id TEXT NOT NULL,
+                    target_node_id TEXT NOT NULL,
+                    source_interface TEXT DEFAULT '',
+                    target_interface TEXT DEFAULT '',
+                    relationship_class TEXT DEFAULT 'physical',
+                    relationship_subtype TEXT DEFAULT 'direct_copper',
+                    direction TEXT DEFAULT 'bidirectional',
+                    oper_status TEXT DEFAULT 'up',
+                    admin_status TEXT DEFAULT 'enabled',
+                    verification_status TEXT DEFAULT 'unknown',
+                    confidence_tier TEXT DEFAULT 'MEDIUM',
+                    confidence_score REAL DEFAULT 0.5,
+                    confidence_rationale TEXT DEFAULT '',
+                    bandwidth_bps INTEGER DEFAULT 1000000000,
+                    vlan_id INTEGER,
+                    is_lag_member INTEGER DEFAULT 0,
+                    lag_parent_edge_id TEXT,
+                    first_seen REAL NOT NULL,
+                    last_seen REAL NOT NULL,
+                    last_verified REAL,
+                    observation_freshness TEXT DEFAULT 'fresh',
+                    lifecycle_state TEXT DEFAULT 'active',
+                    provenance TEXT DEFAULT 'discovery_managed',
+                    user_overrides_json TEXT DEFAULT '{}',
+                    metadata_json TEXT DEFAULT '{}',
+                    FOREIGN KEY (source_node_id) REFERENCES topology_nodes (id) ON DELETE CASCADE,
+                    FOREIGN KEY (target_node_id) REFERENCES topology_nodes (id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS topology_edge_evidence (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    edge_id TEXT NOT NULL,
+                    evidence_type TEXT NOT NULL,
+                    protocol TEXT DEFAULT '',
+                    observing_device_id TEXT NOT NULL,
+                    local_interface TEXT DEFAULT '',
+                    remote_interface TEXT DEFAULT '',
+                    remote_chassis_mac TEXT DEFAULT '',
+                    raw_excerpt TEXT DEFAULT '',
+                    confidence_contribution TEXT DEFAULT 'medium',
+                    explanation TEXT DEFAULT '',
+                    observed_at REAL NOT NULL,
+                    expires_at REAL,
+                    is_active INTEGER DEFAULT 1,
+                    metadata_json TEXT DEFAULT '{}',
+                    FOREIGN KEY (edge_id) REFERENCES topology_edges (id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS topology_snapshots (
+                    snapshot_id TEXT PRIMARY KEY,
+                    schema_version TEXT DEFAULT '4.1',
+                    discovery_run_id TEXT,
+                    created_at REAL NOT NULL,
+                    node_count INTEGER DEFAULT 0,
+                    edge_count INTEGER DEFAULT 0,
+                    graph_json TEXT NOT NULL,
+                    sha256_hash TEXT NOT NULL,
+                    trigger_type TEXT DEFAULT 'discovery_run',
+                    description TEXT DEFAULT '',
+                    metadata_json TEXT DEFAULT '{}'
+                );
+
+                CREATE TRIGGER IF NOT EXISTS trg_snapshot_no_update
+                BEFORE UPDATE ON topology_snapshots
+                BEGIN
+                    SELECT RAISE(ABORT, 'Topology snapshots are mathematically immutable and cannot be updated.');
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS trg_snapshot_no_delete
+                BEFORE DELETE ON topology_snapshots
+                BEGIN
+                    SELECT RAISE(ABORT, 'Topology snapshots are mathematically immutable and cannot be deleted.');
+                END;
+
+                CREATE TABLE IF NOT EXISTS topology_changes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    snapshot_id TEXT,
+                    change_type TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    change_reason TEXT DEFAULT '',
+                    attribute_name TEXT DEFAULT '',
+                    before_value_json TEXT DEFAULT '',
+                    after_value_json TEXT DEFAULT '',
+                    detected_at REAL NOT NULL,
+                    FOREIGN KEY (snapshot_id) REFERENCES topology_snapshots (snapshot_id) ON DELETE SET NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS topology_schema_version (
+                    version TEXT PRIMARY KEY,
+                    applied_at REAL NOT NULL,
+                    description TEXT DEFAULT ''
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_edges_nodes ON topology_edges(source_node_id, target_node_id);
+                CREATE INDEX IF NOT EXISTS idx_edges_rel ON topology_edges(relationship_class, relationship_subtype);
+                CREATE INDEX IF NOT EXISTS idx_edges_lifecycle ON topology_edges(lifecycle_state);
+                CREATE INDEX IF NOT EXISTS idx_edges_freshness ON topology_edges(observation_freshness);
+                CREATE INDEX IF NOT EXISTS idx_edge_ev_edge ON topology_edge_evidence(edge_id);
+                CREATE INDEX IF NOT EXISTS idx_edge_ev_device ON topology_edge_evidence(observing_device_id);
+                CREATE INDEX IF NOT EXISTS idx_snapshots_created ON topology_snapshots(created_at);
+                CREATE INDEX IF NOT EXISTS idx_changes_snap ON topology_changes(snapshot_id);
+                CREATE INDEX IF NOT EXISTS idx_changes_entity ON topology_changes(entity_id);
+                CREATE INDEX IF NOT EXISTS idx_changes_type ON topology_changes(change_type);
+                """
+            )
+
+            conn.execute(
+                "INSERT OR IGNORE INTO topology_schema_version (version, applied_at, description) VALUES (?, ?, ?)",
+                ("4.1", time.time(), "Networking IV Phase 4.1 Normalized Graph Data Model & SQLite Foundation"),
+            )
+
             conn.commit()
+
+    # ------------------------------------------------------------------
+    # Phase 4.1 Repository & Data-Access Layer
+    # ------------------------------------------------------------------
+
+    @contextmanager
+    def transaction(self, write: bool = True):
+        """Provides an atomic transaction block for TopologyEngine operations."""
+        with topology_transaction(self.db_path, write=write) as conn:
+            yield conn
+
+    def get_schema_version(self, conn: Optional[sqlite3.Connection] = None) -> str:
+        """Returns the latest applied topology schema version."""
+        def _execute(c: sqlite3.Connection) -> str:
+            row = c.execute("SELECT version FROM topology_schema_version ORDER BY applied_at DESC LIMIT 1").fetchone()
+            return str(row["version"]) if row else "1.0"
+
+        if conn is not None:
+            return _execute(conn)
+        with self._lock, closing(self._get_connection()) as auto_conn:
+            return _execute(auto_conn)
+
+    def insert_edge(self, edge: TopologyEdge, conn: Optional[sqlite3.Connection] = None) -> str:
+        """Inserts a new TopologyEdge. Validates edge constraints and node existence."""
+        if not isinstance(edge, TopologyEdge):
+            raise TypeError("edge must be an instance of TopologyEdge.")
+
+        def _execute(c: sqlite3.Connection) -> str:
+            s_node = c.execute("SELECT id FROM topology_nodes WHERE id = ?", (edge.source_node_id,)).fetchone()
+            if not s_node:
+                raise ValueError(f"source_node_id '{edge.source_node_id}' does not exist in topology_nodes.")
+            t_node = c.execute("SELECT id FROM topology_nodes WHERE id = ?", (edge.target_node_id,)).fetchone()
+            if not t_node:
+                raise ValueError(f"target_node_id '{edge.target_node_id}' does not exist in topology_nodes.")
+
+            c.execute(
+                """
+                INSERT INTO topology_edges (
+                    id, source_node_id, target_node_id, source_interface, target_interface,
+                    relationship_class, relationship_subtype, direction, oper_status, admin_status,
+                    verification_status, confidence_tier, confidence_score, confidence_rationale,
+                    bandwidth_bps, vlan_id, is_lag_member, lag_parent_edge_id,
+                    first_seen, last_seen, last_verified, observation_freshness,
+                    lifecycle_state, provenance, user_overrides_json, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    edge.id,
+                    edge.source_node_id,
+                    edge.target_node_id,
+                    edge.source_interface,
+                    edge.target_interface,
+                    edge.relationship_class,
+                    edge.relationship_subtype,
+                    edge.direction,
+                    edge.oper_status,
+                    edge.admin_status,
+                    edge.verification_status,
+                    edge.confidence_tier,
+                    edge.confidence_score,
+                    edge.confidence_rationale,
+                    edge.bandwidth_bps,
+                    edge.vlan_id,
+                    1 if edge.is_lag_member else 0,
+                    edge.lag_parent_edge_id,
+                    edge.first_seen,
+                    edge.last_seen,
+                    edge.last_verified,
+                    edge.observation_freshness,
+                    edge.lifecycle_state,
+                    edge.provenance,
+                    json.dumps(edge.user_overrides or {}),
+                    json.dumps(edge.metadata or {}),
+                ),
+            )
+            return edge.id
+
+        if conn is not None:
+            return _execute(conn)
+
+        def _do_write() -> str:
+            with self._lock, closing(self._get_connection()) as auto_conn:
+                res = _execute(auto_conn)
+                auto_conn.commit()
+                return res
+
+        return execute_with_retry(_do_write, operation_name="insert_edge")
+
+    def get_edge(self, edge_id: str, conn: Optional[sqlite3.Connection] = None) -> Optional[TopologyEdge]:
+        """Retrieves a single TopologyEdge by ID."""
+        def _execute(c: sqlite3.Connection) -> Optional[TopologyEdge]:
+            row = c.execute("SELECT * FROM topology_edges WHERE id = ?", (edge_id,)).fetchone()
+            if not row:
+                return None
+            return TopologyEdge.from_dict(dict(row))
+
+        if conn is not None:
+            return _execute(conn)
+        with closing(self._get_connection(read_only=True)) as auto_conn:
+            return _execute(auto_conn)
+
+    def list_edges(
+        self,
+        source_node_id: Optional[str] = None,
+        target_node_id: Optional[str] = None,
+        relationship_class: Optional[str] = None,
+        lifecycle_state: Optional[str] = None,
+        include_tombstoned: bool = False,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> List[TopologyEdge]:
+        """Lists topology edges with optional filtering. Hides tombstoned edges unless specified."""
+        query = "SELECT * FROM topology_edges WHERE 1=1"
+        params: List[Any] = []
+
+        if source_node_id:
+            query += " AND source_node_id = ?"
+            params.append(source_node_id)
+        if target_node_id:
+            query += " AND target_node_id = ?"
+            params.append(target_node_id)
+        if relationship_class:
+            norm_rc = normalize_relationship_class(relationship_class)
+            query += " AND relationship_class = ?"
+            params.append(norm_rc)
+        if lifecycle_state:
+            norm_ls = normalize_edge_lifecycle_state(lifecycle_state)
+            query += " AND lifecycle_state = ?"
+            params.append(norm_ls)
+        elif not include_tombstoned:
+            query += " AND lifecycle_state != 'tombstoned'"
+
+        query += " ORDER BY first_seen ASC"
+
+        def _execute(c: sqlite3.Connection) -> List[TopologyEdge]:
+            rows = c.execute(query, params).fetchall()
+            return [TopologyEdge.from_dict(dict(r)) for r in rows]
+
+        if conn is not None:
+            return _execute(conn)
+        with closing(self._get_connection(read_only=True)) as auto_conn:
+            return _execute(auto_conn)
+
+    def find_existing_edge(
+        self,
+        source_node_id: str,
+        target_node_id: str,
+        relationship_class: str,
+        source_interface: str = "",
+        target_interface: str = "",
+        relationship_subtype: Optional[str] = None,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> Optional[TopologyEdge]:
+        """Locates an edge matching endpoint, interface, and semantic class."""
+        norm_rc = normalize_relationship_class(relationship_class)
+        query = (
+            "SELECT * FROM topology_edges "
+            "WHERE source_node_id = ? AND target_node_id = ? "
+            "  AND relationship_class = ? AND source_interface = ? AND target_interface = ?"
+        )
+        params: List[Any] = [source_node_id, target_node_id, norm_rc, source_interface, target_interface]
+        if relationship_subtype is not None:
+            query += " AND relationship_subtype = ?"
+            params.append(relationship_subtype)
+
+        def _execute(c: sqlite3.Connection) -> Optional[TopologyEdge]:
+            row = c.execute(query, params).fetchone()
+            if not row:
+                return None
+            return TopologyEdge.from_dict(dict(row))
+
+        if conn is not None:
+            return _execute(conn)
+        with self._lock, closing(self._get_connection()) as auto_conn:
+            return _execute(auto_conn)
+
+    def update_edge(
+        self,
+        edge_id: str,
+        updates: Dict[str, Any],
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> Optional[TopologyEdge]:
+        """Updates attributes of an existing edge. Validates field constraints."""
+        if not updates:
+            return self.get_edge(edge_id, conn=conn)
+
+        def _execute(c: sqlite3.Connection) -> Optional[TopologyEdge]:
+            existing = c.execute("SELECT * FROM topology_edges WHERE id = ?", (edge_id,)).fetchone()
+            if not existing:
+                return None
+            edge_data = dict(existing)
+            edge_data["user_overrides"] = json.loads(edge_data.pop("user_overrides_json") or "{}")
+            edge_data["metadata"] = json.loads(edge_data.pop("metadata_json") or "{}")
+            edge_data["is_lag_member"] = bool(edge_data.get("is_lag_member", 0))
+
+            for k, v in updates.items():
+                if k in ("user_overrides_json", "metadata_json"):
+                    continue
+                if k == "relationship_class":
+                    v = normalize_relationship_class(v)
+                elif k == "lifecycle_state":
+                    v = normalize_edge_lifecycle_state(v)
+                elif k == "confidence_tier":
+                    v = normalize_confidence_tier(v)
+                elif k == "confidence_score":
+                    v = float(v)
+                    if not (0.0 <= v <= 1.0):
+                        raise ValueError(f"confidence_score must be between 0.0 and 1.0, got {v}")
+                elif k == "confidence_rationale":
+                    if not v or not str(v).strip():
+                        raise ValueError("confidence_rationale must be provided and non-empty.")
+                edge_data[k] = v
+
+            updated_edge = TopologyEdge.from_dict(edge_data)
+
+            c.execute(
+                """
+                UPDATE topology_edges
+                SET source_interface = ?, target_interface = ?, relationship_class = ?,
+                    relationship_subtype = ?, direction = ?, oper_status = ?, admin_status = ?,
+                    verification_status = ?, confidence_tier = ?, confidence_score = ?,
+                    confidence_rationale = ?, bandwidth_bps = ?, vlan_id = ?, is_lag_member = ?,
+                    lag_parent_edge_id = ?, first_seen = ?, last_seen = ?, last_verified = ?,
+                    observation_freshness = ?, lifecycle_state = ?, provenance = ?,
+                    user_overrides_json = ?, metadata_json = ?
+                WHERE id = ?
+                """,
+                (
+                    updated_edge.source_interface,
+                    updated_edge.target_interface,
+                    updated_edge.relationship_class,
+                    updated_edge.relationship_subtype,
+                    updated_edge.direction,
+                    updated_edge.oper_status,
+                    updated_edge.admin_status,
+                    updated_edge.verification_status,
+                    updated_edge.confidence_tier,
+                    updated_edge.confidence_score,
+                    updated_edge.confidence_rationale,
+                    updated_edge.bandwidth_bps,
+                    updated_edge.vlan_id,
+                    1 if updated_edge.is_lag_member else 0,
+                    updated_edge.lag_parent_edge_id,
+                    updated_edge.first_seen,
+                    updated_edge.last_seen,
+                    updated_edge.last_verified,
+                    updated_edge.observation_freshness,
+                    updated_edge.lifecycle_state,
+                    updated_edge.provenance,
+                    json.dumps(updated_edge.user_overrides or {}),
+                    json.dumps(updated_edge.metadata or {}),
+                    edge_id,
+                ),
+            )
+            return updated_edge
+
+        if conn is not None:
+            return _execute(conn)
+
+        def _do_decay() -> int:
+            with self._lock, closing(self._get_connection()) as auto_conn:
+                res = _execute(auto_conn)
+                auto_conn.commit()
+                return res
+
+        return execute_with_retry(_do_decay, operation_name="decay_stale_observations")
+
+    def delete_edge(
+        self,
+        edge_id: str,
+        soft_delete: bool = True,
+        actor: str = "admin",
+        reason: str = "Administrative deletion",
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> bool:
+        """
+        Deletes an edge. If soft_delete is True (default), marks as 'tombstoned'
+        and preserves empirical evidence for audit/historical continuity.
+        If soft_delete is False, hard deletes edge and cascades to edge evidence.
+        Records an auditable TopologyChange (EDGE_REMOVED) and audit log record.
+        """
+        def _execute(c: sqlite3.Connection) -> bool:
+            row = c.execute("SELECT * FROM topology_edges WHERE id = ?", (edge_id,)).fetchone()
+            if not row:
+                return False
+            if soft_delete and row["lifecycle_state"] == "tombstoned":
+                return False  # Already tombstoned/deleted
+
+            now_ts = time.time()
+            if soft_delete:
+                cur = c.execute(
+                    "UPDATE topology_edges SET lifecycle_state = 'tombstoned', last_seen = ? WHERE id = ?",
+                    (now_ts, edge_id),
+                )
+            else:
+                c.execute("DELETE FROM topology_edge_evidence WHERE edge_id = ?", (edge_id,))
+                cur = c.execute("DELETE FROM topology_edges WHERE id = ?", (edge_id,))
+
+            if cur.rowcount > 0:
+                table_names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+                if "topology_changes" in table_names:
+                    self.record_change(
+                        TopologyChange(
+                            change_type=TopologyChangeType.EDGE_REMOVED.value,
+                            entity_id=edge_id,
+                            change_reason=reason,
+                            detected_at=now_ts,
+                        ),
+                        conn=c,
+                    )
+                if "topology_audit_log" in table_names:
+                    c.execute(
+                        "INSERT INTO topology_audit_log (actor, action, target_type, target_id, reason, created_at) "
+                        "VALUES (?, 'delete_edge', 'edge', ?, ?, ?)",
+                        (actor, edge_id, reason, now_ts),
+                    )
+                return True
+            return False
+
+        if conn is not None:
+            return _execute(conn)
+        with self._lock, closing(self._get_connection()) as auto_conn:
+            res = _execute(auto_conn)
+            auto_conn.commit()
+            return res
+
+    def insert_edge_evidence(
+        self,
+        evidence: EdgeEvidence,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> int:
+        """Inserts a new EdgeEvidence row. Enforces foreign key constraint to topology_edges."""
+        if not isinstance(evidence, EdgeEvidence):
+            raise TypeError("evidence must be an instance of EdgeEvidence.")
+
+        def _execute(c: sqlite3.Connection) -> int:
+            edge = c.execute("SELECT id FROM topology_edges WHERE id = ?", (evidence.edge_id,)).fetchone()
+            if not edge:
+                raise ValueError(f"edge_id '{evidence.edge_id}' does not exist in topology_edges.")
+
+            cur = c.execute(
+                """
+                INSERT INTO topology_edge_evidence (
+                    edge_id, evidence_type, protocol, observing_device_id,
+                    local_interface, remote_interface, remote_chassis_mac,
+                    raw_excerpt, confidence_contribution, explanation,
+                    observed_at, expires_at, is_active, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    evidence.edge_id,
+                    evidence.evidence_type,
+                    evidence.protocol,
+                    evidence.observing_device_id,
+                    evidence.local_interface,
+                    evidence.remote_interface,
+                    evidence.remote_chassis_mac,
+                    evidence.raw_excerpt,
+                    evidence.confidence_contribution,
+                    evidence.explanation,
+                    evidence.observed_at,
+                    evidence.expires_at,
+                    1 if evidence.is_active else 0,
+                    json.dumps(evidence.metadata or {}),
+                ),
+            )
+            return int(cur.lastrowid)
+
+        if conn is not None:
+            return _execute(conn)
+        with self._lock, closing(self._get_connection()) as auto_conn:
+            res = _execute(auto_conn)
+            auto_conn.commit()
+            return res
+
+    def get_edge_evidence(
+        self,
+        edge_id: str,
+        active_only: bool = True,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> List[EdgeEvidence]:
+        """Retrieves all evidence associated with an edge, ordered newest first."""
+        query = "SELECT * FROM topology_edge_evidence WHERE edge_id = ?"
+        params: List[Any] = [edge_id]
+        if active_only:
+            query += " AND is_active = 1"
+        query += " ORDER BY observed_at DESC"
+
+        def _execute(c: sqlite3.Connection) -> List[EdgeEvidence]:
+            rows = c.execute(query, params).fetchall()
+            return [EdgeEvidence.from_dict(dict(r)) for r in rows]
+
+        if conn is not None:
+            return _execute(conn)
+        with self._lock, closing(self._get_connection()) as auto_conn:
+            return _execute(auto_conn)
+
+    def deactivate_expired_evidence(
+        self,
+        now: Optional[float] = None,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> int:
+        """Marks evidence rows as is_active = 0 when expires_at <= now."""
+        current_time = now if now is not None else time.time()
+
+        def _execute(c: sqlite3.Connection) -> int:
+            cur = c.execute(
+                "UPDATE topology_edge_evidence SET is_active = 0 WHERE is_active = 1 AND expires_at IS NOT NULL AND expires_at <= ?",
+                (current_time,),
+            )
+            return cur.rowcount
+
+        if conn is not None:
+            return _execute(conn)
+        with self._lock, closing(self._get_connection()) as auto_conn:
+            res = _execute(auto_conn)
+            auto_conn.commit()
+            return res
+
+    def create_snapshot(
+        self,
+        trigger_type: str = "manual",
+        description: str = "",
+        discovery_run_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        completeness: Optional[Dict[str, Any]] = None,
+        schema_version: str = "4.4",
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> TopologySnapshot:
+        """
+        Phase 4.4A Complete Immutable Topology Snapshot Model.
+        Creates an immutable, SHA-256 hashed point-in-time snapshot of the topology graph.
+        Pulls current nodes, active edges, and edge evidence in a single consistent read transaction,
+        embeds sanitized discovery completeness metadata, and records in database.
+        Concurrency-hardened: Read phase operates without holding the single-writer lock;
+        graph serialization and hashing occurs in memory; insert commits in a fast atomic transaction.
+        """
+        ts = time.time()
+        snap_id = f"snap_{int(ts * 1000)}_{uuid.uuid4().hex[:8]}"
+
+        MAX_SNAPSHOT_NODES = 10000
+        MAX_SNAPSHOT_EDGES = 50000
+
+        def _read_graph_state(c: sqlite3.Connection):
+            # 1. Nodes (sorted by id)
+            node_rows = c.execute("SELECT * FROM topology_nodes ORDER BY id ASC").fetchall()
+            nodes_list = [dict(r) for r in node_rows]
+            if len(nodes_list) > MAX_SNAPSHOT_NODES:
+                raise ValueError(
+                    f"Snapshot exceeds maximum allowable node limit ({MAX_SNAPSHOT_NODES}): got {len(nodes_list)}"
+                )
+            for n in nodes_list:
+                if "metadata_json" in n:
+                    raw_m = n.pop("metadata_json")
+                    n["metadata"] = json.loads(raw_m) if isinstance(raw_m, str) and raw_m else {}
+                if "user_overrides_json" in n:
+                    raw_u = n.pop("user_overrides_json")
+                    n["user_overrides"] = json.loads(raw_u) if isinstance(raw_u, str) and raw_u else {}
+
+            # 2. Edges (sorted by id, non-tombstoned)
+            edge_rows = c.execute(
+                "SELECT * FROM topology_edges WHERE lifecycle_state != 'tombstoned' ORDER BY id ASC"
+            ).fetchall()
+            edges_list = [dict(r) for r in edge_rows]
+            if len(edges_list) > MAX_SNAPSHOT_EDGES:
+                raise ValueError(
+                    f"Snapshot exceeds maximum allowable edge limit ({MAX_SNAPSHOT_EDGES}): got {len(edges_list)}"
+                )
+            for e in edges_list:
+                if "metadata_json" in e:
+                    raw_m = e.pop("metadata_json")
+                    e["metadata"] = json.loads(raw_m) if isinstance(raw_m, str) and raw_m else {}
+                if "user_overrides_json" in e:
+                    raw_u = e.pop("user_overrides_json")
+                    e["user_overrides"] = json.loads(raw_u) if isinstance(raw_u, str) and raw_u else {}
+                e["is_lag_member"] = bool(e.get("is_lag_member", 0))
+
+            # 3. Evidence (sorted by edge_id, id)
+            edge_ids = [e["id"] for e in edges_list]
+            evidence_list: List[Dict[str, Any]] = []
+            if edge_ids:
+                placeholders = ",".join("?" for _ in edge_ids)
+                ev_rows = c.execute(
+                    f"SELECT * FROM topology_edge_evidence WHERE edge_id IN ({placeholders}) ORDER BY edge_id ASC, id ASC",
+                    edge_ids,
+                ).fetchall()
+                for row in ev_rows:
+                    ev = dict(row)
+                    clean_excerpt = sanitize_cli_excerpt(sanitize_untrusted_text(ev.get("raw_excerpt") or ""))
+                    clean_explanation = sanitize_untrusted_text(ev.get("explanation") or "")
+                    ev_meta = json.loads(ev.get("metadata_json") or "{}") if isinstance(ev.get("metadata_json"), str) else (ev.get("metadata") or {})
+                    clean_item = {
+                        "id": ev.get("id"),
+                        "edge_id": ev.get("edge_id"),
+                        "evidence_type": ev.get("evidence_type", ""),
+                        "protocol": ev.get("protocol", ""),
+                        "observing_device_id": ev.get("observing_device_id", ""),
+                        "source_device": ev.get("observing_device_id", ""),
+                        "local_interface": ev.get("local_interface", ""),
+                        "remote_interface": ev.get("remote_interface", ""),
+                        "remote_chassis_mac": ev.get("remote_chassis_mac", ""),
+                        "raw_excerpt": clean_excerpt,
+                        "confidence_contribution": ev.get("confidence_contribution", "medium"),
+                        "confidence_score": ev.get("confidence_contribution", "medium"),
+                        "explanation": clean_explanation,
+                        "observed_at": ev.get("observed_at"),
+                        "discovered_at": ev.get("observed_at"),
+                        "expires_at": ev.get("expires_at"),
+                        "is_active": bool(ev.get("is_active", 1)),
+                        "metadata": ev_meta,
+                    }
+                    evidence_list.append(clean_item)
+
+            ev_by_edge: Dict[str, List[Dict[str, Any]]] = {}
+            for ev in evidence_list:
+                ev_by_edge.setdefault(ev["edge_id"], []).append(ev)
+            for e in edges_list:
+                e["evidence"] = ev_by_edge.get(e["id"], [])
+
+            return nodes_list, edges_list, evidence_list
+
+        # Execute read phase
+        if conn is not None:
+            nodes_list, edges_list, evidence_list = _read_graph_state(conn)
+        else:
+            with closing(self._get_connection(read_only=True)) as read_conn:
+                nodes_list, edges_list, evidence_list = _read_graph_state(read_conn)
+
+        # 4. Completeness metadata (Pure CPU in memory)
+        snapshot_metadata = dict(metadata or {})
+        comp_raw = completeness if completeness is not None else snapshot_metadata.get("completeness", {})
+        node_ids = [n["id"] for n in nodes_list]
+
+        if "is_complete" in comp_raw:
+            is_comp = bool(comp_raw["is_complete"])
+        else:
+            disc_status = comp_raw.get("discovery_status", "unknown")
+            if disc_status == "complete":
+                is_comp = True
+            elif disc_status in ("failed", "partial"):
+                is_comp = False
+            else:
+                is_comp = True if (not comp_raw.get("failed_devices") and not comp_raw.get("timed_out_devices") and len(nodes_list) > 0) else False
+
+        completeness_dict = {
+            "discovery_status": str(comp_raw.get("discovery_status", "unknown")),
+            "expected_devices": list(comp_raw.get("expected_devices", [])),
+            "successful_devices": list(comp_raw.get("successful_devices", node_ids)),
+            "failed_devices": list(comp_raw.get("failed_devices", [])),
+            "timed_out_devices": list(comp_raw.get("timed_out_devices", [])),
+            "collection_scope": comp_raw.get("collection_scope", ""),
+            "started_at": float(comp_raw.get("started_at", ts)),
+            "completed_at": float(comp_raw.get("completed_at", ts)),
+            "is_complete": is_comp,
+        }
+        snapshot_metadata["completeness"] = completeness_dict
+
+        # 5. Canonical JSON & SHA-256 Checksum (Pure CPU in memory)
+        graph_state = {
+            "snapshot_id": snap_id,
+            "created_at": ts,
+            "schema_version": schema_version,
+            "nodes": nodes_list,
+            "edges": edges_list,
+            "evidence": evidence_list,
+            "completeness": completeness_dict,
+            "metadata": snapshot_metadata,
+        }
+        graph_json = json.dumps(graph_state, sort_keys=True, separators=(',', ':'))
+        sha256_hash = hashlib.sha256(graph_json.encode("utf-8")).hexdigest()
+
+        snapshot = TopologySnapshot(
+            snapshot_id=snap_id,
+            schema_version=schema_version,
+            discovery_run_id=discovery_run_id,
+            created_at=ts,
+            node_count=len(nodes_list),
+            edge_count=len(edges_list),
+            graph_json=graph_json,
+            sha256_hash=sha256_hash,
+            trigger_type=trigger_type,
+            description=description,
+            metadata=snapshot_metadata,
+        )
+
+        def _insert(c: sqlite3.Connection) -> None:
+            c.execute(
+                """
+                INSERT INTO topology_snapshots (
+                    snapshot_id, schema_version, discovery_run_id, created_at,
+                    node_count, edge_count, graph_json, sha256_hash,
+                    trigger_type, description, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot.snapshot_id,
+                    snapshot.schema_version,
+                    snapshot.discovery_run_id,
+                    snapshot.created_at,
+                    snapshot.node_count,
+                    snapshot.edge_count,
+                    snapshot.graph_json,
+                    snapshot.sha256_hash,
+                    snapshot.trigger_type,
+                    snapshot.description,
+                    json.dumps(snapshot.metadata or {}),
+                ),
+            )
+
+        if conn is not None:
+            _insert(conn)
+            return snapshot
+
+        def _do_write() -> None:
+            with self._lock, closing(self._get_connection()) as auto_conn:
+                _insert(auto_conn)
+                auto_conn.commit()
+
+        execute_with_retry(_do_write, operation_name="create_snapshot")
+        return snapshot
+
+    def get_snapshot(
+        self,
+        snapshot_id: str,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> Optional[TopologySnapshot]:
+        """Retrieves an immutable TopologySnapshot by ID."""
+        def _execute(c: sqlite3.Connection) -> Optional[TopologySnapshot]:
+            row = c.execute("SELECT * FROM topology_snapshots WHERE snapshot_id = ?", (snapshot_id,)).fetchone()
+            if not row:
+                return None
+            return TopologySnapshot.from_dict(dict(row))
+
+        if conn is not None:
+            return _execute(conn)
+        with closing(self._get_connection(read_only=True)) as auto_conn:
+            return _execute(auto_conn)
+
+    def list_snapshots(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        trigger_type: Optional[str] = None,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> List[TopologySnapshot]:
+        """Lists snapshots ordered newest first with optional pagination and trigger filter."""
+        query = "SELECT * FROM topology_snapshots WHERE 1=1"
+        params: List[Any] = []
+        if trigger_type:
+            query += " AND trigger_type = ?"
+            params.append(trigger_type)
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([max(1, limit), max(0, offset)])
+
+        def _execute(c: sqlite3.Connection) -> List[TopologySnapshot]:
+            rows = c.execute(query, params).fetchall()
+            return [TopologySnapshot.from_dict(dict(r)) for r in rows]
+
+        if conn is not None:
+            return _execute(conn)
+        with closing(self._get_connection(read_only=True)) as auto_conn:
+            return _execute(auto_conn)
+
+    def count_snapshots(
+        self,
+        trigger_type: Optional[str] = None,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> int:
+        """Returns total snapshot count matching criteria."""
+        query = "SELECT count(*) FROM topology_snapshots WHERE 1=1"
+        params: List[Any] = []
+        if trigger_type:
+            query += " AND trigger_type = ?"
+            params.append(trigger_type)
+
+        def _execute(c: sqlite3.Connection) -> int:
+            return int(c.execute(query, params).fetchone()[0])
+
+        if conn is not None:
+            return _execute(conn)
+        with closing(self._get_connection(read_only=True)) as auto_conn:
+            return _execute(auto_conn)
+
+    def compare_snapshots(
+        self,
+        base_id: Any,
+        target_id: Any,
+    ) -> GraphDiffReport:
+        """
+        Phase 4.4A Semantic Snapshot Comparison Engine.
+        Executes read-only comparison between two point-in-time snapshots with:
+        - DB query isolation inside lock (<5ms)
+        - Memory deserialization and CPU comparison outside DB lock
+        - Canonical multi-edge identity resolution preserving (T_A, T_B)
+        - Ambiguity detection (INDETERMINATE_AMBIGUOUS_MATCH)
+        - Epistemically safe node/edge removal checks
+        - Operational status, freshness, and evidence change classification
+        """
+        if hasattr(base_id, "snapshot_id"):
+            base_id = base_id.snapshot_id
+        if hasattr(target_id, "snapshot_id"):
+            target_id = target_id.snapshot_id
+
+        base_id_str = str(base_id or "").strip()
+        target_id_str = str(target_id or "").strip()
+        if not base_id_str:
+            raise ValueError("base_id cannot be empty.")
+        if not target_id_str:
+            raise ValueError("target_id cannot be empty.")
+
+        t0 = time.perf_counter()
+
+        # Database read boundary outside writer lock (WAL read-only):
+        with closing(self._get_connection(read_only=True)) as conn:
+            row_base = conn.execute(
+                "SELECT snapshot_id, schema_version, graph_json, metadata_json, created_at FROM topology_snapshots WHERE snapshot_id = ?",
+                (base_id_str,),
+            ).fetchone()
+            row_target = conn.execute(
+                "SELECT snapshot_id, schema_version, graph_json, metadata_json, created_at FROM topology_snapshots WHERE snapshot_id = ?",
+                (target_id_str,),
+            ).fetchone()
+        t1 = time.perf_counter()
+        db_query_ms = round((t1 - t0) * 1000.0, 3)
+
+        if not row_base:
+            raise ValueError(f"Base snapshot '{base_id_str}' not found.")
+        if not row_target:
+            raise ValueError(f"Target snapshot '{target_id_str}' not found.")
+
+        # Deserialization phase outside DB lock:
+        t2 = time.perf_counter()
+        base_graph = json.loads(row_base["graph_json"])
+        target_graph = json.loads(row_target["graph_json"])
+        base_meta = json.loads(row_base["metadata_json"] or "{}") if isinstance(row_base["metadata_json"], str) else (row_base["metadata_json"] or {})
+        target_meta = json.loads(row_target["metadata_json"] or "{}") if isinstance(row_target["metadata_json"], str) else (row_target["metadata_json"] or {})
+        t3 = time.perf_counter()
+        deserialization_ms = round((t3 - t2) * 1000.0, 3)
+
+        # Graph size safeguard bounds
+        MAX_NODES = 10000
+        MAX_EDGES = 50000
+        base_nodes: List[Dict[str, Any]] = base_graph.get("nodes", [])
+        target_nodes: List[Dict[str, Any]] = target_graph.get("nodes", [])
+        base_edges: List[Dict[str, Any]] = base_graph.get("edges", [])
+        target_edges: List[Dict[str, Any]] = target_graph.get("edges", [])
+
+        if len(base_nodes) > MAX_NODES or len(target_nodes) > MAX_NODES:
+            raise ValueError(f"Snapshot exceeds maximum allowable node limit ({MAX_NODES}).")
+        if len(base_edges) > MAX_EDGES or len(target_edges) > MAX_EDGES:
+            raise ValueError(f"Snapshot exceeds maximum allowable edge limit ({MAX_EDGES}).")
+
+        # Diff computation phase:
+        t4 = time.perf_counter()
+
+        structural_changes: List[Dict[str, Any]] = []
+        operational_changes: List[Dict[str, Any]] = []
+        evidence_changes: List[Dict[str, Any]] = []
+        freshness_changes: List[Dict[str, Any]] = []
+        indeterminate_items: List[Dict[str, Any]] = []
+
+        # Target discovery completeness metadata
+        target_comp = target_meta.get("completeness") or target_graph.get("completeness") or {}
+        target_status = str(target_comp.get("discovery_status", "unknown")).lower()
+        if "is_complete" in target_comp:
+            target_is_complete = bool(target_comp["is_complete"])
+        else:
+            if target_status == "complete":
+                target_is_complete = True
+            elif target_status in ("failed", "partial"):
+                target_is_complete = False
+            else:
+                target_is_complete = True if (not target_comp.get("failed_devices") and not target_comp.get("timed_out_devices") and len(target_nodes) > 0) else False
+
+        successful_devices = set(target_comp.get("successful_devices", [n.get("id") for n in target_nodes]))
+        failed_devices = set(target_comp.get("failed_devices", []))
+        timed_out_devices = set(target_comp.get("timed_out_devices", []))
+
+        # ---------------------------------------------------------------------
+        # 1. NODE COMPARISON
+        # ---------------------------------------------------------------------
+        base_nodes_map = {n["id"]: n for n in base_nodes if "id" in n}
+        target_nodes_map = {n["id"]: n for n in target_nodes if "id" in n}
+
+        # Node Added:
+        for nid, tn in target_nodes_map.items():
+            if nid not in base_nodes_map:
+                structural_changes.append({
+                    "change_type": "NODE_ADDED",
+                    "entity_type": "node",
+                    "entity_id": nid,
+                    "change_reason": "Device observed in target snapshot but absent in base",
+                    "attribute_name": "",
+                    "before_value": None,
+                    "after_value": tn,
+                })
+
+        # Node Removed (Epistemic safeguard):
+        for nid, bn in base_nodes_map.items():
+            if nid not in target_nodes_map:
+                is_safe_removal = (
+                    target_is_complete
+                    and target_status in ("complete", "unknown")
+                    and (nid not in failed_devices)
+                    and (nid not in timed_out_devices)
+                )
+                if is_safe_removal:
+                    structural_changes.append({
+                        "change_type": "NODE_REMOVED",
+                        "entity_type": "node",
+                        "entity_id": nid,
+                        "change_reason": "Device present in base snapshot was confirmed absent during complete discovery",
+                        "attribute_name": "",
+                        "before_value": bn,
+                        "after_value": None,
+                    })
+                else:
+                    indeterminate_items.append({
+                        "indeterminate_type": "INDETERMINATE_UNREACHABLE_NODE",
+                        "entity_type": "node",
+                        "entity_id": nid,
+                        "reason": f"Device missing from target snapshot but target discovery was incomplete (status={target_status}, is_complete={target_is_complete}) or device was unreachable",
+                        "details": {
+                            "node_id": nid,
+                            "target_is_complete": target_is_complete,
+                            "target_discovery_status": target_status,
+                            "failed": nid in failed_devices,
+                            "timed_out": nid in timed_out_devices,
+                        },
+                    })
+
+        # Node Modified:
+        node_fields_to_check = [
+            "name", "identity", "hostname", "ip", "ip_address",
+            "device_type", "device_role", "role", "model", "status",
+            "reachability_status", "management_status"
+        ]
+        for nid in set(base_nodes_map.keys()) & set(target_nodes_map.keys()):
+            bn = base_nodes_map[nid]
+            tn = target_nodes_map[nid]
+            for fld in node_fields_to_check:
+                bv = bn.get(fld)
+                tv = tn.get(fld)
+                if bv is not None and tv is not None and bv != tv:
+                    structural_changes.append({
+                        "change_type": "NODE_MODIFIED",
+                        "entity_type": "node",
+                        "entity_id": nid,
+                        "attribute_name": fld,
+                        "change_reason": f"Node attribute '{fld}' changed from '{bv}' to '{tv}'",
+                        "before_value": bv,
+                        "after_value": tv,
+                    })
+
+        # ---------------------------------------------------------------------
+        # 2. MULTI-EDGE IDENTITY RESOLUTION & COMPARISON
+        # ---------------------------------------------------------------------
+        base_edges_by_id = {e["id"]: e for e in base_edges if "id" in e}
+        target_edges_by_id = {e["id"]: e for e in target_edges if "id" in e}
+
+        matched_pairs: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
+        matched_base_ids: Set[str] = set()
+        matched_target_ids: Set[str] = set()
+
+        for eid in set(base_edges_by_id.keys()) & set(target_edges_by_id.keys()):
+            matched_pairs.append((base_edges_by_id[eid], target_edges_by_id[eid]))
+            matched_base_ids.add(eid)
+            matched_target_ids.add(eid)
+
+        unmatched_base = [e for e in base_edges if e.get("id") not in matched_base_ids]
+        unmatched_target = [e for e in target_edges if e.get("id") not in matched_target_ids]
+
+        base_grouped_by_key: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
+        for be in unmatched_base:
+            k = compute_edge_canonical_key(be)
+            base_grouped_by_key.setdefault(k, []).append(be)
+
+        target_grouped_by_key: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = {}
+        for te in unmatched_target:
+            k = compute_edge_canonical_key(te)
+            target_grouped_by_key.setdefault(k, []).append(te)
+
+        def _get_pair(e: Dict[str, Any]) -> Tuple[str, str]:
+            u = str(e.get("source_node_id") or "")
+            v = str(e.get("target_node_id") or "")
+            return (u, v) if u <= v else (v, u)
+
+        base_pair_counts: Dict[Tuple[str, str], int] = {}
+        for e in base_edges:
+            pair = _get_pair(e)
+            base_pair_counts[pair] = base_pair_counts.get(pair, 0) + 1
+
+        target_pair_counts: Dict[Tuple[str, str], int] = {}
+        for e in target_edges:
+            pair = _get_pair(e)
+            target_pair_counts[pair] = target_pair_counts.get(pair, 0) + 1
+
+        all_candidate_keys = set(base_grouped_by_key.keys()) | set(target_grouped_by_key.keys())
+        ambiguous_base_edges: Set[str] = set()
+        ambiguous_target_edges: Set[str] = set()
+
+        for k in all_candidate_keys:
+            b_list = base_grouped_by_key.get(k, [])
+            t_list = target_grouped_by_key.get(k, [])
+
+            if len(b_list) > 1 or len(t_list) > 1:
+                for e in b_list:
+                    ambiguous_base_edges.add(e["id"])
+                    indeterminate_items.append({
+                        "indeterminate_type": "INDETERMINATE_AMBIGUOUS_MATCH",
+                        "entity_type": "edge",
+                        "entity_id": e["id"],
+                        "reason": f"Multiple edges share identical canonical identity tuple {k} (collision count: base={len(b_list)}, target={len(t_list)})",
+                        "details": {"key": str(k), "edge": e},
+                    })
+                for e in t_list:
+                    ambiguous_target_edges.add(e["id"])
+                    indeterminate_items.append({
+                        "indeterminate_type": "INDETERMINATE_AMBIGUOUS_MATCH",
+                        "entity_type": "edge",
+                        "entity_id": e["id"],
+                        "reason": f"Multiple edges share identical canonical identity tuple {k} (collision count: base={len(b_list)}, target={len(t_list)})",
+                        "details": {"key": str(k), "edge": e},
+                    })
+                continue
+
+            if len(b_list) == 1 and len(t_list) == 1:
+                be = b_list[0]
+                te = t_list[0]
+                b_iface_missing = not (be.get("source_interface") and be.get("target_interface"))
+                t_iface_missing = not (te.get("source_interface") and te.get("target_interface"))
+                b_pair = _get_pair(be)
+                t_pair = _get_pair(te)
+
+                has_parallel_base = base_pair_counts.get(b_pair, 0) > 1
+                has_parallel_target = target_pair_counts.get(t_pair, 0) > 1
+
+                if (b_iface_missing or t_iface_missing) and (has_parallel_base or has_parallel_target):
+                    ambiguous_base_edges.add(be["id"])
+                    ambiguous_target_edges.add(te["id"])
+                    indeterminate_items.append({
+                        "indeterminate_type": "INDETERMINATE_AMBIGUOUS_MATCH",
+                        "entity_type": "edge",
+                        "entity_id": be["id"],
+                        "reason": "Missing interface on link with parallel edges between same endpoint pair",
+                        "details": {"key": str(k), "edge": be},
+                    })
+                    indeterminate_items.append({
+                        "indeterminate_type": "INDETERMINATE_AMBIGUOUS_MATCH",
+                        "entity_type": "edge",
+                        "entity_id": te["id"],
+                        "reason": "Missing interface on link with parallel edges between same endpoint pair",
+                        "details": {"key": str(k), "edge": te},
+                    })
+                else:
+                    matched_pairs.append((be, te))
+                    matched_base_ids.add(be["id"])
+                    matched_target_ids.add(te["id"])
+
+        # Check remaining unmatched edges for missing interface on parallel link
+        for be in unmatched_base:
+            if be["id"] not in matched_base_ids and be["id"] not in ambiguous_base_edges:
+                b_pair = _get_pair(be)
+                b_iface_missing = not (be.get("source_interface") and be.get("target_interface"))
+                if b_iface_missing and base_pair_counts.get(b_pair, 0) > 1:
+                    ambiguous_base_edges.add(be["id"])
+                    indeterminate_items.append({
+                        "indeterminate_type": "INDETERMINATE_AMBIGUOUS_MATCH",
+                        "entity_type": "edge",
+                        "entity_id": be["id"],
+                        "reason": "Missing interface on link with parallel edges between same endpoint pair",
+                        "details": {"edge": be},
+                    })
+
+        for te in unmatched_target:
+            if te["id"] not in matched_target_ids and te["id"] not in ambiguous_target_edges:
+                t_pair = _get_pair(te)
+                t_iface_missing = not (te.get("source_interface") and te.get("target_interface"))
+                if t_iface_missing and target_pair_counts.get(t_pair, 0) > 1:
+                    ambiguous_target_edges.add(te["id"])
+                    indeterminate_items.append({
+                        "indeterminate_type": "INDETERMINATE_AMBIGUOUS_MATCH",
+                        "entity_type": "edge",
+                        "entity_id": te["id"],
+                        "reason": "Missing interface on link with parallel edges between same endpoint pair",
+                        "details": {"edge": te},
+                    })
+
+        # Remaining unmatched target edges (not ambiguous) -> EDGE_ADDED
+        for te in unmatched_target:
+            if te["id"] not in matched_target_ids and te["id"] not in ambiguous_target_edges:
+                structural_changes.append({
+                    "change_type": "EDGE_ADDED",
+                    "entity_type": "edge",
+                    "entity_id": te["id"],
+                    "change_reason": "Edge observed in target snapshot but absent in base",
+                    "attribute_name": "",
+                    "before_value": None,
+                    "after_value": te,
+                })
+
+        # Remaining unmatched base edges (not ambiguous) -> EDGE_REMOVED (Epistemic safeguard)
+        for be in unmatched_base:
+            if be["id"] not in matched_base_ids and be["id"] not in ambiguous_base_edges:
+                u = be.get("source_node_id")
+                v = be.get("target_node_id")
+                is_safe_edge_removal = (
+                    target_is_complete
+                    and target_status in ("complete", "unknown")
+                    and (u in successful_devices and v in successful_devices)
+                    and (u not in failed_devices and u not in timed_out_devices)
+                    and (v not in failed_devices and v not in timed_out_devices)
+                )
+                if is_safe_edge_removal:
+                    structural_changes.append({
+                        "change_type": "EDGE_REMOVED",
+                        "entity_type": "edge",
+                        "entity_id": be["id"],
+                        "change_reason": "Edge confirmed removed between verified endpoints",
+                        "attribute_name": "",
+                        "before_value": be,
+                        "after_value": None,
+                    })
+                else:
+                    indeterminate_items.append({
+                        "indeterminate_type": "INDETERMINATE_UNVERIFIED_EDGE",
+                        "entity_type": "edge",
+                        "entity_id": be["id"],
+                        "reason": f"Edge missing from target snapshot but endpoint verification incomplete (source={u}, target={v}, target_complete={target_is_complete})",
+                        "details": {
+                            "edge_id": be["id"],
+                            "source_node_id": u,
+                            "target_node_id": v,
+                            "target_is_complete": target_is_complete,
+                            "target_discovery_status": target_status,
+                            "source_successful": u in successful_devices,
+                            "target_successful": v in successful_devices,
+                        },
+                    })
+
+        # ---------------------------------------------------------------------
+        # 3. MATCHED EDGES: OPERATIONAL, FRESHNESS, EVIDENCE, MODIFICATIONS
+        # ---------------------------------------------------------------------
+        base_evidence_list: List[Dict[str, Any]] = base_graph.get("evidence", [])
+        target_evidence_list: List[Dict[str, Any]] = target_graph.get("evidence", [])
+        base_ev_by_edge: Dict[str, List[Dict[str, Any]]] = {}
+        for ev in base_evidence_list:
+            base_ev_by_edge.setdefault(ev.get("edge_id", ""), []).append(ev)
+        target_ev_by_edge: Dict[str, List[Dict[str, Any]]] = {}
+        for ev in target_evidence_list:
+            target_ev_by_edge.setdefault(ev.get("edge_id", ""), []).append(ev)
+
+        for be, te in matched_pairs:
+            eid = be["id"]
+
+            # Operational Status Change:
+            b_op = be.get("oper_status") or "unknown"
+            t_op = te.get("oper_status") or "unknown"
+            if b_op != t_op:
+                operational_changes.append({
+                    "change_type": "STATUS_CHANGED",
+                    "entity_type": "edge",
+                    "entity_id": eid,
+                    "attribute_name": "oper_status",
+                    "before_value": b_op,
+                    "after_value": t_op,
+                    "change_reason": f"Operational status transitioned from '{b_op}' to '{t_op}'",
+                })
+
+            # Observation Freshness Change:
+            b_fresh = be.get("observation_freshness")
+            t_fresh = te.get("observation_freshness")
+            if b_fresh is not None and t_fresh is not None:
+                try:
+                    if round(float(b_fresh), 4) != round(float(t_fresh), 4):
+                        freshness_changes.append({
+                            "change_type": "FRESHNESS_CHANGED",
+                            "entity_type": "edge",
+                            "entity_id": eid,
+                            "attribute_name": "observation_freshness",
+                            "before_value": b_fresh,
+                            "after_value": t_fresh,
+                            "change_reason": f"Observation freshness updated from {b_fresh} to {t_fresh}",
+                        })
+                except (ValueError, TypeError):
+                    pass
+
+            # Evidence Differences:
+            b_evs = be.get("evidence") or base_ev_by_edge.get(eid, [])
+            t_evs = te.get("evidence") or target_ev_by_edge.get(te["id"], [])
+
+            b_active_count = sum(1 for ev in b_evs if ev.get("is_active", True))
+            t_active_count = sum(1 for ev in t_evs if ev.get("is_active", True))
+
+            b_ev_ids = {ev.get("id") for ev in b_evs if ev.get("id") is not None}
+            t_ev_ids = {ev.get("id") for ev in t_evs if ev.get("id") is not None}
+            new_evs = [ev for ev in t_evs if ev.get("id") not in b_ev_ids and ev.get("id") is not None]
+            if new_evs or len(t_evs) > len(b_evs):
+                evidence_changes.append({
+                    "change_type": "EVIDENCE_CHANGED",
+                    "entity_type": "edge",
+                    "entity_id": eid,
+                    "attribute_name": "evidence_added",
+                    "before_value": len(b_evs),
+                    "after_value": len(t_evs),
+                    "change_reason": f"{len(new_evs) or (len(t_evs) - len(b_evs))} new evidence item(s) attached to edge",
+                })
+
+            expired_evs = [
+                ev for ev in t_evs
+                if not ev.get("is_active", True)
+                and any(old.get("id") == ev.get("id") and old.get("is_active", True) for old in b_evs)
+            ]
+            if expired_evs or (t_active_count < b_active_count and len(t_evs) <= len(b_evs)):
+                evidence_changes.append({
+                    "change_type": "EVIDENCE_EXPIRED",
+                    "entity_type": "edge",
+                    "entity_id": eid,
+                    "attribute_name": "evidence_expired",
+                    "before_value": b_active_count,
+                    "after_value": t_active_count,
+                    "change_reason": "Evidence item on edge transitioned to expired/inactive state",
+                })
+
+            b_conf = be.get("confidence_tier") or be.get("confidence") or be.get("confidence_score")
+            t_conf = te.get("confidence_tier") or te.get("confidence") or te.get("confidence_score")
+            if b_conf is not None and t_conf is not None and str(b_conf).upper() != str(t_conf).upper():
+                evidence_changes.append({
+                    "change_type": "CONFIDENCE_CHANGED",
+                    "entity_type": "edge",
+                    "entity_id": eid,
+                    "attribute_name": "confidence_score",
+                    "before_value": b_conf,
+                    "after_value": t_conf,
+                    "change_reason": f"Confidence score changed from {b_conf} to {t_conf}",
+                })
+
+            edge_attrs_to_check = ["confidence_rationale", "link_speed", "mtu", "is_lag_member", "lag_master_id"]
+            for attr in edge_attrs_to_check:
+                bv = be.get(attr)
+                tv = te.get(attr)
+                if bv is not None and tv is not None and bv != tv:
+                    structural_changes.append({
+                        "change_type": "EDGE_MODIFIED",
+                        "entity_type": "edge",
+                        "entity_id": eid,
+                        "attribute_name": attr,
+                        "before_value": bv,
+                        "after_value": tv,
+                        "change_reason": f"Edge attribute '{attr}' modified from '{bv}' to '{tv}'",
+                    })
+
+        t5 = time.perf_counter()
+        diff_compute_ms = round((t5 - t4) * 1000.0, 3)
+        total_duration_ms = round((t5 - t0) * 1000.0, 3)
+
+        summary = {
+            "nodes_added": sum(1 for c in structural_changes if c["change_type"] == "NODE_ADDED"),
+            "nodes_removed": sum(1 for c in structural_changes if c["change_type"] == "NODE_REMOVED"),
+            "nodes_modified": sum(1 for c in structural_changes if c["change_type"] == "NODE_MODIFIED"),
+            "edges_added": sum(1 for c in structural_changes if c["change_type"] == "EDGE_ADDED"),
+            "edges_removed": sum(1 for c in structural_changes if c["change_type"] == "EDGE_REMOVED"),
+            "edges_modified": sum(1 for c in structural_changes if c["change_type"] == "EDGE_MODIFIED"),
+            "operational_changes": len(operational_changes),
+            "freshness_changes": len(freshness_changes),
+            "evidence_changes": len(evidence_changes),
+            "indeterminate_count": len(indeterminate_items),
+        }
+
+        telemetry = {
+            "db_query_ms": db_query_ms,
+            "deserialization_ms": deserialization_ms,
+            "diff_compute_ms": diff_compute_ms,
+            "total_duration_ms": total_duration_ms,
+            "base_graph_size": {"nodes": len(base_nodes), "edges": len(base_edges)},
+            "target_graph_size": {"nodes": len(target_nodes), "edges": len(target_edges)},
+        }
+
+        return GraphDiffReport(
+            base_snapshot_id=base_id_str,
+            target_snapshot_id=target_id_str,
+            generated_at=time.time(),
+            summary=summary,
+            structural_changes=structural_changes,
+            operational_changes=operational_changes,
+            evidence_changes=evidence_changes,
+            freshness_changes=freshness_changes,
+            indeterminate_items=indeterminate_items,
+            telemetry=telemetry,
+        )
+
+    def record_change(
+        self,
+        change: TopologyChange,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> int:
+        """Records a topology graph delta change."""
+        if not isinstance(change, TopologyChange):
+            raise TypeError("change must be an instance of TopologyChange.")
+
+        def _execute(c: sqlite3.Connection) -> int:
+            cur = c.execute(
+                """
+                INSERT INTO topology_changes (
+                    snapshot_id, change_type, entity_id, change_reason,
+                    attribute_name, before_value_json, after_value_json, detected_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    change.snapshot_id,
+                    change.change_type,
+                    change.entity_id,
+                    change.change_reason,
+                    change.attribute_name,
+                    change.before_value_json,
+                    change.after_value_json,
+                    change.detected_at,
+                ),
+            )
+            return int(cur.lastrowid)
+
+        if conn is not None:
+            return _execute(conn)
+        with self._lock, closing(self._get_connection()) as auto_conn:
+            res = _execute(auto_conn)
+            auto_conn.commit()
+            return res
+
+    def get_change(
+        self,
+        change_id: int,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> Optional[TopologyChange]:
+        """Retrieves a single TopologyChange record by its primary key ID."""
+        def _execute(c: sqlite3.Connection) -> Optional[TopologyChange]:
+            row = c.execute("SELECT * FROM topology_changes WHERE id = ?", (change_id,)).fetchone()
+            if not row:
+                return None
+            return TopologyChange.from_dict(dict(row))
+
+        if conn is not None:
+            return _execute(conn)
+        with closing(self._get_connection(read_only=True)) as auto_conn:
+            return _execute(auto_conn)
+
+    def count_changes(
+        self,
+        snapshot_id: Optional[str] = None,
+        entity_id: Optional[str] = None,
+        change_type: Optional[str] = None,
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> int:
+        """Counts recorded topology delta changes with optional filters."""
+        query = "SELECT count(*) FROM topology_changes WHERE 1=1"
+        params: List[Any] = []
+        if snapshot_id:
+            query += " AND snapshot_id = ?"
+            params.append(snapshot_id)
+        if entity_id:
+            query += " AND entity_id = ?"
+            params.append(entity_id)
+        if change_type:
+            norm_type = normalize_topology_change_type(change_type)
+            query += " AND change_type = ?"
+            params.append(norm_type)
+        if start_time is not None:
+            query += " AND detected_at >= ?"
+            params.append(start_time)
+        if end_time is not None:
+            query += " AND detected_at <= ?"
+            params.append(end_time)
+
+        def _execute(c: sqlite3.Connection) -> int:
+            return int(c.execute(query, params).fetchone()[0])
+
+        if conn is not None:
+            return _execute(conn)
+        with closing(self._get_connection(read_only=True)) as auto_conn:
+            return _execute(auto_conn)
+
+    def list_changes(
+        self,
+        snapshot_id: Optional[str] = None,
+        entity_id: Optional[str] = None,
+        change_type: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> List[TopologyChange]:
+        """Lists recorded topology delta changes with optional filters and pagination."""
+        query = "SELECT * FROM topology_changes WHERE 1=1"
+        params: List[Any] = []
+        if snapshot_id:
+            query += " AND snapshot_id = ?"
+            params.append(snapshot_id)
+        if entity_id:
+            query += " AND entity_id = ?"
+            params.append(entity_id)
+        if change_type:
+            norm_type = normalize_topology_change_type(change_type)
+            query += " AND change_type = ?"
+            params.append(norm_type)
+        if start_time is not None:
+            query += " AND detected_at >= ?"
+            params.append(start_time)
+        if end_time is not None:
+            query += " AND detected_at <= ?"
+            params.append(end_time)
+        query += " ORDER BY detected_at DESC LIMIT ? OFFSET ?"
+        params.extend([max(1, limit), max(0, offset)])
+
+        def _execute(c: sqlite3.Connection) -> List[TopologyChange]:
+            rows = c.execute(query, params).fetchall()
+            return [TopologyChange.from_dict(dict(r)) for r in rows]
+
+        if conn is not None:
+            return _execute(conn)
+        with closing(self._get_connection(read_only=True)) as auto_conn:
+            return _execute(auto_conn)
 
     # ------------------------------------------------------------------
     # Policy & Governance Configuration
     # ------------------------------------------------------------------
 
     def get_policy(self) -> Dict[str, Any]:
-        with self._lock, closing(self._get_connection()) as conn:
+        with closing(self._get_connection(read_only=True)) as conn:
             row = conn.execute("SELECT policy_json FROM topology_policy WHERE key = 'default'").fetchone()
             stored = _json_loads_safe(row["policy_json"] if row else None, {})
         merged = dict(DEFAULT_TOPOLOGY_POLICY)
@@ -887,6 +2366,260 @@ class TopologyEngine(TopologyDiscoveryMixin):
             )
             conn.commit()
 
+    def _reconcile_discovered_edge(
+        self,
+        *,
+        source_id: str,
+        target_id: str,
+        relationship_class: str,
+        source_interface: str = "",
+        target_interface: str = "",
+        relationship_subtype: str = "",
+        direction: str = "bidirectional",
+        oper_status: str = "up",
+        admin_status: str = "enabled",
+        verification_status: str = "observed",
+        confidence_tier: str = "MEDIUM",
+        confidence_score: float = 0.5,
+        confidence_rationale: str = "",
+        bandwidth_bps: int = 1000000000,
+        vlan_id: Optional[int] = None,
+        is_lag_member: bool = False,
+        lag_parent_edge_id: Optional[str] = None,
+        evidence_item: Optional[Dict[str, Any]] = None,
+        now: Optional[float] = None,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> str:
+        """
+        Reconciles discovered multi-layer topology edges idempotently in topology_edges
+        and records evidence in topology_edge_evidence.
+
+        Supports:
+        - Strict relationship class separation (physical, layer2, layer3, logical).
+        - Multi-edge support: does NOT overwrite parallel edges of different classes or interfaces.
+        - Bidirectional corroboration upgrade to 'physical' / 'CONFIRMED' when both endpoints match on physical ports.
+        - Epistemic guardrail: subnets and ARP entries are NEVER promoted to physical adjacency.
+        - First-class evidence tracking in topology_edge_evidence.
+        """
+        ts = now if now is not None else time.time()
+        norm_rc = normalize_relationship_class(relationship_class)
+        norm_ct = normalize_confidence_tier(confidence_tier)
+        s_if = sanitize_untrusted_text(source_interface, 64)
+        t_if = sanitize_untrusted_text(target_interface, 64)
+
+        def _execute(c: sqlite3.Connection) -> str:
+            # 1. Validate both endpoints exist in topology_nodes
+            s_node = c.execute("SELECT id FROM topology_nodes WHERE id = ?", (source_id,)).fetchone()
+            t_node = c.execute("SELECT id FROM topology_nodes WHERE id = ?", (target_id,)).fetchone()
+            if not s_node or not t_node:
+                logger.debug(
+                    "Cannot reconcile edge %s -> %s: endpoint(s) missing in topology_nodes.",
+                    source_id,
+                    target_id,
+                )
+                return ""
+
+            # 2. Check for existing edge in forward or reverse direction
+            pair_rows = c.execute(
+                """
+                SELECT * FROM topology_edges
+                WHERE (source_node_id = ? AND target_node_id = ? AND relationship_class = ?)
+                   OR (direction = 'bidirectional' AND source_node_id = ? AND target_node_id = ? AND relationship_class = ?)
+                """,
+                (source_id, target_id, norm_rc, target_id, source_id, norm_rc),
+            ).fetchall()
+
+            matched_row = None
+            is_reverse = False
+
+            for r in pair_rows:
+                rev = r["source_node_id"] == target_id and r["target_node_id"] == source_id
+                ex_s_if = r["target_interface"] if rev else r["source_interface"]
+                ex_t_if = r["source_interface"] if rev else r["target_interface"]
+                ex_sub = r["relationship_subtype"]
+
+                # Exact port pair match
+                if (ex_s_if == s_if and ex_t_if == t_if) or (ex_s_if == s_if and not ex_t_if and not t_if):
+                    if not relationship_subtype or not ex_sub or relationship_subtype == ex_sub:
+                        matched_row = r
+                        is_reverse = rev
+                        break
+                # Port refinement (remote port previously missing, now observed)
+                elif ex_s_if == s_if and not ex_t_if and t_if:
+                    matched_row = r
+                    is_reverse = rev
+                    break
+                # Generic match when both interfaces empty (e.g. subnet-level edges)
+                elif not ex_s_if and not ex_t_if and not s_if and not t_if:
+                    if not relationship_subtype or not ex_sub or relationship_subtype == ex_sub:
+                        matched_row = r
+                        is_reverse = rev
+                        break
+
+            if matched_row is not None:
+                edge_id = str(matched_row["id"])
+                ex_s_if = matched_row["target_interface"] if is_reverse else matched_row["source_interface"]
+                ex_t_if = matched_row["source_interface"] if is_reverse else matched_row["target_interface"]
+
+                final_rc = matched_row["relationship_class"]
+                final_sub = matched_row["relationship_subtype"] or relationship_subtype
+                final_vstatus = matched_row["verification_status"]
+                final_tier = matched_row["confidence_tier"]
+                final_score = float(matched_row["confidence_score"] or 0.5)
+                final_rationale = matched_row["confidence_rationale"]
+                last_ver = matched_row["last_verified"]
+
+                # Bidirectional corroboration upgrade
+                if is_reverse:
+                    ports_physical = any(p in (s_if or "").lower() for p in ("ether", "sfp")) and any(p in (t_if or "").lower() for p in ("ether", "sfp"))
+                    if s_if and (t_if or ex_t_if) and (norm_rc in ("layer2", "physical")):
+                        if ports_physical:
+                            final_rc = "physical"
+                            final_sub = "direct_copper" if "ether" in s_if.lower() else "direct_fiber"
+                            final_vstatus = "confirmed"
+                            final_tier = "CONFIRMED"
+                            final_score = 1.0
+                            final_rationale = (
+                                f"Verified physical adjacency: both {matched_row['source_node_id']} ({ex_s_if}) and "
+                                f"{matched_row['target_node_id']} ({s_if}) independently confirmed identities and port mapping."
+                            )
+                            last_ver = ts
+                else:
+                    if confidence_score > final_score:
+                        final_score = confidence_score
+                        final_tier = norm_ct
+                        final_rationale = confidence_rationale or final_rationale
+                    final_vstatus = verification_status or final_vstatus
+
+                if matched_row["provenance"] == "user_managed" or matched_row["verification_status"] == "manual":
+                    c.execute(
+                        "UPDATE topology_edges SET last_seen = ?, observation_freshness = 'fresh' WHERE id = ?",
+                        (ts, edge_id),
+                    )
+                else:
+                    c.execute(
+                        """
+                        UPDATE topology_edges
+                        SET last_seen = ?, last_verified = ?, oper_status = ?, verification_status = ?,
+                            confidence_tier = ?, confidence_score = ?, confidence_rationale = ?,
+                            relationship_class = ?, relationship_subtype = ?, target_interface = ?,
+                            observation_freshness = 'fresh', lifecycle_state = 'active'
+                        WHERE id = ?
+                        """,
+                        (
+                            ts,
+                            last_ver,
+                            oper_status,
+                            final_vstatus,
+                            final_tier,
+                            final_score,
+                            final_rationale,
+                            final_rc,
+                            final_sub,
+                            t_if or matched_row["target_interface"],
+                            edge_id,
+                        ),
+                    )
+            else:
+                clean_src = re.sub(r"[^a-zA-Z0-9_]", "_", source_id.lower())
+                clean_tgt = re.sub(r"[^a-zA-Z0-9_]", "_", target_id.lower())
+                clean_s_if = re.sub(r"[^a-zA-Z0-9_]", "_", s_if.lower()) if s_if else "any"
+                clean_t_if = re.sub(r"[^a-zA-Z0-9_]", "_", t_if.lower()) if t_if else "any"
+                sub_suffix = f"_{relationship_subtype}" if relationship_subtype else ""
+                vlan_suffix = f"_vlan{vlan_id}" if vlan_id is not None else ""
+
+                edge_id = f"edge_{norm_rc}_{clean_src}_{clean_s_if}__{clean_tgt}_{clean_t_if}{sub_suffix}{vlan_suffix}"
+
+                existing_by_id = c.execute("SELECT id FROM topology_edges WHERE id = ?", (edge_id,)).fetchone()
+                if existing_by_id:
+                    edge_id = f"{edge_id}_{int(ts * 1000) % 100000}"
+
+                edge_obj = TopologyEdge(
+                    id=edge_id,
+                    source_node_id=source_id,
+                    target_node_id=target_id,
+                    source_interface=s_if,
+                    target_interface=t_if,
+                    relationship_class=norm_rc,
+                    relationship_subtype=relationship_subtype or ("direct_copper" if norm_rc == "physical" else ("bridge_port_member" if norm_rc == "layer2" else "routed_multiaccess")),
+                    direction=direction,
+                    oper_status=oper_status,
+                    admin_status=admin_status,
+                    verification_status=verification_status,
+                    confidence_tier=norm_ct,
+                    confidence_score=confidence_score,
+                    confidence_rationale=confidence_rationale or f"Discovered via {evidence_item.get('protocol', 'empirical evidence') if evidence_item else 'telemetry'}.",
+                    bandwidth_bps=bandwidth_bps,
+                    vlan_id=vlan_id,
+                    is_lag_member=is_lag_member,
+                    lag_parent_edge_id=lag_parent_edge_id,
+                    first_seen=ts,
+                    last_seen=ts,
+                    last_verified=ts if verification_status == "confirmed" else None,
+                    observation_freshness="fresh",
+                    lifecycle_state="active",
+                    provenance="discovery_managed",
+                )
+                self.insert_edge(edge_obj, conn=c)
+
+                self.record_change(
+                    TopologyChange(
+                        change_type="EDGE_ADDED",
+                        entity_id=edge_id,
+                        change_reason="Discovered via telemetry reconciliation",
+                        detected_at=ts,
+                    ),
+                    conn=c,
+                )
+
+            # 4. Attach EdgeEvidence if provided
+            if evidence_item:
+                ev_type = evidence_item.get("evidence_type", "neighbor_discovery")
+                proto = evidence_item.get("protocol", "")
+                raw_ex = sanitize_cli_excerpt(evidence_item.get("raw_excerpt", ""), max_len=16000)
+                exp = evidence_item.get("explanation", confidence_rationale)
+                conf_contrib = evidence_item.get("confidence", "medium")
+
+                half_life = EVIDENCE_HALF_LIVES.get(proto, EVIDENCE_HALF_LIVES.get(ev_type, DEFAULT_HALF_LIFE))
+                expires_at = None if half_life == float("inf") else (ts + 2.0 * half_life)
+
+                ev_obj = EdgeEvidence(
+                    edge_id=edge_id,
+                    evidence_type=ev_type,
+                    protocol=proto,
+                    observing_device_id=source_id,
+                    local_interface=s_if,
+                    remote_interface=t_if,
+                    remote_chassis_mac=evidence_item.get("remote_chassis_mac", ""),
+                    raw_excerpt=raw_ex,
+                    confidence_contribution=conf_contrib,
+                    explanation=exp,
+                    observed_at=ts,
+                    expires_at=expires_at,
+                    is_active=1,
+                    metadata=evidence_item.get("metadata", {}),
+                )
+                self.insert_edge_evidence(ev_obj, conn=c)
+
+                self.record_change(
+                    TopologyChange(
+                        change_type="EVIDENCE_CHANGED",
+                        entity_id=edge_id,
+                        change_reason=f"Evidence {ev_type} ({proto}) recorded",
+                        detected_at=ts,
+                    ),
+                    conn=c,
+                )
+
+            return edge_id
+
+        if conn is not None:
+            return _execute(conn)
+        with self._lock, closing(self._get_connection()) as auto_conn:
+            res = _execute(auto_conn)
+            auto_conn.commit()
+            return res
+
     def _reconcile_discovered_link(
         self,
         *,
@@ -1123,6 +2856,23 @@ class TopologyEngine(TopologyDiscoveryMixin):
         return link_id
 
     # ------------------------------------------------------------------
+    def correlate_and_reconcile_device_bundles(
+        self,
+        device_bundles: Dict[str, Dict[str, Any]],
+        now: Optional[float] = None,
+    ) -> List[str]:
+        """
+        Integrates CrossDeviceEvidenceCorrelator into the discovery reconciliation loop.
+        Correlates multi-device evidence and reconciles resulting relationships into
+        topology_edges and topology_edge_evidence.
+        """
+        from core.network_intelligence.correlation import CrossDeviceEvidenceCorrelator
+        correlator = CrossDeviceEvidenceCorrelator()
+        relationships = correlator.correlate_bundles(device_bundles)
+        return correlator.reconcile_correlated_relationships_to_engine(
+            relationships, self, now=now
+        )
+
     # Manual Node & Link CRUD + Administrative Overrides
     # ------------------------------------------------------------------
 
@@ -1575,12 +3325,40 @@ class TopologyEngine(TopologyDiscoveryMixin):
             conn.commit()
             return cur.rowcount > 0
 
-    def delete_link(self, link_id: str) -> bool:
+    def delete_link(self, link_id: str, actor: str = "admin", reason: str = "Administrative link deletion") -> bool:
         with self._lock, closing(self._get_connection()) as conn:
             conn.execute("DELETE FROM topology_evidence WHERE subject_type = 'link' AND subject_id = ?", (link_id,))
             cur = conn.execute("DELETE FROM topology_links WHERE id = ?", (link_id,))
+            rowcount = cur.rowcount
+            table_names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            if "topology_edges" in table_names:
+                # Soft-delete matching edge to preserve empirical evidence for audit continuity
+                cur_edge = conn.execute(
+                    "UPDATE topology_edges SET lifecycle_state = 'tombstoned', last_seen = ? WHERE id = ? AND lifecycle_state != 'tombstoned'",
+                    (time.time(), link_id),
+                )
+                rowcount += cur_edge.rowcount
+
+            if rowcount > 0:
+                now_ts = time.time()
+                if "topology_changes" in table_names:
+                    self.record_change(
+                        TopologyChange(
+                            change_type=TopologyChangeType.EDGE_REMOVED.value,
+                            entity_id=link_id,
+                            change_reason=reason,
+                            detected_at=now_ts,
+                        ),
+                        conn=conn,
+                    )
+                if "topology_audit_log" in table_names:
+                    conn.execute(
+                        "INSERT INTO topology_audit_log (actor, action, target_type, target_id, reason, created_at) "
+                        "VALUES (?, 'delete_link', 'link', ?, ?, ?)",
+                        (actor, link_id, reason, now_ts),
+                    )
             conn.commit()
-            return cur.rowcount > 0
+            return rowcount > 0
 
     def clear_topology(self) -> Dict[str, Any]:
         with self._lock, closing(self._get_connection()) as conn:
@@ -1878,6 +3656,9 @@ class TopologyEngine(TopologyDiscoveryMixin):
             limitations: List[str] = []
             visited_names: Set[str] = set()
             queue: List[Tuple[str, str, int]] = [(seed_dev["name"], seed_dev["host"], 0)]
+            successful_dev_list: List[str] = []
+            failed_dev_list: List[str] = []
+            timed_out_dev_list: List[str] = []
 
             hops_scanned = 0
             total_nodes_obs = 0
@@ -1913,6 +3694,9 @@ class TopologyEngine(TopologyDiscoveryMixin):
                 if not interrogated.get("success"):
                     err_msg = sanitize_untrusted_text(interrogated.get("error", "Interrogation failed"), 200)
                     errors.append(f"{cur_name}: {err_msg}")
+                    failed_dev_list.append(cur_name)
+                    if "timeout" in err_msg.lower():
+                        timed_out_dev_list.append(cur_name)
                     # Update management_status on existing node WITHOUT deleting confirmed topology!
                     with self._lock, closing(self._get_connection()) as conn:
                         row = conn.execute(
@@ -1932,9 +3716,30 @@ class TopologyEngine(TopologyDiscoveryMixin):
                             job_id, "failed", started_at, hops_scanned, total_nodes_obs, total_links_obs,
                             errors, limitations, f"Gagal menginterogasi seed router {cur_name}."
                         )
+                        failed_comp = {
+                            "discovery_status": "failed",
+                            "expected_devices": [cur_name],
+                            "successful_devices": [],
+                            "failed_devices": [cur_name],
+                            "timed_out_devices": [cur_name] if "timeout" in err_msg.lower() else [],
+                            "collection_scope": effective_mode,
+                            "started_at": started_at,
+                            "completed_at": time.time(),
+                            "is_complete": False,
+                        }
+                        try:
+                            self.create_snapshot(
+                                trigger_type="discovery_run",
+                                description=f"Failed discovery: {cur_name}",
+                                discovery_run_id=job_id,
+                                completeness=failed_comp,
+                            )
+                        except Exception as e_snap:
+                            logger.warning(f"Could not create failed discovery snapshot: {e_snap}")
                         return {"success": False, "job_id": job_id, "error": f"Gagal menginterogasi {cur_name}: {err_msg}"}
                     continue
 
+                successful_dev_list.append(cur_name)
                 outs = interrogated["outputs"]
                 limitations.extend(interrogated.get("limitations", []))
 
@@ -1993,6 +3798,91 @@ class TopologyEngine(TopologyDiscoveryMixin):
                 job_id, "completed", started_at, hops_scanned, total_nodes_obs, total_links_obs,
                 errors, limitations, summary
             )
+
+            # Phase 4.4A Snapshot & Semantic Diff Integration
+            expected_devs = [d["name"] for d in enabled_devs] if effective_mode == "enterprise_managed" else list(visited_names)
+            is_comp = (len(failed_dev_list) == 0 and len(timed_out_dev_list) == 0 and len(successful_dev_list) > 0 and len(errors) == 0)
+            disc_status = "complete" if is_comp else ("failed" if not successful_dev_list else "partial")
+
+            comp_meta = {
+                "discovery_status": disc_status,
+                "expected_devices": expected_devs,
+                "successful_devices": successful_dev_list,
+                "failed_devices": failed_dev_list,
+                "timed_out_devices": timed_out_dev_list,
+                "collection_scope": effective_mode,
+                "started_at": started_at,
+                "completed_at": time.time(),
+                "is_complete": is_comp,
+            }
+
+            new_snap = None
+            diff_report = None
+            try:
+                prior_snaps = self.list_snapshots(limit=2)
+                prior_snap = prior_snaps[0] if prior_snaps else None
+
+                new_snap = self.create_snapshot(
+                    trigger_type="discovery_run",
+                    description=summary,
+                    discovery_run_id=job_id,
+                    completeness=comp_meta,
+                )
+
+                if prior_snap and prior_snap.snapshot_id != new_snap.snapshot_id:
+                    diff_report = self.compare_snapshots(prior_snap.snapshot_id, new_snap.snapshot_id)
+
+                    for ch in diff_report.structural_changes:
+                        self.record_change(
+                            TopologyChange(
+                                snapshot_id=new_snap.snapshot_id,
+                                change_type=ch["change_type"],
+                                entity_id=ch["entity_id"],
+                                change_reason=ch.get("change_reason", ""),
+                                attribute_name=ch.get("attribute_name", ""),
+                                before_value_json=json.dumps(ch.get("before_value")) if ch.get("before_value") is not None else "",
+                                after_value_json=json.dumps(ch.get("after_value")) if ch.get("after_value") is not None else "",
+                            )
+                        )
+                    for ch in diff_report.operational_changes:
+                        self.record_change(
+                            TopologyChange(
+                                snapshot_id=new_snap.snapshot_id,
+                                change_type="STATUS_CHANGED",
+                                entity_id=ch["entity_id"],
+                                change_reason=ch.get("change_reason", ""),
+                                attribute_name=ch.get("attribute_name", "oper_status"),
+                                before_value_json=json.dumps(ch.get("before_value")) if ch.get("before_value") is not None else "",
+                                after_value_json=json.dumps(ch.get("after_value")) if ch.get("after_value") is not None else "",
+                            )
+                        )
+                    for ch in diff_report.evidence_changes:
+                        self.record_change(
+                            TopologyChange(
+                                snapshot_id=new_snap.snapshot_id,
+                                change_type=ch["change_type"],
+                                entity_id=ch["entity_id"],
+                                change_reason=ch.get("change_reason", ""),
+                                attribute_name=ch.get("attribute_name", "evidence"),
+                                before_value_json=json.dumps(ch.get("before_value")) if ch.get("before_value") is not None else "",
+                                after_value_json=json.dumps(ch.get("after_value")) if ch.get("after_value") is not None else "",
+                            )
+                        )
+                    for ch in diff_report.freshness_changes:
+                        self.record_change(
+                            TopologyChange(
+                                snapshot_id=new_snap.snapshot_id,
+                                change_type=ch["change_type"],
+                                entity_id=ch["entity_id"],
+                                change_reason=ch.get("change_reason", ""),
+                                attribute_name=ch.get("attribute_name", "observation_freshness"),
+                                before_value_json=json.dumps(ch.get("before_value")) if ch.get("before_value") is not None else "",
+                                after_value_json=json.dumps(ch.get("after_value")) if ch.get("after_value") is not None else "",
+                            )
+                        )
+            except Exception as e_snap:
+                logger.warning(f"Error creating/comparing discovery snapshot: {e_snap}")
+
             return {
                 "success": True,
                 "job_id": job_id,
@@ -2001,6 +3891,8 @@ class TopologyEngine(TopologyDiscoveryMixin):
                 "errors": errors,
                 "limitations": limitations,
                 "details": first_details or {},
+                "snapshot_id": new_snap.snapshot_id if new_snap else None,
+                "diff_summary": diff_report.summary if diff_report else {},
             }
 
         finally:
@@ -2282,6 +4174,7 @@ class TopologyEngine(TopologyDiscoveryMixin):
             "view_mode": view_mode or "all_observed",
             "nodes": visible_nodes,
             "links": links,
+            "edges": [e.to_dict() for e in self.list_edges()],
             "policy": pol,
             "last_job": last_job,
             "active_job_id": self._active_job_id,
@@ -2858,6 +4751,692 @@ class TopologyEngine(TopologyDiscoveryMixin):
         )
         return "\n".join(lines)
 
+
+    # =======================================================================
+    # Phase 4.3: Real-Time NMS Operational Event Synchronization & Decayer
+    # =======================================================================
+
+    @staticmethod
+    def _normalize_nms_oper_status(raw_status: Any) -> str:
+        s = str(raw_status).strip().lower()
+        if s in ("up", "running", "active", "online", "ok", "true", "1"):
+            return "up"
+        if s in ("down", "inactive", "offline", "failed", "error", "false", "0", "disabled"):
+            return "down"
+        if s in ("degraded", "warning", "suspected_down"):
+            return "degraded"
+        return "unknown"
+
+    def _resolve_canonical_node_id(
+        self,
+        query: str,
+        conn: sqlite3.Connection,
+    ) -> Optional[str]:
+        """
+        Resolves query to a topology_nodes primary key using CanonicalDevice registry first,
+        falling back to direct topology_nodes lookup.
+        """
+        if not query:
+            return None
+
+        # 1. Check CanonicalNetworkRegistry
+        try:
+            from core.canonical_network import get_canonical_registry
+            registry = get_canonical_registry()
+            c_dev = registry.resolve_device(query)
+            if c_dev:
+                candidates = [c_dev.device_id, c_dev.inventory_name, c_dev.observed_identity, c_dev.hostname]
+                candidates = [c for c in candidates if c]
+                for cand in candidates:
+                    row = conn.execute(
+                        "SELECT id FROM topology_nodes WHERE id = ? OR LOWER(name) = LOWER(?) OR LOWER(identity) = LOWER(?)",
+                        (cand, cand, cand),
+                    ).fetchone()
+                    if row:
+                        return str(row["id"])
+
+                if c_dev.management_ip:
+                    row = conn.execute("SELECT id FROM topology_nodes WHERE ip = ?", (c_dev.management_ip,)).fetchone()
+                    if row:
+                        return str(row["id"])
+                for ip_str in (c_dev.all_ips or []):
+                    row = conn.execute("SELECT id FROM topology_nodes WHERE ip = ?", (ip_str,)).fetchone()
+                    if row:
+                        return str(row["id"])
+
+                if c_dev.primary_mac:
+                    norm_m = normalize_mac(c_dev.primary_mac)
+                    row = conn.execute("SELECT id FROM topology_nodes WHERE UPPER(mac) = UPPER(?)", (norm_m,)).fetchone()
+                    if row:
+                        return str(row["id"])
+        except Exception as exc:
+            logger.debug("Canonical registry resolution fallback: %s", exc)
+
+        # 2. Fallback to direct topology_nodes matching
+        clean_q = str(query).strip()
+        row = conn.execute(
+            "SELECT id FROM topology_nodes WHERE id = ? OR LOWER(name) = LOWER(?) OR LOWER(identity) = LOWER(?) OR ip = ?",
+            (clean_q, clean_q, clean_q, clean_q),
+        ).fetchone()
+        if row:
+            return str(row["id"])
+
+        norm_m = normalize_mac(clean_q)
+        if norm_m:
+            row = conn.execute("SELECT id FROM topology_nodes WHERE UPPER(mac) = UPPER(?)", (norm_m,)).fetchone()
+            if row:
+                return str(row["id"])
+
+        return None
+
+    def handle_nms_event(
+        self,
+        event: Any,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> Dict[str, Any]:
+        """
+        Processes real-time NMS operational events (interface and device status changes).
+        Strictly preserves topology invariance:
+        - NEVER creates topology edges or nodes from NMS events alone.
+        - NEVER modifies relationship_class, relationship_subtype, endpoint devices/interfaces,
+          physical adjacency classification, or confidence tier/score.
+        - NEVER tombstones or deletes edges on link down.
+        - Handles duplicate, delayed, out-of-order, or missing-reference events idempotently.
+        """
+        if event is None:
+            return {"success": False, "error": "empty_event", "edges_updated": 0}
+
+        event_name = ""
+        payload: Dict[str, Any] = {}
+        event_id = None
+        event_timestamp_raw = None
+
+        if hasattr(event, "event") and hasattr(event, "data"):
+            event_name = str(event.event)
+            payload = event.data if isinstance(event.data, dict) else {}
+            event_id = getattr(event, "event_id", None)
+            event_timestamp_raw = getattr(event, "timestamp", None)
+        elif isinstance(event, dict):
+            event_name = str(event.get("event") or event.get("event_name") or EventNames.NMS_INTERFACE_STATUS_CHANGED)
+            payload = event.get("data") if isinstance(event.get("data"), dict) else event
+            event_id = payload.get("event_id") or event.get("event_id")
+            event_timestamp_raw = payload.get("timestamp") or event.get("timestamp")
+        else:
+            return {"success": False, "error": "invalid_event_format", "edges_updated": 0}
+
+        if not isinstance(payload, dict):
+            return {"success": False, "error": "payload_not_dict", "edges_updated": 0}
+
+        # Normalize timestamp to float epoch
+        event_time: float
+        if "timestamp" in payload and isinstance(payload["timestamp"], (int, float)):
+            event_time = float(payload["timestamp"])
+        elif event_timestamp_raw is not None:
+            if isinstance(event_timestamp_raw, (int, float)):
+                event_time = float(event_timestamp_raw)
+            else:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(str(event_timestamp_raw).replace("Z", "+00:00"))
+                    event_time = dt.timestamp()
+                except Exception:
+                    event_time = time.time()
+        else:
+            event_time = time.time()
+
+        is_status_transition_event = (
+            event_name in (
+                EventNames.NMS_INTERFACE_STATUS_CHANGED,
+                "nms.interface.status_changed",
+            )
+        )
+        is_interface_observed = (
+            event_name in (
+                getattr(EventNames, "NMS_INTERFACE_OBSERVED", "nms.interface.observed"),
+                "nms.interface.observed",
+            )
+        )
+        is_interface_event = is_status_transition_event or is_interface_observed
+        is_device_event = (
+            event_name in (
+                EventNames.NMS_DEVICE_STATUS,
+                "nms.device.status_changed",
+                "nms.device_status",
+            )
+        )
+
+        if not is_interface_event and not is_device_event:
+            return {
+                "success": False,
+                "reason": "unknown_event_type",
+                "event_type": event_name,
+                "edges_updated": 0,
+            }
+
+        def _execute(c: sqlite3.Connection) -> Dict[str, Any]:
+            if is_interface_event:
+                return self._process_interface_status_event(
+                    payload=payload,
+                    event_id=event_id,
+                    event_time=event_time,
+                    conn=c,
+                    is_status_transition_event=is_status_transition_event,
+                )
+            else:
+                return self._process_device_status_event(
+                    payload=payload,
+                    event_id=event_id,
+                    event_time=event_time,
+                    conn=c,
+                )
+
+        if conn is not None:
+            return _execute(conn)
+
+        def _do_write() -> Dict[str, Any]:
+            with self._lock, closing(self._get_connection()) as auto_conn:
+                res = _execute(auto_conn)
+                auto_conn.commit()
+                return res
+
+        result = execute_with_retry(_do_write, operation_name="handle_nms_event")
+        pending = result.pop("_pending_events", [])
+        if pending:
+            try:
+                event_bus = self._target_bus or get_event_bus()
+                for p_data in pending:
+                    try:
+                        event_bus.publish("topology.delta", data=p_data)
+                    except Exception as emit_err:
+                        logger.warning("Error publishing topology.delta outside transaction: %s", emit_err)
+            except Exception:
+                pass
+        return result
+
+    def _process_interface_status_event(
+        self,
+        payload: Dict[str, Any],
+        event_id: Optional[str],
+        event_time: float,
+        conn: sqlite3.Connection,
+        is_status_transition_event: bool = True,
+    ) -> Dict[str, Any]:
+        device_ref = (
+            payload.get("device_id")
+            or payload.get("device")
+            or payload.get("device_name")
+            or payload.get("host")
+            or payload.get("ip")
+        )
+        if not device_ref or not str(device_ref).strip():
+            return {"success": False, "error": "missing_device_reference", "edges_updated": 0}
+
+        iface_ref = (
+            payload.get("interface_name")
+            or payload.get("interface")
+            or payload.get("iface")
+            or payload.get("iname")
+            or payload.get("port")
+        )
+        if iface_ref is None or not str(iface_ref).strip():
+            return {"success": False, "error": "missing_interface_reference", "edges_updated": 0}
+        clean_iface = str(iface_ref).strip()
+
+        oper_raw = payload.get("oper_status") or payload.get("status")
+        if not oper_raw or not str(oper_raw).strip():
+            return {"success": False, "error": "missing_oper_status", "edges_updated": 0}
+
+        norm_status = self._normalize_nms_oper_status(oper_raw)
+
+        pending_events: List[Dict[str, Any]] = []
+        resolved_node_id = self._resolve_canonical_node_id(str(device_ref).strip(), conn)
+        if not resolved_node_id:
+            logger.debug("NMS sync: device '%s' not recognized in topology.", device_ref)
+            return {"success": False, "reason": "unknown_device", "edges_updated": 0}
+
+        matching_edges = conn.execute(
+            """
+            SELECT * FROM topology_edges
+            WHERE lifecycle_state != 'tombstoned'
+              AND (
+                (source_node_id = ? AND LOWER(source_interface) = LOWER(?))
+                OR
+                (target_node_id = ? AND LOWER(target_interface) = LOWER(?))
+              )
+            """,
+            (resolved_node_id, clean_iface, resolved_node_id, clean_iface),
+        ).fetchall()
+
+        if not matching_edges:
+            logger.debug(
+                "NMS sync: no matching topology edge for device '%s' interface '%s'. Invariance preserved (no edge created).",
+                resolved_node_id, clean_iface,
+            )
+            return {
+                "success": True,
+                "reason": "interface_not_mapped",
+                "device_id": resolved_node_id,
+                "interface": clean_iface,
+                "edges_updated": 0,
+            }
+
+        updated_count = 0
+        now_ts = event_time
+
+        for edge in matching_edges:
+            edge_id = edge["id"]
+            current_status = edge["oper_status"]
+            current_last_seen = float(edge["last_seen"]) if edge["last_seen"] else 0.0
+
+            try:
+                meta = json.loads(edge["metadata_json"] or "{}")
+            except Exception:
+                meta = {}
+
+            last_nms_ts = float(meta.get("last_nms_timestamp") or current_last_seen)
+
+            # Ordering check: older event must not overwrite newer observation
+            if now_ts < last_nms_ts:
+                logger.debug(
+                    "NMS sync: out-of-order event dropped for edge %s (event_ts=%.2f < last_ts=%.2f)",
+                    edge_id, now_ts, last_nms_ts,
+                )
+                continue
+
+            # Idempotency check: duplicate delivery
+            if now_ts == last_nms_ts and current_status == norm_status:
+                logger.debug("NMS sync: duplicate event ignored for edge %s", edge_id)
+                continue
+
+            meta["last_nms_timestamp"] = now_ts
+            meta["last_nms_oper_status"] = norm_status
+            meta["last_nms_interface"] = clean_iface
+            meta["last_nms_device"] = resolved_node_id
+            if event_id:
+                meta["last_nms_event_id"] = event_id
+            if "admin_status" in payload:
+                meta["last_nms_admin_status"] = payload["admin_status"]
+            if "speed_bps" in payload:
+                meta["last_nms_speed_bps"] = payload["speed_bps"]
+
+            # Check if this represents a genuine status transition:
+            # Only transition status if it is a status transition event and status actually changed.
+            # If it is an observation event (NMS_INTERFACE_OBSERVED), oper_status is preserved
+            # (unless it was 'unknown' and we now know a concrete operational status).
+            has_status_transition = is_status_transition_event and (current_status != norm_status)
+            new_status = norm_status if has_status_transition or current_status == "unknown" else current_status
+
+            # CRITICAL TOPOLOGY INVARIANCE:
+            # ONLY update oper_status (on genuine transition/unknown initialization), last_seen, observation_freshness, metadata_json.
+            # relationship_class, relationship_subtype, confidence_score, tier, endpoints,
+            # and lifecycle_state remain strictly invariant.
+            conn.execute(
+                """
+                UPDATE topology_edges
+                SET oper_status = ?,
+                    last_seen = ?,
+                    observation_freshness = 'fresh',
+                    metadata_json = ?
+                WHERE id = ?
+                """,
+                (new_status, now_ts, json.dumps(meta), edge_id),
+            )
+            updated_count += 1
+
+            # Only record delta in topology_changes and emit WebSocket event if genuine status transition occurred!
+            if has_status_transition:
+                self.record_change(
+                    TopologyChange(
+                        change_type=TopologyChangeType.STATUS_CHANGED.value,
+                        entity_id=edge_id,
+                        change_reason=f"OPERATIONAL_{norm_status.upper()}",
+                        attribute_name="oper_status",
+                        before_value_json=json.dumps(current_status),
+                        after_value_json=json.dumps(norm_status),
+                        detected_at=now_ts,
+                    ),
+                    conn=conn,
+                )
+
+                # Update legacy topology_links for backward compatibility
+                conn.execute(
+                    """
+                    UPDATE topology_links
+                    SET status = ?,
+                        last_checked = ?
+                    WHERE (source_id = ? AND LOWER(source_port) = LOWER(?))
+                       OR (target_id = ? AND LOWER(target_port) = LOWER(?))
+                    """,
+                    (norm_status, now_ts, resolved_node_id, clean_iface, resolved_node_id, clean_iface),
+                )
+
+                # Emit delta event on EventBus for WebSocket push ONLY on genuine transition
+                pending_events.append({
+                    "edge_id": edge_id,
+                    "oper_status": norm_status,
+                    "previous_status": current_status,
+                    "source_node_id": edge["source_node_id"],
+                    "target_node_id": edge["target_node_id"],
+                    "source_interface": edge["source_interface"],
+                    "target_interface": edge["target_interface"],
+                    "timestamp": now_ts,
+                })
+            else:
+                # Unchanged observation: refresh last_checked in legacy links without status change or ws broadcast
+                conn.execute(
+                    """
+                    UPDATE topology_links
+                    SET last_checked = ?
+                    WHERE (source_id = ? AND LOWER(source_port) = LOWER(?))
+                       OR (target_id = ? AND LOWER(target_port) = LOWER(?))
+                    """,
+                    (now_ts, resolved_node_id, clean_iface, resolved_node_id, clean_iface),
+                )
+
+        return {
+            "success": True,
+            "device_id": resolved_node_id,
+            "interface": clean_iface,
+            "oper_status": norm_status,
+            "edges_updated": updated_count,
+            "_pending_events": pending_events,
+        }
+
+    def _process_device_status_event(
+        self,
+        payload: Dict[str, Any],
+        event_id: Optional[str],
+        event_time: float,
+        conn: sqlite3.Connection,
+    ) -> Dict[str, Any]:
+        device_ref = payload.get("device_id") or payload.get("device") or payload.get("name") or payload.get("ip")
+        if not device_ref:
+            return {"success": False, "error": "missing_device_reference", "edges_updated": 0}
+
+        status_raw = payload.get("status") or payload.get("state")
+        if not status_raw:
+            return {"success": False, "error": "missing_device_status", "edges_updated": 0}
+
+        resolved_node_id = self._resolve_canonical_node_id(str(device_ref).strip(), conn)
+        if not resolved_node_id:
+            return {"success": False, "reason": "unknown_device", "edges_updated": 0}
+
+        dev_status = str(status_raw).strip().upper()
+        now_ts = event_time
+
+        if dev_status == "DOWN":
+            node_reach = "unreachable"
+            node_status = "offline"
+            edge_oper = "degraded"
+        elif dev_status == "UP":
+            node_reach = "reachable"
+            node_status = "online"
+            edge_oper = "up"
+        elif dev_status == "SUSPECTED_DOWN":
+            node_reach = "suspected_down"
+            node_status = "warning"
+            edge_oper = "degraded"
+        elif dev_status == "DEGRADED":
+            node_reach = "reachable"
+            node_status = "warning"
+            edge_oper = "degraded"
+        else:
+            node_reach = "unknown"
+            node_status = "warning"
+            edge_oper = "unknown"
+
+        conn.execute(
+            """
+            UPDATE topology_nodes
+            SET reachability_status = ?,
+                status = ?,
+                last_seen = ?
+            WHERE id = ?
+            """,
+            (node_reach, node_status, now_ts, resolved_node_id),
+        )
+
+        edges_updated = 0
+        if dev_status in ("DOWN", "UP"):
+            edges = conn.execute(
+                """
+                SELECT * FROM topology_edges
+                WHERE lifecycle_state != 'tombstoned'
+                  AND (source_node_id = ? OR target_node_id = ?)
+                """,
+                (resolved_node_id, resolved_node_id),
+            ).fetchall()
+
+            for edge in edges:
+                conn.execute(
+                    """
+                    UPDATE topology_edges
+                    SET oper_status = ?,
+                        last_seen = ?,
+                        observation_freshness = 'fresh'
+                    WHERE id = ?
+                    """,
+                    (edge_oper, now_ts, edge["id"]),
+                )
+                edges_updated += 1
+
+        return {
+            "success": True,
+            "device_id": resolved_node_id,
+            "device_status": dev_status,
+            "node_reachability": node_reach,
+            "edges_updated": edges_updated,
+        }
+
+    # -----------------------------------------------------------------------
+    # In-Memory 60-Second Stale Observation Decayer
+    # -----------------------------------------------------------------------
+
+    def decay_stale_observations(
+        self,
+        now: Optional[float] = None,
+        stale_threshold_sec: Optional[float] = None,
+        conn: Optional[sqlite3.Connection] = None,
+    ) -> int:
+        """
+        Marks operational edge observations as 'stale' when observation freshness threshold expires.
+        Pure in-memory/DB scan:
+        - NEVER tombstones or deletes an edge.
+        - NEVER downgrades physical adjacency.
+        - NEVER invents a link failure (oper_status is untouched).
+        - Avoids unnecessary database writes (only touches fresh edges exceeding threshold).
+        - Accepts injected deterministic 'now' and 'stale_threshold_sec' for testing.
+        """
+        threshold = (
+            float(stale_threshold_sec)
+            if stale_threshold_sec is not None
+            else float(self._stale_threshold_sec)
+        )
+        current_ts = float(now) if now is not None else time.time()
+
+        def _execute(c: sqlite3.Connection) -> int:
+            cur = c.execute(
+                """
+                UPDATE topology_edges
+                SET observation_freshness = 'stale'
+                WHERE lifecycle_state != 'tombstoned'
+                  AND observation_freshness = 'fresh'
+                  AND verification_status != 'manual'
+                  AND (? - last_seen) > ?
+                """,
+                (current_ts, threshold),
+            )
+            count = cur.rowcount
+            if count > 0:
+                logger.info(
+                    "Topology Stale Decayer: marked %d edge(s) as 'stale' (age > %.1fs).",
+                    count, threshold,
+                )
+            return count
+
+        if conn is not None:
+            return _execute(conn)
+        with self._lock, closing(self._get_connection()) as auto_conn:
+            res = _execute(auto_conn)
+            auto_conn.commit()
+            return res
+
+    async def _decayer_loop(self) -> None:
+        logger.info(
+            "Topology Stale Decayer ticker started (interval=%.1fs, threshold=%.1fs).",
+            self._decayer_interval_sec,
+            self._stale_threshold_sec,
+        )
+        try:
+            while not self._decayer_stop_event.is_set():
+                start_mono = time.monotonic()
+                try:
+                    self.decay_stale_observations()
+                except Exception as exc:
+                    logger.error("Error during stale observation decay cycle: %s", exc)
+
+                elapsed_mono = time.monotonic() - start_mono
+                sleep_time = max(0.5, self._decayer_interval_sec - elapsed_mono)
+                try:
+                    await asyncio.wait_for(
+                        self._decayer_stop_event.wait(),
+                        timeout=sleep_time,
+                    )
+                    break
+                except asyncio.TimeoutError:
+                    pass
+        except asyncio.CancelledError:
+            pass
+        finally:
+            with self._decayer_lock:
+                self._decayer_task = None
+            logger.info("Topology Stale Decayer ticker stopped.")
+
+    def start_decayer(
+        self,
+        interval_sec: float = 60.0,
+        stale_threshold_sec: float = 60.0,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+    ) -> bool:
+        """Starts the in-memory Stale Observation Decayer ticker. Idempotent."""
+        with self._decayer_lock:
+            if self._decayer_task is not None and not self._decayer_task.done():
+                return True
+
+            self._decayer_interval_sec = float(interval_sec)
+            self._stale_threshold_sec = float(stale_threshold_sec)
+            self._decayer_stop_event.clear()
+
+            try:
+                target_loop = loop
+                if target_loop is None:
+                    try:
+                        target_loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        target_loop = asyncio.get_event_loop()
+                self._decayer_task = target_loop.create_task(self._decayer_loop())
+                return True
+            except Exception as exc:
+                logger.error("Failed to start Topology Stale Decayer task: %s", exc)
+                return False
+
+    def stop_decayer(self) -> bool:
+        """Stops the in-memory Stale Observation Decayer ticker cleanly. Idempotent."""
+        with self._decayer_lock:
+            if self._decayer_task is None and self._decayer_stop_event.is_set():
+                return False
+            self._decayer_stop_event.set()
+            task = self._decayer_task
+            self._decayer_task = None
+
+        if task and not task.done():
+            task.cancel()
+        return True
+
+    def is_decayer_running(self) -> bool:
+        with self._decayer_lock:
+            return self._decayer_task is not None and not self._decayer_task.done()
+
+    # -----------------------------------------------------------------------
+    # EventBus Subscriber Registration Lifecycle
+    # -----------------------------------------------------------------------
+
+    def register_nms_subscriber(self, bus: Optional[EventBus] = None) -> bool:
+        """
+        Registers handle_nms_event as subscriber on the EventBus.
+        Idempotent: guarantees handle_nms_event is registered exactly once per process.
+        """
+        with self._subscriber_lock:
+            if self._subscriber_token is not None:
+                return True
+
+            target_bus = bus or event_bus
+            self._target_bus = target_bus
+
+            def _nms_callback(event: Event) -> None:
+                try:
+                    self.handle_nms_event(event)
+                except Exception as exc:
+                    logger.error("TopologyEngine handle_nms_event unhandled error: %s", exc, exc_info=True)
+
+            token = target_bus.subscribe(
+                EventNames.NMS_INTERFACE_STATUS_CHANGED,
+                _nms_callback,
+            )
+            dev_token = target_bus.subscribe(
+                EventNames.NMS_DEVICE_STATUS,
+                _nms_callback,
+            )
+            obs_token = target_bus.subscribe(
+                EventNames.NMS_INTERFACE_OBSERVED,
+                _nms_callback,
+            )
+            self._subscriber_token = token
+            self._dev_subscriber_token = dev_token
+            self._obs_subscriber_token = obs_token
+            logger.info("TopologyEngine registered NMS subscriber (tokens: %s, %s, %s)", token, dev_token, obs_token)
+            return True
+
+    def unregister_nms_subscriber(self) -> bool:
+        """Unregisters the NMS event subscriber from EventBus. Idempotent."""
+        with self._subscriber_lock:
+            if self._subscriber_token is None and self._dev_subscriber_token is None and self._obs_subscriber_token is None:
+                return False
+
+            bus = self._target_bus or event_bus
+            if self._subscriber_token:
+                bus.unsubscribe(EventNames.NMS_INTERFACE_STATUS_CHANGED, self._subscriber_token)
+                self._subscriber_token = None
+            if self._dev_subscriber_token:
+                bus.unsubscribe(EventNames.NMS_DEVICE_STATUS, self._dev_subscriber_token)
+                self._dev_subscriber_token = None
+            if self._obs_subscriber_token:
+                bus.unsubscribe(EventNames.NMS_INTERFACE_OBSERVED, self._obs_subscriber_token)
+                self._obs_subscriber_token = None
+            logger.info("TopologyEngine unregistered NMS subscribers.")
+            return True
+
+    def is_subscriber_registered(self) -> bool:
+        with self._subscriber_lock:
+            return self._subscriber_token is not None
+
+    def start_nms_sync(
+        self,
+        interval_sec: float = 60.0,
+        stale_threshold_sec: float = 60.0,
+        bus: Optional[EventBus] = None,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+    ) -> bool:
+        """Starts both EventBus subscription and Stale Decayer. Idempotent."""
+        sub_ok = self.register_nms_subscriber(bus=bus)
+        dec_ok = self.start_decayer(interval_sec=interval_sec, stale_threshold_sec=stale_threshold_sec, loop=loop)
+        return sub_ok and dec_ok
+
+    def stop_nms_sync(self) -> bool:
+        """Stops both EventBus subscription and Stale Decayer. Idempotent."""
+        sub_ok = self.unregister_nms_subscriber()
+        dec_ok = self.stop_decayer()
+        return sub_ok or dec_ok
 
 # Singleton accessor
 _engine_instance: Optional[TopologyEngine] = None

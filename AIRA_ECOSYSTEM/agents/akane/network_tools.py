@@ -216,3 +216,28 @@ def audit_network_firewall(device_name: str) -> dict:
 def audit_network_vlan(device_name: str) -> dict:
     """Mengaudit konfigurasi bridge VLAN filtering dan penetapan PVID port."""
     return get_network_mcp_client().call_tool("mikrotik_audit_vlan", {"device_name": device_name})
+
+
+def auto_diagnose_network(
+    device_name: Optional[str] = None,
+    symptom: Optional[str] = None,
+    target_ip: Optional[str] = None,
+    target_devices: Optional[list[str]] = None,
+    routing_table: str = "main",
+    require_dio_validation: bool = False,
+) -> dict:
+    """Menjalankan investigasi multi-router, korelasi routing & topologi, analisis dependensi rekursif, riwayat rute, perankingan akar masalah, dan rekomendasi verifikasi aman (100% Read-Only)."""
+    try:
+        from core.network_intelligence.auto_orchestrator import get_auto_orchestrator
+        resolved_targets = target_devices if target_devices else ([device_name] if device_name else None)
+        orchestrator = get_auto_orchestrator()
+        return orchestrator.execute_auto_diagnosis(
+            target_devices=resolved_targets,
+            symptom=symptom,
+            target_ip=target_ip,
+            auto_plan=True,
+            routing_table=routing_table or "main",
+            require_dio_validation=require_dio_validation,
+        )
+    except Exception as exc:
+        return {"success": False, "error": f"Auto diagnosis gagal: {exc}"}

@@ -267,26 +267,33 @@ class EvidenceCollector:
     def _normalize_observation(self, obs_type: str, raw_text: str, ros_major: int) -> Dict[str, Any]:
         """Dispatches raw output to typed deterministic normalizers."""
         if obs_type == "routes":
-            from agents.akane.reasoning_engine import parse_routeros_routes
-            parsed = parse_routeros_routes(raw_text)
+            from core.routing.unified_route_parser import UnifiedRouteParser
+            parser = UnifiedRouteParser()
+            parsed, report = parser.parse_with_report(raw_text, ros_version=ros_major)
+            tables_seen: List[str] = []
+            for r in parsed:
+                tbl = r.routing_table or "main"
+                if tbl not in tables_seen:
+                    tables_seen.append(tbl)
             return {
                 "count": len(parsed),
+                "active_count": report.active_count,
+                "parser_version": "4.6.0",
+                "parse_status": report.status,
+                "is_partial": report.is_partial,
+                "routing_tables": tables_seen or (["main"] if parsed else []),
                 "routes": [
                     {
-                        "dst_address": r.dst_address,
-                        "gateway": r.gateway,
-                        "distance": r.distance,
-                        "active": r.active,
-                        "dynamic": r.dynamic,
-                        "connect": r.connect,
-                        "static": r.static,
-                        "prefix_len": r.prefix_len,
-                        "raw_flags": r.raw_flags,
+                        **r.to_dict(),
+                        "dst_address": r.dst_prefix,
                     }
                     for r in parsed
                 ],
-                "has_default_route": any(r.dst_address == "0.0.0.0/0" for r in parsed),
-                "has_active_default_route": any(r.dst_address == "0.0.0.0/0" and r.active for r in parsed),
+                "has_default_route": any(r.dst_prefix == "0.0.0.0/0" for r in parsed),
+                "has_active_default_route": any(
+                    r.dst_prefix == "0.0.0.0/0" and r.active and not r.disabled and not r.unreachable
+                    for r in parsed
+                ),
             }
 
         elif obs_type == "ip_addresses":

@@ -1,0 +1,2 @@
+0 A S  dst-address=192.168.1.5 gateway=10.0.0.1 distance=1
+1 A S  dst-address=10.0.0.0/8 gateway=10.0.0.2 distance=1

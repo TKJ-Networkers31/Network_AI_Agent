@@ -255,3 +255,27 @@ async def wizard_verify_and_save(body: WizardVerifyIn, _auth=Depends(require_top
         version=body.version,
     )
     return res
+
+
+# ---------------------------------------------------------------------------
+# Multi-Tier Time-Series Metrics Query (WP 5.4)
+# ---------------------------------------------------------------------------
+@router.get("/metrics/query")
+def query_time_series_metrics(
+    device_id: str = Query(..., description="Device identifier"),
+    metric_name: str = Query(..., description="Canonical metric taxonomy name"),
+    interface_name: Optional[str] = Query(None, description="Optional interface name"),
+    start_time: Optional[float] = Query(None, description="Query start epoch timestamp"),
+    end_time: Optional[float] = Query(None, description="Query end epoch timestamp"),
+    step: Optional[str] = Query(None, description="Resolution override: raw, 5m, or 1h"),
+):
+    from core.nms.metrics_store import query_metrics
+    result = query_metrics(
+        device_id=device_id,
+        metric_name=metric_name,
+        interface_name=interface_name,
+        start_time=start_time,
+        end_time=end_time,
+        step=step,
+    )
+    return {"success": True, **result}

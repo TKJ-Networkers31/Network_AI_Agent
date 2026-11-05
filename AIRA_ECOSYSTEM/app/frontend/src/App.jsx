@@ -50,6 +50,10 @@ const DevicesPage = lazyWithRetry(() => import("./pages/DevicesPage.jsx"));
 const TopologyPage = lazyWithRetry(() => import("./pages/TopologyPage.jsx"));
 const NmsPage = lazyWithRetry(() => import("./pages/NmsPage.jsx"));
 const NetworkIntelligencePage = lazyWithRetry(() => import("./pages/NetworkIntelligencePage.jsx"));
+const OperationsPage = lazyWithRetry(() => import("./pages/OperationsPage.jsx"));
+const GatewaysPage = lazyWithRetry(() => import("./pages/GatewaysPage.jsx"));
+const DecisionsPage = lazyWithRetry(() => import("./pages/DecisionsPage.jsx"));
+const CustomerPortalPage = lazyWithRetry(() => import("./pages/CustomerPortalPage.jsx"));
 const AkaneWorkspace = lazyWithRetry(() => import("./pages/AkaneWorkspace.jsx"));
 const ModelsPage = lazyWithRetry(() => import("./pages/ModelsPage.jsx"));
 const PersonaPage = lazyWithRetry(() => import("./pages/PersonaPage.jsx"));
@@ -62,6 +66,10 @@ const PAGES = {
   workspace: WorkspacePage,
   topology: TopologyPage,
   nms: NmsPage,
+  operations: OperationsPage,
+  gateways: GatewaysPage,
+  decisions: DecisionsPage,
+  portal: CustomerPortalPage,
   devices: DevicesPage,
   intelligence: NetworkIntelligencePage,
   akane: AkaneWorkspace,
@@ -73,7 +81,7 @@ const PAGES = {
 };
 
 // Halaman yang mengatur scroll-nya sendiri di dalam (butuh tinggi tetap).
-const FIXED_HEIGHT_PAGES = new Set(["chat", "workspace", "logs", "topology", "nms"]);
+const FIXED_HEIGHT_PAGES = new Set(["chat", "workspace", "logs", "topology", "nms", "operations", "gateways"]);
 
 const SIDEBAR_KEY = "aira_sidebar_collapsed";
 

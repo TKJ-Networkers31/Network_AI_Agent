@@ -1,0 +1,86 @@
+{
+  "setup_duration_sec": 0.996,
+  "decision_synthesis": {
+    "tenants_10": {
+      "duration_sec": 0.311,
+      "avg_ms_per_decision": 31.06,
+      "throughput_per_sec": 32.2
+    },
+    "tenants_25": {
+      "duration_sec": 0.845,
+      "avg_ms_per_decision": 33.79,
+      "throughput_per_sec": 29.6
+    },
+    "tenants_50": {
+      "duration_sec": 1.552,
+      "avg_ms_per_decision": 31.04,
+      "throughput_per_sec": 32.2
+    }
+  },
+  "health_scoring": {
+    "tenants_10": {
+      "evaluations_count": 60,
+      "duration_sec": 1.424,
+      "avg_ms_per_eval": 23.73,
+      "throughput_per_sec": 42.1
+    },
+    "tenants_25": {
+      "evaluations_count": 150,
+      "duration_sec": 3.843,
+      "avg_ms_per_eval": 25.62,
+      "throughput_per_sec": 39.0
+    },
+    "tenants_50": {
+      "evaluations_count": 300,
+      "duration_sec": 7.932,
+      "avg_ms_per_eval": 26.44,
+      "throughput_per_sec": 37.8
+    }
+  },
+  "virtual_simulation": {
+    "scenarios_10": {
+      "duration_sec": 0.05,
+      "avg_ms_per_simulation": 4.98,
+      "throughput_per_sec": 200.7
+    },
+    "scenarios_25": {
+      "duration_sec": 0.147,
+      "avg_ms_per_simulation": 5.9,
+      "throughput_per_sec": 169.6
+    },
+    "scenarios_50": {
+      "duration_sec": 0.357,
+      "avg_ms_per_simulation": 7.14,
+      "throughput_per_sec": 140.0
+    }
+  },
+  "sla_reporting": {
+    "tenants_10": {
+      "duration_sec": 0.233,
+      "avg_ms_per_report": 23.35,
+      "throughput_per_sec": 42.8
+    },
+    "tenants_25": {
+      "duration_sec": 0.549,
+      "avg_ms_per_report": 21.95,
+      "throughput_per_sec": 45.6
+    },
+    "tenants_50": {
+      "duration_sec": 1.215,
+      "avg_ms_per_report": 24.31,
+      "throughput_per_sec": 41.1
+    }
+  },
+  "incident_orchestration": {
+    "total_alerts": 500,
+    "created_incidents": 275,
+    "deduplicated_alerts": 225,
+    "duration_sec": 11.037,
+    "throughput_alerts_per_sec": 45.3,
+    "deduplication_ratio_percent": 45.0
+  },
+  "resources": {
+    "peak_ram_mb": 0.23,
+    "sqlite_db_size_kb": 1476.0
+  }
+}

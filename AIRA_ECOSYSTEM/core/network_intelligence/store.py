@@ -117,6 +117,23 @@ CREATE TABLE IF NOT EXISTS configuration_plans (
 );
 CREATE INDEX IF NOT EXISTS idx_plans_incident ON configuration_plans(incident_id);
 CREATE INDEX IF NOT EXISTS idx_plans_status ON configuration_plans(plan_status);
+
+CREATE TABLE IF NOT EXISTS intelligence_investigations (
+    investigation_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    question TEXT NOT NULL,
+    intent TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'COMPLETED',
+    plan_json TEXT NOT NULL DEFAULT '{}',
+    rca_json TEXT,
+    explanation_json TEXT,
+    health_json TEXT,
+    path_json TEXT,
+    duration_sec REAL NOT NULL DEFAULT 0.0,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_intel_inv_session ON intelligence_investigations(session_id);
+CREATE INDEX IF NOT EXISTS idx_intel_inv_created ON intelligence_investigations(created_at);
 """
 
 
@@ -501,6 +518,112 @@ class NetworkIntelligenceStore:
             created_at=float(row["created_at"]),
             updated_at=float(row["updated_at"]),
         )
+
+    # -----------------------------------------------------------------------
+    # Intelligence Investigations (WP 6.10, 6.12, 6.15)
+    # -----------------------------------------------------------------------
+
+    def save_intelligence_investigation(
+        self,
+        investigation_id: str,
+        session_id: str,
+        question: str,
+        intent: str,
+        status: str,
+        plan_dict: Dict[str, Any],
+        rca_dict: Optional[Dict[str, Any]] = None,
+        explanation_dict: Optional[Dict[str, Any]] = None,
+        health_dict: Optional[Dict[str, Any]] = None,
+        path_dict: Optional[Dict[str, Any]] = None,
+        duration_sec: float = 0.0,
+        created_at: Optional[float] = None,
+    ) -> None:
+        c_at = float(created_at) if created_at is not None else time.time()
+        with self._lock, closing(self._connect()) as conn:
+            conn.execute(
+                """
+                INSERT INTO intelligence_investigations (
+                    investigation_id, session_id, question, intent, status,
+                    plan_json, rca_json, explanation_json, health_json, path_json,
+                    duration_sec, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(investigation_id) DO UPDATE SET
+                    status = excluded.status,
+                    plan_json = excluded.plan_json,
+                    rca_json = excluded.rca_json,
+                    explanation_json = excluded.explanation_json,
+                    health_json = excluded.health_json,
+                    path_json = excluded.path_json,
+                    duration_sec = excluded.duration_sec
+                """,
+                (
+                    investigation_id,
+                    session_id,
+                    question,
+                    intent,
+                    status,
+                    json.dumps(plan_dict),
+                    json.dumps(rca_dict) if rca_dict else None,
+                    json.dumps(explanation_dict) if explanation_dict else None,
+                    json.dumps(health_dict) if health_dict else None,
+                    json.dumps(path_dict) if path_dict else None,
+                    float(duration_sec),
+                    c_at,
+                ),
+            )
+            conn.commit()
+
+    def get_intelligence_investigation(self, investigation_id: str) -> Optional[Dict[str, Any]]:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM intelligence_investigations WHERE investigation_id = ?",
+                (investigation_id,),
+            ).fetchone()
+            if not row:
+                return None
+            return {
+                "investigation_id": row["investigation_id"],
+                "session_id": row["session_id"],
+                "question": row["question"],
+                "intent": row["intent"],
+                "status": row["status"],
+                "plan": json.loads(row["plan_json"] or "{}"),
+                "rca": json.loads(row["rca_json"]) if row["rca_json"] else None,
+                "explanation": json.loads(row["explanation_json"]) if row["explanation_json"] else None,
+                "health": json.loads(row["health_json"]) if row["health_json"] else None,
+                "path": json.loads(row["path_json"]) if row["path_json"] else None,
+                "duration_sec": float(row["duration_sec"]),
+                "created_at": float(row["created_at"]),
+            }
+
+    def list_intelligence_investigations(
+        self,
+        session_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        with closing(self._connect()) as conn:
+            if session_id:
+                rows = conn.execute(
+                    "SELECT * FROM intelligence_investigations WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+                    (session_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM intelligence_investigations ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            out = []
+            for r in rows:
+                out.append({
+                    "investigation_id": r["investigation_id"],
+                    "session_id": r["session_id"],
+                    "question": r["question"],
+                    "intent": r["intent"],
+                    "status": r["status"],
+                    "duration_sec": float(r["duration_sec"]),
+                    "created_at": float(r["created_at"]),
+                })
+            return out
 
 
 _store_singleton: Optional[NetworkIntelligenceStore] = None

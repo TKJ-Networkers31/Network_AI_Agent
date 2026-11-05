@@ -36,6 +36,7 @@ export function useVoice({ onTranscript, notify } = {}) {
   const [errorMessage, setErrorMessage] = useState("");
 
   const recognitionRef = useRef(null);
+  const micClaimedRef = useRef(false);
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
 
@@ -46,6 +47,8 @@ export function useVoice({ onTranscript, notify } = {}) {
   // Arbitrase Mikrofon: Handoff ke Background Service & Companion
   // -------------------------------------------------------------
   const claimMic = useCallback(() => {
+    if (micClaimedRef.current) return;
+    micClaimedRef.current = true;
     if (typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent("aira:mic-claimed", { detail: { source: "chat_speech" } })
@@ -59,6 +62,8 @@ export function useVoice({ onTranscript, notify } = {}) {
   }, []);
 
   const releaseMic = useCallback(() => {
+    if (!micClaimedRef.current) return;
+    micClaimedRef.current = false;
     if (typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent("aira:mic-released", { detail: { source: "chat_speech" } })

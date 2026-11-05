@@ -5,8 +5,19 @@ for AIRA Network Management System & Live Topology Monitoring (NMS).
 
 from __future__ import annotations
 
+from enum import Enum
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+# ---------------------------------------------------------------------------
+# NMS Scheduler State Machine
+# ---------------------------------------------------------------------------
+class NmsSchedulerState(str, Enum):
+    STOPPED = "STOPPED"
+    STARTING = "STARTING"
+    RUNNING = "RUNNING"
+    STOPPING = "STOPPING"
+    FAILED = "FAILED"
 
 # ---------------------------------------------------------------------------
 # NMS Status Values (State Machine)

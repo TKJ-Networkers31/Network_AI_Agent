@@ -13,6 +13,7 @@ Maintains 100% backward compatibility with existing endpoints while adding:
 from __future__ import annotations
 
 import hmac
+import json
 import logging
 import os
 import socket
@@ -646,7 +647,10 @@ def add_link(body: LinkIn, _actor: str = Depends(require_topology_admin)):
 @router.delete("/links")
 def delete_link(link_id: str = Query(..., min_length=1), _actor: str = Depends(require_topology_admin)):
     """Menghapus link/kabel tertentu antara dua perangkat."""
-    ok = get_topology_engine().delete_link(link_id)
+    engine = get_topology_engine()
+    ok = engine.delete_link(link_id, actor=_actor, reason="Administrative link deletion")
+    if not ok:
+        ok = engine.delete_edge(link_id, soft_delete=True, actor=_actor, reason="Administrative link deletion")
     if not ok:
         raise HTTPException(status_code=404, detail="Link tidak ditemukan.")
     return {"success": True, "link_id": link_id}
@@ -852,3 +856,590 @@ def seed_demo_topology(_actor: str = Depends(require_topology_admin)):
         engine.upsert_link(**l)
 
     return {"success": True, "message": "Demo topology V2 berhasil di-generate.", "nodes": len(demo_nodes), "links": len(demo_links)}
+
+# ---------------------------------------------------------------------------
+# Phase 4.2 / 4.5: Multi-Layer Edges & Evidence Inspector Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/edges")
+def list_topology_edges(
+    source_node_id: Optional[str] = Query(default=None),
+    target_node_id: Optional[str] = Query(default=None),
+    relationship_class: Optional[str] = Query(default=None),
+    lifecycle_state: Optional[str] = Query(default=None),
+):
+    """Lists normalized multi-layer topology edges."""
+    engine = get_topology_engine()
+    edges = engine.list_edges(
+        source_node_id=source_node_id,
+        target_node_id=target_node_id,
+        relationship_class=relationship_class,
+        lifecycle_state=lifecycle_state,
+    )
+    return {"success": True, "edges": [e.to_dict() for e in edges], "total": len(edges)}
+
+
+@router.get("/edges/{edge_id}")
+def get_topology_edge(edge_id: str):
+    """Retrieves a single normalized topology edge."""
+    engine = get_topology_engine()
+    edge = engine.get_edge(edge_id)
+    if not edge:
+        raise HTTPException(status_code=404, detail=f"Edge '{edge_id}' tidak ditemukan.")
+    return {"success": True, "edge": edge.to_dict()}
+
+
+@router.get("/edges/{edge_id}/evidence")
+def get_edge_evidence(edge_id: str, active_only: bool = Query(default=True)):
+    """Retrieves first-class empirical evidence records for a topology edge."""
+    engine = get_topology_engine()
+    edge = engine.get_edge(edge_id)
+    if not edge:
+        raise HTTPException(status_code=404, detail=f"Edge '{edge_id}' tidak ditemukan.")
+    evidence_list = engine.get_edge_evidence(edge_id=edge_id, active_only=active_only)
+    return {
+        "success": True,
+        "edge_id": edge_id,
+        "evidence": [ev.to_dict() for ev in evidence_list],
+        "total": len(evidence_list),
+    }
+
+
+@router.delete("/edges/{edge_id}")
+def delete_topology_edge(edge_id: str, _actor: str = Depends(require_topology_admin)):
+    """Deletes or tombstones a normalized topology edge with auditable change tracking."""
+    engine = get_topology_engine()
+    ok = engine.delete_edge(edge_id, soft_delete=True, actor=_actor, reason="Administrative edge deletion")
+    if not ok:
+        ok = engine.delete_link(edge_id, actor=_actor, reason="Administrative link deletion")
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Edge '{edge_id}' tidak ditemukan.")
+    return {"success": True, "edge_id": edge_id}
+
+# ---------------------------------------------------------------------------
+# Phase 4.4B: Historical Topology & Semantic Change Detection Endpoints
+# ---------------------------------------------------------------------------
+
+
+class CreateSnapshotIn(BaseModel):
+    description: str = Field(default="", max_length=256)
+    trigger_type: str = Field(default="manual", max_length=64)
+
+
+@router.get("/snapshots")
+def list_snapshots(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    trigger_type: Optional[str] = Query(default=None),
+    include_graph: bool = Query(default=False),
+):
+    """
+    Lists historical topology snapshots ordered newest first with pagination.
+    Omit graph_json by default to preserve network bandwidth.
+    """
+    engine = get_topology_engine()
+    snaps = engine.list_snapshots(limit=limit, offset=offset, trigger_type=trigger_type)
+    total = engine.count_snapshots(trigger_type=trigger_type)
+
+    items = []
+    for s in snaps:
+        d = s.to_dict()
+        if not include_graph:
+            d.pop("graph_json", None)
+        completeness = d.get("metadata", {}).get("completeness", {})
+        d["is_complete"] = completeness.get("is_complete", True)
+        d["discovery_status"] = completeness.get("discovery_status", "complete" if d["is_complete"] else "partial")
+        items.append(d)
+
+    return {
+        "success": True,
+        "snapshots": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/snapshots/compare")
+def compare_topology_snapshots(
+    base_id: str = Query(..., description="Base / earlier snapshot ID"),
+    target_id: str = Query(..., description="Target / later snapshot ID"),
+):
+    """
+    Phase 4.4B Semantic Snapshot Diff Comparison.
+    Computes structural, operational, evidence, and freshness differences
+    between two point-in-time immutable topology snapshots with epistemic
+    safeguards protecting unverified devices and ambiguous links.
+    """
+    engine = get_topology_engine()
+    base = engine.get_snapshot(base_id)
+    if not base:
+        raise HTTPException(status_code=404, detail=f"Base snapshot '{base_id}' tidak ditemukan.")
+    target = engine.get_snapshot(target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Target snapshot '{target_id}' tidak ditemukan.")
+
+    diff = engine.compare_snapshots(base_id, target_id)
+    return {
+        "success": True,
+        "diff": diff.to_dict(),
+    }
+
+
+@router.get("/snapshots/{snapshot_id}")
+def get_topology_snapshot(
+    snapshot_id: str,
+    include_graph: bool = Query(default=True),
+):
+    """Retrieves an immutable point-in-time snapshot with metadata and full graph."""
+    engine = get_topology_engine()
+    snap = engine.get_snapshot(snapshot_id)
+    if not snap:
+        raise HTTPException(status_code=404, detail=f"Snapshot '{snapshot_id}' tidak ditemukan.")
+
+    res = snap.to_dict()
+    if include_graph and snap.graph_json:
+        try:
+            res["graph"] = json.loads(snap.graph_json)
+        except Exception:
+            res["graph"] = {}
+    elif not include_graph:
+        res.pop("graph_json", None)
+
+    res["integrity_verified"] = snap.verify_integrity()
+    return {"success": True, "snapshot": res}
+
+
+@router.post("/snapshots")
+def create_topology_snapshot(
+    payload: CreateSnapshotIn,
+    request: Request,
+    actor: str = Depends(require_topology_admin),
+):
+    """
+    Creates an explicit point-in-time immutable snapshot of current topology state.
+    Protected by administrative authorization.
+    """
+    engine = get_topology_engine()
+    description = (payload.description or "").strip()
+    if not description:
+        description = f"Manual snapshot captured by {actor}"
+    snap = engine.create_snapshot(
+        trigger_type=payload.trigger_type or "manual",
+        description=description,
+    )
+    return {
+        "success": True,
+        "message": f"Snapshot {snap.snapshot_id} berhasil dibuat.",
+        "snapshot": snap.to_dict(),
+    }
+
+
+@router.get("/snapshots/{snapshot_id}/verify")
+def verify_snapshot_integrity(snapshot_id: str):
+    """
+    Cryptographically verifies SHA-256 integrity of a snapshot record.
+    Distinguishes verified vs compromised states.
+    """
+    engine = get_topology_engine()
+    snap = engine.get_snapshot(snapshot_id)
+    if not snap:
+        raise HTTPException(status_code=404, detail=f"Snapshot '{snapshot_id}' tidak ditemukan.")
+
+    computed = snap.calculate_checksum()
+    verified = (computed == snap.sha256_hash)
+    return {
+        "success": True,
+        "snapshot_id": snapshot_id,
+        "verified": verified,
+        "sha256_hash": snap.sha256_hash,
+        "computed_hash": computed,
+        "integrity_status": "verified" if verified else "compromised",
+    }
+
+
+@router.get("/changes")
+def list_topology_changes(
+    snapshot_id: Optional[str] = Query(default=None),
+    entity_id: Optional[str] = Query(default=None),
+    change_type: Optional[str] = Query(default=None),
+    start_time: Optional[float] = Query(default=None),
+    end_time: Optional[float] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    """
+    Lists chronological topology changes with optional filters by snapshot,
+    entity, change category, and time range.
+    """
+    engine = get_topology_engine()
+    changes = engine.list_changes(
+        snapshot_id=snapshot_id,
+        entity_id=entity_id,
+        change_type=change_type,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+        offset=offset,
+    )
+    total = engine.count_changes(
+        snapshot_id=snapshot_id,
+        entity_id=entity_id,
+        change_type=change_type,
+        start_time=start_time,
+        end_time=end_time,
+    )
+
+    parsed_changes = []
+    for c in changes:
+        cd = c.to_dict()
+        try:
+            cd["before_value"] = json.loads(c.before_value_json) if c.before_value_json else None
+        except Exception:
+            cd["before_value"] = c.before_value_json
+        try:
+            cd["after_value"] = json.loads(c.after_value_json) if c.after_value_json else None
+        except Exception:
+            cd["after_value"] = c.after_value_json
+        parsed_changes.append(cd)
+
+    return {
+        "success": True,
+        "changes": parsed_changes,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/changes/{change_id}")
+def get_topology_change(change_id: int):
+    """
+    Retrieves full details of a single topology delta change record,
+    including before/after state and related evidence references.
+    """
+    engine = get_topology_engine()
+    chg = engine.get_change(change_id)
+    if not chg:
+        raise HTTPException(status_code=404, detail=f"Change #{change_id} tidak ditemukan.")
+
+    chg_dict = chg.to_dict()
+    try:
+        chg_dict["before_value"] = json.loads(chg.before_value_json) if chg.before_value_json else None
+    except Exception:
+        chg_dict["before_value"] = chg.before_value_json
+    try:
+        chg_dict["after_value"] = json.loads(chg.after_value_json) if chg.after_value_json else None
+    except Exception:
+        chg_dict["after_value"] = chg.after_value_json
+
+    # Attach related evidence references if entity is an edge
+    related_evidence = []
+    edge = engine.get_edge(chg.entity_id)
+    if edge:
+        ev_list = engine.get_edge_evidence(edge_id=edge.id, active_only=False)
+        related_evidence = [ev.to_dict() for ev in ev_list]
+
+    # If edge was hard-deleted or evidence is stored in historical snapshot graph
+    if not related_evidence and chg.snapshot_id:
+        snap = engine.get_snapshot(chg.snapshot_id)
+        if snap and snap.graph_json:
+            try:
+                snap_graph = json.loads(snap.graph_json) if isinstance(snap.graph_json, str) else snap.graph_json
+                for ev in snap_graph.get("evidence", []):
+                    if ev.get("edge_id") == chg.entity_id or str(ev.get("id")) == str(chg.entity_id):
+                        related_evidence.append(ev)
+            except Exception:
+                pass
+
+    chg_dict["related_evidence"] = related_evidence
+
+    return {
+        "success": True,
+        "change": chg_dict,
+    }
+
+
+# ---------------------------------------------------------------------------
+# WP 4.6.4: Historical Route Analytics & Immutable Route Snapshots Endpoints
+# ---------------------------------------------------------------------------
+
+
+class CreateRouteSnapshotIn(BaseModel):
+    device_ids: Optional[List[str]] = Field(default=None)
+    description: str = Field(default="", max_length=256)
+    trigger_type: str = Field(default="manual", max_length=64)
+    topology_snapshot_id: Optional[str] = Field(default=None, max_length=128)
+    collect_if_missing: bool = Field(default=False)
+    deduplicate_by_evidence_id: bool = Field(default=False)
+
+
+@router.get("/route-snapshots")
+def list_route_snapshots_endpoint(
+    device_id: Optional[str] = Query(default=None, max_length=128),
+    batch_id: Optional[str] = Query(default=None, max_length=128),
+    trigger_type: Optional[str] = Query(default=None, max_length=64),
+    completeness: Optional[str] = Query(default=None, max_length=32),
+    include_routes: bool = Query(default=False),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    """Lists immutable historical route snapshots ordered newest first with pagination."""
+    from core.routing.route_history import get_route_history_store
+
+    store = get_route_history_store()
+    snaps, total = store.list_snapshots(
+        device_id=device_id,
+        batch_id=batch_id,
+        trigger_type=trigger_type,
+        completeness=completeness,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "success": True,
+        "snapshots": [s.to_dict(include_routes=include_routes) for s in snaps],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.post("/route-snapshots")
+def create_route_snapshots_endpoint(
+    payload: CreateRouteSnapshotIn,
+    actor: str = Depends(require_topology_admin),
+):
+    """Captures immutable route snapshots for one or multiple registered devices."""
+    from core.canonical_network import get_canonical_registry
+    from core.routing.route_collector import get_route_collector
+    from core.routing.route_history import get_route_history_store
+
+    collector = get_route_collector()
+    registry = get_canonical_registry()
+    store = get_route_history_store()
+
+    if payload.collect_if_missing:
+        collector.collect_multi_device_routes(
+            targets=payload.device_ids,
+            reuse_fresh_sec=60.0,
+        )
+
+    all_cached = collector.list_latest_results()
+    selected = {}
+    if payload.device_ids:
+        for q in payload.device_ids:
+            cdev = registry.resolve_device(q)
+            did = cdev.device_id if cdev else q
+            res = collector.get_latest_result(did)
+            if res is not None:
+                selected[res.device_id] = res
+    else:
+        selected = all_cached
+
+    if not selected:
+        raise HTTPException(
+            status_code=400,
+            detail="Belum ada data tabel rute yang terkumpul untuk disimpan sebagai snapshot.",
+        )
+
+    desc = (payload.description or "").strip() or f"Route snapshot captured by {actor}"
+    summary = store.create_multi_device_snapshots(
+        selected,
+        topology_snapshot_id=payload.topology_snapshot_id,
+        trigger_type=payload.trigger_type or "manual",
+        description=desc,
+        deduplicate_by_evidence_id=payload.deduplicate_by_evidence_id,
+    )
+    return {
+        "success": True,
+        "message": f"{summary['snapshots_count']} route snapshot berhasil disimpan.",
+        **summary,
+    }
+
+
+@router.get("/route-snapshots/compare")
+def compare_route_snapshots_endpoint(
+    base_id: str = Query(..., min_length=1, max_length=128),
+    target_id: str = Query(..., min_length=1, max_length=128),
+):
+    """Compares two immutable route snapshots with incomplete-collection removal suppression."""
+    from core.routing.route_history import get_route_history_store
+
+    store = get_route_history_store()
+    try:
+        diff = store.compare_snapshots(base_id, target_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return {
+        "success": True,
+        "diff": diff.to_dict(),
+    }
+
+
+@router.get("/route-snapshots/analytics")
+def get_route_historical_analytics_endpoint(
+    device_id: Optional[str] = Query(default=None, max_length=128),
+    start_time: Optional[float] = Query(default=None),
+    end_time: Optional[float] = Query(default=None),
+    correlation_window_sec: float = Query(default=120.0, ge=1.0, le=3600.0),
+    limit: int = Query(default=200, ge=1, le=500),
+):
+    """Returns historical route churn, stability, flapping, and temporal correlation analytics."""
+    from core.routing.route_history import get_route_history_store
+
+    store = get_route_history_store()
+    analytics = store.get_historical_analytics(
+        device_id=device_id,
+        start_time=start_time,
+        end_time=end_time,
+        correlation_window_sec=correlation_window_sec,
+        limit=limit,
+    )
+    return {
+        "success": True,
+        "analytics": analytics,
+    }
+
+
+@router.get("/route-snapshots/changes")
+def list_route_changes_endpoint(
+    device_id: Optional[str] = Query(default=None, max_length=128),
+    snapshot_id: Optional[str] = Query(default=None, max_length=128),
+    change_type: Optional[str] = Query(default=None, max_length=64),
+    dst_prefix: Optional[str] = Query(default=None, max_length=64),
+    start_time: Optional[float] = Query(default=None),
+    end_time: Optional[float] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+):
+    """Lists semantic route change records with filters and pagination."""
+    from core.routing.route_history import get_route_history_store
+
+    store = get_route_history_store()
+    changes, total = store.list_changes(
+        device_id=device_id,
+        snapshot_id=snapshot_id,
+        change_type=change_type,
+        dst_prefix=dst_prefix,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "success": True,
+        "changes": [c.to_dict() for c in changes],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/route-snapshots/changes/{change_id}")
+def get_route_change_detail_endpoint(change_id: int):
+    """Retrieves full details of a single route change record."""
+    from core.routing.route_history import get_route_history_store
+
+    store = get_route_history_store()
+    chg = store.get_change(change_id)
+    if chg is None:
+        raise HTTPException(status_code=404, detail=f"Route change #{change_id} tidak ditemukan.")
+    return {
+        "success": True,
+        "change": chg.to_dict(),
+    }
+
+
+@router.get("/route-snapshots/{snapshot_id}")
+def get_route_snapshot_endpoint(
+    snapshot_id: str,
+    include_routes: bool = Query(default=True),
+):
+    """Retrieves an immutable route snapshot with integrity verification."""
+    from core.routing.route_history import get_route_history_store
+
+    store = get_route_history_store()
+    snap = store.get_snapshot(snapshot_id)
+    if snap is None:
+        raise HTTPException(status_code=404, detail=f"Route snapshot '{snapshot_id}' tidak ditemukan.")
+    return {
+        "success": True,
+        "snapshot": snap.to_dict(include_routes=include_routes),
+    }
+
+
+@router.get("/route-snapshots/{snapshot_id}/verify")
+def verify_route_snapshot_endpoint(snapshot_id: str):
+    """Cryptographically verifies SHA-256 integrity of a route snapshot independently of completeness."""
+    from core.routing.route_history import get_route_history_store
+
+    store = get_route_history_store()
+    verification = store.verify_snapshot(snapshot_id)
+    if verification is None:
+        raise HTTPException(status_code=404, detail=f"Route snapshot '{snapshot_id}' tidak ditemukan.")
+    return {
+        "success": True,
+        **verification,
+    }
+
+
+@router.get("/route-overlay")
+def get_topology_route_overlay_endpoint(
+    source_device: Optional[str] = Query(default=None, max_length=128),
+    destination: Optional[str] = Query(default=None, max_length=64),
+    routing_table: str = Query(default="main", max_length=64),
+    source_prefix_for_return: Optional[str] = Query(default=None, max_length=64),
+):
+    """
+    Generates an ephemeral, non-destructive SVG route overlay for TopologyPage
+    and MultiDeviceRouteInspector without mutating persisted physical/L2 edges.
+    """
+    from core.canonical_network import get_canonical_registry
+    from core.routing.cross_device_routing import CrossDeviceRouteIntelligenceEngine
+    from core.routing.route_collector import get_route_collector
+
+    collector = get_route_collector()
+    registry = get_canonical_registry()
+    collections = collector.list_latest_results()
+    registered_devs = registry.list_devices()
+    dev_ips = {d.device_id: list(d.all_ips) for d in registered_devs}
+    reg_ids = [d.device_id for d in registered_devs if d.is_managed]
+
+    src_id = source_device
+    if src_id:
+        csrc = registry.resolve_device(src_id)
+        if csrc:
+            src_id = csrc.device_id
+
+    topo_engine = get_topology_engine()
+    topo = topo_engine.get_topology()
+    topo_edges = topo.get("edges", [])
+    oper_states = {
+        str(n.get("id")): str(n.get("status") or "online")
+        for n in topo.get("nodes", [])
+        if n.get("id")
+    }
+
+    xdev_engine = CrossDeviceRouteIntelligenceEngine()
+    report = xdev_engine.analyze_network_routing(
+        collections,
+        device_ips=dev_ips,
+        topology_edges=topo_edges,
+        device_oper_states=oper_states,
+        registered_device_ids=reg_ids,
+        source_device=src_id,
+        destination=destination,
+        routing_table=routing_table,
+        source_prefix_for_return=source_prefix_for_return,
+    )
+    return {
+        "success": True,
+        "overlay": report.topology_overlay,
+        "inconsistencies": [i.to_dict() for i in report.inconsistencies],
+        "path_evaluation": report.path_evaluation,
+        "incomplete_devices": report.incomplete_devices,
+        "unavailable_devices": report.unavailable_devices,
+    }

@@ -349,6 +349,23 @@ export const api = {
   },
 
   intelligence: {
+    autoDiagnose: (body = {}) =>
+      request("/intelligence/auto-diagnose", { method: "POST", body: JSON.stringify(body) }),
+    cancelAutoDiagnose: (pipelineId) =>
+      request(`/intelligence/auto-diagnose/${encodeURIComponent(pipelineId)}/cancel`, { method: "POST" }),
+    collectRoutes: (body = {}) =>
+      request("/intelligence/routes/collect", { method: "POST", body: JSON.stringify(body) }),
+    getRouteStatus: () => request("/intelligence/routes/status"),
+    analyzeCrossDeviceRoutes: (body = {}) =>
+      request("/intelligence/routes/cross-device", { method: "POST", body: JSON.stringify(body) }),
+    getRouteDependencies: (deviceId = null, routingTable = null) => {
+      const qs = new URLSearchParams();
+      if (deviceId) qs.set("device_id", deviceId);
+      if (routingTable) qs.set("routing_table", routingTable);
+      return request(`/intelligence/routes/dependencies${qs.toString() ? `?${qs.toString()}` : ""}`);
+    },
+    simulateRouteFailure: (body) =>
+      request("/intelligence/routes/failure-impact", { method: "POST", body: JSON.stringify(body) }),
     createIncident: (body) =>
       request("/intelligence/incidents", { method: "POST", body: JSON.stringify(body) }),
     listIncidents: (limit = 50, device = null) =>
@@ -382,5 +399,73 @@ export const api = {
           incidentId ? `&incident_id=${encodeURIComponent(incidentId)}` : ""
         }`
       ),
+    batchCollect: (body) =>
+      request("/intelligence/devices/batch-collect", { method: "POST", body: JSON.stringify(body) }),
+    correlateDevices: (body) =>
+      request("/intelligence/correlation", { method: "POST", body: JSON.stringify(body) }),
+    createMultiDeviceInvestigation: (body) =>
+      request("/intelligence/multi-device-investigation", { method: "POST", body: JSON.stringify(body) }),
+    // Networking VI: Network Intelligence Core (WP 6.14 & WP 6.15)
+    getOverview: () => request("/intelligence/overview"),
+    investigateNL: (body) =>
+      request("/intelligence/investigate", { method: "POST", body: JSON.stringify(body) }),
+    listNLInvestigations: (sessionId = null, limit = 50) => {
+      const qs = new URLSearchParams();
+      if (sessionId) qs.set("session_id", sessionId);
+      qs.set("limit", limit);
+      return request(`/intelligence/investigations?${qs.toString()}`);
+    },
+    getNLInvestigation: (id) =>
+      request(`/intelligence/investigations/${encodeURIComponent(id)}`),
+    cancelNLInvestigation: (id) =>
+      request(`/intelligence/investigations/${encodeURIComponent(id)}/cancel`, { method: "POST" }),
+    getGraph: ({ layer = null, entityType = null, deviceId = null, limit = 200, offset = 0 } = {}) => {
+      const qs = new URLSearchParams();
+      if (layer) qs.set("layer", layer);
+      if (entityType) qs.set("entity_type", entityType);
+      if (deviceId) qs.set("device_id", deviceId);
+      qs.set("limit", limit);
+      qs.set("offset", offset);
+      return request(`/intelligence/graph?${qs.toString()}`);
+    },
+    getPathAnalysis: ({ destinationIp, sourceDeviceId = null, sourceIp = null, routingTable = "main" }) => {
+      const qs = new URLSearchParams();
+      qs.set("destination_ip", destinationIp);
+      if (sourceDeviceId) qs.set("source_device_id", sourceDeviceId);
+      if (sourceIp) qs.set("source_ip", sourceIp);
+      qs.set("routing_table", routingTable);
+      return request(`/intelligence/paths?${qs.toString()}`);
+    },
+    getCorrelations: (windowSec = 300) =>
+      request(`/intelligence/correlations?window_sec=${windowSec}`),
+    getRca: (scope = "network") =>
+      request(`/intelligence/rca?scope=${encodeURIComponent(scope)}`),
+    getAnomalies: ({ severity = null, deviceId = null } = {}) => {
+      const qs = new URLSearchParams();
+      if (severity) qs.set("severity", severity);
+      if (deviceId) qs.set("device_id", deviceId);
+      return request(`/intelligence/anomalies${qs.toString() ? `?${qs.toString()}` : ""}`);
+    },
+    getHealth: () => request("/intelligence/health"),
+    analyzeImpact: (body) =>
+      request("/intelligence/impact", { method: "POST", body: JSON.stringify(body) }),
+    simulateFailure: (body) =>
+      request("/intelligence/simulations", { method: "POST", body: JSON.stringify(body) }),
+    getHistory: ({ olderSnapshotId = null, newerSnapshotId = null } = {}) => {
+      const qs = new URLSearchParams();
+      if (olderSnapshotId) qs.set("older_snapshot_id", olderSnapshotId);
+      if (newerSnapshotId) qs.set("newer_snapshot_id", newerSnapshotId);
+      return request(`/intelligence/history${qs.toString() ? `?${qs.toString()}` : ""}`);
+    },
+    getEvidenceItem: (id) =>
+      request(`/intelligence/evidence/${encodeURIComponent(id)}`),
+    getMetricsHistory: ({ deviceId, interfaceName = null, startTime = null, endTime = null, limit = 500, downsamplePoints = null }) => {
+      let q = `/intelligence/metrics/history?device_id=${encodeURIComponent(deviceId)}&limit=${limit}`;
+      if (interfaceName) q += `&interface_name=${encodeURIComponent(interfaceName)}`;
+      if (startTime) q += `&start_time=${startTime}`;
+      if (endTime) q += `&end_time=${endTime}`;
+      if (downsamplePoints) q += `&downsample_points=${downsamplePoints}`;
+      return request(q);
+    },
   },
 };

@@ -36,7 +36,7 @@ import time
 from typing import Any, Optional
 
 from core.dio import get_dio
-from core.dio.models import InteractionPlan, MissingField, ChoiceOption
+from core.dio.models import InteractionPlan, MissingField, ChoiceOption, InteractionState
 from core.dio.reasoning import select_mode
 from core.dio.constants import MODE_LOCATION_PERMISSION, EVENT_INTERACTION_REQUESTED
 from core.dio.interaction_memory import get_interaction_memory
@@ -171,6 +171,8 @@ def request_structured_input(
             "issues": validation.get("issues", []),
         }
 
+    get_interaction_memory().save(f"dio_state:{schema.id}", InteractionState.FORM_PRESENTED.value)
+
     return {
         "success": True,
         "tool": "request_structured_input",
@@ -247,6 +249,7 @@ def request_location_permission(
         pending,
         ttl_seconds=LOCATION_PENDING_TTL_SECONDS,
     )
+    get_interaction_memory().save(f"dio_state:{request_id}", InteractionState.FORM_PRESENTED.value)
 
     try:
         event_bus.publish(
@@ -324,6 +327,26 @@ def submit_structured_input(
     saved_keys: list[str] = []
 
     memory = get_interaction_memory()
+    state_key = f"dio_state:{schema_id}"
+    curr_state = memory.load(state_key)
+
+    # Idempotent guard to prevent duplicate submission replay
+    if curr_state in (InteractionState.COMPLETED.value, InteractionState.CANCELLED.value):
+        return {
+            "success": True,
+            "schema_id": schema_id,
+            "already_processed": True,
+            "cancelled": curr_state == InteractionState.CANCELLED.value,
+            "state": curr_state,
+            "saved_keys": [],
+            "pending_location": None,
+            "location_result": None,
+        }
+
+    # Transition to SUBMITTED -> VALIDATING
+    memory.save(state_key, InteractionState.SUBMITTED.value)
+    memory.save(state_key, InteractionState.VALIDATING.value)
+
     pending_key = f"{LOCATION_PENDING_KEY_PREFIX}{schema_id}"
     pending = memory.load(pending_key)
 
@@ -348,13 +371,16 @@ def submit_structured_input(
             memory.save(f"{schema_id}:{key}", value)  # namespace per schema
             saved_keys.append(key)
 
+    final_state = InteractionState.CANCELLED.value if cancelled else InteractionState.COMPLETED.value
+    memory.save(state_key, final_state)
+
     event_name = "interaction.cancelled" if cancelled else "interaction.completed"
 
     try:
         event_bus.publish(
             event_name, agent="DIO",
             # HANYA nama field, bukan nilainya.
-            data={"schema_id": schema_id, "action_id": action_id, "keys": list(values.keys())},
+            data={"schema_id": schema_id, "action_id": action_id, "keys": list(values.keys()), "state": final_state},
         )
     except Exception:
         pass
@@ -363,6 +389,7 @@ def submit_structured_input(
         "success": True,
         "schema_id": schema_id,
         "cancelled": cancelled,
+        "state": final_state,
         "saved_keys": saved_keys,
         "pending_location": pending,
         "location_result": location_result,

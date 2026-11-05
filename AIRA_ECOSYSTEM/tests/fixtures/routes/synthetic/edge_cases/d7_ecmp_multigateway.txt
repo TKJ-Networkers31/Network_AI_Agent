@@ -1,0 +1,1 @@
+0 A S  dst-address=0.0.0.0/0 gateway=10.0.0.1,10.0.0.2 distance=1 gateway-status=10.0.0.1 reachable via ether1,10.0.0.2 reachable via ether2

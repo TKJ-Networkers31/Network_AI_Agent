@@ -1,0 +1,1286 @@
+"""
+AIRA OS — Multi-Tenant Core, Identity & Customer Inventory Services (Networking VIII).
+
+Implements business logic, security validation, and database operations for:
+- TenantManager: Tenant lifecycle, subscription tiers, and resource quota enforcement
+- IdentityManager: User creation, password hashing, RBAC permission resolution, session tokens
+- InventoryManager: Customer sites, groups, and network devices with RFC 1918 overlap safety
+- AuditLogger: Immutable security and operational audit trail
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from pathlib import Path
+import re
+import secrets
+import sqlite3
+import time
+from typing import Any, Dict, List, Optional, Set, Tuple
+import uuid
+
+from core.tenant.db import ensure_tenant_schema
+from core.tenant.models import (
+    AuditEntry,
+    CustomerNotificationPreferences,
+    CustomerProfile,
+    DeviceType,
+    Permission,
+    ROLE_PERMISSIONS,
+    SessionStatus,
+    Site,
+    SiteGroup,
+    SubscriptionTier,
+    SupportCategory,
+    SupportPriority,
+    SupportRequest,
+    SupportRequestComment,
+    SupportStatus,
+    Tenant,
+    TenantConfiguration,
+    TenantContext,
+    TenantDevice,
+    TenantResourceQuota,
+    TenantStatus,
+    TenantSubscription,
+    User,
+    UserRole,
+    UserRoleType,
+    UserSession,
+    VALID_SUPPORT_TRANSITIONS,
+)
+from core.topology_db import (
+    DEFAULT_TOPOLOGY_DB_PATH,
+    topology_transaction,
+)
+
+logger = logging.getLogger("aira.tenant.manager")
+
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_\-]{1,63}$")
+
+
+def _hash_password(password: str, salt: str) -> str:
+    """Computes PBKDF2-HMAC-SHA256 with 100,000 iterations."""
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        100_000,
+    ).hex()
+
+
+def _hash_token(token: str) -> str:
+    """SHA-256 hash of a session token for secure database lookup."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+# ===========================================================================
+# 1. TENANT MANAGER (WP 8.1)
+# ===========================================================================
+
+class TenantManager:
+    """Manages multi-tenant lifecycle, subscriptions, and resource quotas."""
+
+    def __init__(self, db_path: Optional[Path] = None) -> None:
+        self.db_path = Path(db_path or DEFAULT_TOPOLOGY_DB_PATH).resolve()
+        ensure_tenant_schema(self.db_path)
+
+    def create_tenant(
+        self,
+        name: str,
+        slug: str,
+        configuration: Optional[TenantConfiguration] = None,
+        tier: str = SubscriptionTier.STANDARD.value,
+        max_sites: Optional[int] = None,
+        max_devices: Optional[int] = None,
+        max_gateways: Optional[int] = None,
+    ) -> Tenant:
+        """Provisions a new customer organization and assigns default resource quotas."""
+        slug_clean = slug.strip().lower()
+        if not _SLUG_RE.match(slug_clean):
+            raise ValueError(f"Invalid slug format: '{slug_clean}'. Must be lowercase alphanumeric with hyphens/underscores.")
+
+        tenant_id = f"tenant_{uuid.uuid4().hex[:12]}"
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        cfg = configuration or TenantConfiguration()
+        config_json = json.dumps(cfg.to_dict())
+
+        # Resource quotas per tier
+        tier_upper = tier.upper().strip()
+        defaults = {
+            SubscriptionTier.COMMUNITY.value: (2, 20, 2),
+            SubscriptionTier.STANDARD.value: (10, 100, 10),
+            SubscriptionTier.ENTERPRISE.value: (50, 500, 50),
+            SubscriptionTier.CUSTOM.value: (100, 1000, 100),
+        }
+        def_sites, def_devs, def_gws = defaults.get(tier_upper, (10, 100, 10))
+        sites_limit = max_sites if max_sites is not None else def_sites
+        devs_limit = max_devices if max_devices is not None else def_devs
+        gws_limit = max_gateways if max_gateways is not None else def_gws
+
+        sub_id = f"sub_{uuid.uuid4().hex[:12]}"
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            # Insert Tenant
+            conn.execute(
+                """
+                INSERT INTO operational_tenants (tenant_id, name, slug, status, config_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (tenant_id, name.strip(), slug_clean, TenantStatus.ACTIVE.value, config_json, now, now),
+            )
+            # Insert Subscription
+            conn.execute(
+                """
+                INSERT INTO operational_tenant_subscriptions 
+                (subscription_id, tenant_id, tier, max_sites, max_devices, max_gateways, is_active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+                """,
+                (sub_id, tenant_id, tier_upper, sites_limit, devs_limit, gws_limit, now),
+            )
+
+        logger.info("Created tenant %s (%s) with tier %s", tenant_id, slug_clean, tier_upper)
+        return Tenant(
+            tenant_id=tenant_id,
+            name=name.strip(),
+            slug=slug_clean,
+            status=TenantStatus.ACTIVE.value,
+            created_at=now,
+            updated_at=now,
+            configuration=cfg,
+        )
+
+    def get_tenant(self, tenant_id: str) -> Optional[Tenant]:
+        """Retrieves tenant record by immutable ID."""
+        with topology_transaction(self.db_path, write=False) as conn:
+            row = conn.execute(
+                "SELECT tenant_id, name, slug, status, config_json, created_at, updated_at FROM operational_tenants WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()
+            if not row:
+                return None
+            cfg_dict = json.loads(row["config_json"] or "{}")
+            return Tenant(
+                tenant_id=row["tenant_id"],
+                name=row["name"],
+                slug=row["slug"],
+                status=row["status"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                configuration=TenantConfiguration.from_dict(cfg_dict),
+            )
+
+    def get_tenant_by_slug(self, slug: str) -> Optional[Tenant]:
+        """Retrieves tenant record by unique human slug."""
+        with topology_transaction(self.db_path, write=False) as conn:
+            row = conn.execute(
+                "SELECT tenant_id, name, slug, status, config_json, created_at, updated_at FROM operational_tenants WHERE slug = ?",
+                (slug.strip().lower(),),
+            ).fetchone()
+            if not row:
+                return None
+            cfg_dict = json.loads(row["config_json"] or "{}")
+            return Tenant(
+                tenant_id=row["tenant_id"],
+                name=row["name"],
+                slug=row["slug"],
+                status=row["status"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                configuration=TenantConfiguration.from_dict(cfg_dict),
+            )
+
+    def list_tenants(
+        self,
+        status: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Tenant]:
+        """Returns paginated list of customer organizations."""
+        query = "SELECT tenant_id, name, slug, status, config_json, created_at, updated_at FROM operational_tenants"
+        params: List[Any] = []
+        if status:
+            query += " WHERE status = ?"
+            params.append(status.upper())
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([max(1, limit), max(0, offset)])
+
+        with topology_transaction(self.db_path, write=False) as conn:
+            rows = conn.execute(query, params).fetchall()
+            results: List[Tenant] = []
+            for row in rows:
+                cfg_dict = json.loads(row["config_json"] or "{}")
+                results.append(Tenant(
+                    tenant_id=row["tenant_id"],
+                    name=row["name"],
+                    slug=row["slug"],
+                    status=row["status"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                    configuration=TenantConfiguration.from_dict(cfg_dict),
+                ))
+            return results
+
+    def update_tenant_status(self, tenant_id: str, new_status: str) -> bool:
+        """Transitions tenant status (ACTIVE, SUSPENDED, MAINTENANCE, DECOMMISSIONED)."""
+        valid_statuses = {s.value for s in TenantStatus}
+        st_upper = new_status.upper().strip()
+        if st_upper not in valid_statuses:
+            raise ValueError(f"Invalid status: '{st_upper}'. Allowed: {valid_statuses}")
+
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with topology_transaction(self.db_path, write=True) as conn:
+            cur = conn.execute(
+                "UPDATE operational_tenants SET status = ?, updated_at = ? WHERE tenant_id = ?",
+                (st_upper, now, tenant_id),
+            )
+            # If suspended or decommissioned, revoke all active sessions immediately
+            if st_upper in (TenantStatus.SUSPENDED.value, TenantStatus.DECOMMISSIONED.value):
+                conn.execute(
+                    "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE tenant_id = ?",
+                    (tenant_id,),
+                )
+            return cur.rowcount > 0
+
+    def get_tenant_quota(self, tenant_id: str) -> TenantResourceQuota:
+        """Calculates current resource utilization against limits."""
+        with topology_transaction(self.db_path, write=False) as conn:
+            # Get subscription limits
+            sub_row = conn.execute(
+                "SELECT max_sites, max_devices, max_gateways FROM operational_tenant_subscriptions WHERE tenant_id = ? AND is_active = 1",
+                (tenant_id,),
+            ).fetchone()
+            max_sites = sub_row["max_sites"] if sub_row else 10
+            max_devs = sub_row["max_devices"] if sub_row else 100
+            max_gws = sub_row["max_gateways"] if sub_row else 10
+
+            # Count current sites
+            site_count = conn.execute(
+                "SELECT COUNT(*) FROM operational_sites WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()[0]
+
+            # Count current devices
+            dev_count = conn.execute(
+                "SELECT COUNT(*) FROM operational_devices WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()[0]
+
+            return TenantResourceQuota(
+                tenant_id=tenant_id,
+                current_sites=site_count,
+                current_devices=dev_count,
+                current_gateways=0,  # Gateways populated in WP 8.4
+                max_sites=max_sites,
+                max_devices=max_devs,
+                max_gateways=max_gws,
+            )
+
+
+# ===========================================================================
+# 2. IDENTITY & RBAC MANAGER (WP 8.2)
+# ===========================================================================
+
+class IdentityManager:
+    """Manages users, authentication, permissions, sessions, and RBAC governance."""
+
+    def __init__(self, db_path: Optional[Path] = None) -> None:
+        self.db_path = Path(db_path or DEFAULT_TOPOLOGY_DB_PATH).resolve()
+        ensure_tenant_schema(self.db_path)
+
+    def create_user(
+        self,
+        username: str,
+        email: str,
+        password: str,
+        role_type: str,
+        is_internal: bool = False,
+        tenant_id: Optional[str] = None,
+    ) -> User:
+        """Creates a new user and assigns their initial RBAC role."""
+        if not is_internal and not tenant_id:
+            raise ValueError("Customer users must be associated with a valid tenant_id.")
+
+        role_upper = role_type.upper().strip()
+        valid_roles = {r.value for r in UserRoleType}
+        if role_upper not in valid_roles:
+            raise ValueError(f"Invalid role_type: '{role_upper}'. Allowed: {valid_roles}")
+
+        # Enforce privilege boundary: Customer users cannot be given internal NOC roles
+        internal_roles = {
+            UserRoleType.PLATFORM_SUPER_ADMIN.value,
+            UserRoleType.NOC_ADMIN.value,
+            UserRoleType.NOC_OPERATOR.value,
+            UserRoleType.NETWORK_ENGINEER.value,
+            UserRoleType.NOC_ANALYST.value,
+            UserRoleType.SUPPORT_OPERATOR.value,
+            UserRoleType.AUDITOR.value,
+        }
+        if not is_internal and role_upper in internal_roles:
+            raise PermissionError(f"Privilege Boundary Violation: Customer user cannot be assigned internal NOC role '{role_upper}'.")
+
+        user_id = f"usr_{uuid.uuid4().hex[:12]}"
+        salt = secrets.token_hex(16)
+        pw_hash = _hash_password(password, salt)
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        asgn_id = f"asgn_{uuid.uuid4().hex[:12]}"
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO operational_users 
+                (user_id, username, email, password_hash, salt, is_internal, tenant_id, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                """,
+                (user_id, username.strip().lower(), email.strip().lower(), pw_hash, salt, 1 if is_internal else 0, tenant_id, now, now),
+            )
+            conn.execute(
+                """
+                INSERT INTO operational_user_roles (assignment_id, user_id, role_type, granted_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (asgn_id, user_id, role_upper, now),
+            )
+
+        logger.info("Created user %s (%s, internal=%s, role=%s)", user_id, username, is_internal, role_upper)
+        return User(
+            user_id=user_id,
+            username=username.strip().lower(),
+            email=email.strip().lower(),
+            password_hash=pw_hash,
+            salt=salt,
+            is_internal=is_internal,
+            tenant_id=tenant_id,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def authenticate_user(self, username_or_email: str, password: str) -> Optional[UserSession]:
+        """Authenticates credentials and establishes a new UserSession upon success."""
+        identifier = username_or_email.strip().lower()
+        with topology_transaction(self.db_path, write=False) as conn:
+            row = conn.execute(
+                """
+                SELECT user_id, username, email, password_hash, salt, is_internal, tenant_id, is_active 
+                FROM operational_users 
+                WHERE (username = ? OR email = ?) AND is_active = 1
+                """,
+                (identifier, identifier),
+            ).fetchone()
+            if not row:
+                return None
+
+            expected_hash = _hash_password(password, row["salt"])
+            if not secrets.compare_digest(row["password_hash"], expected_hash):
+                return None
+
+            user_id = row["user_id"]
+            username = row["username"]
+            tenant_id = row["tenant_id"]
+            is_internal = bool(row["is_internal"])
+
+            # Verify tenant is not suspended if customer user
+            if not is_internal and tenant_id:
+                t_row = conn.execute(
+                    "SELECT status FROM operational_tenants WHERE tenant_id = ?",
+                    (tenant_id,),
+                ).fetchone()
+                if not t_row or t_row["status"] not in (TenantStatus.ACTIVE.value, TenantStatus.MAINTENANCE.value):
+                    logger.warning("Authentication rejected: Tenant %s is %s", tenant_id, t_row["status"] if t_row else "NOT_FOUND")
+                    return None
+
+        # Create session
+        return self.create_session(user_id=user_id)
+
+    def create_session(self, user_id: str, duration_hours: int = 24) -> UserSession:
+        """Issues an active session token for an authenticated user."""
+        session_id = f"sess_{uuid.uuid4().hex[:16]}"
+        raw_token = f"aira_tok_{secrets.token_urlsafe(32)}"
+        token_hash = _hash_token(raw_token)
+        now_epoch = time.time()
+        now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_epoch))
+        exp_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_epoch + (duration_hours * 3600)))
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            u_row = conn.execute(
+                "SELECT username, is_internal, tenant_id FROM operational_users WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            if not u_row:
+                raise ValueError(f"User {user_id} not found.")
+
+            # Load roles
+            roles_rows = conn.execute(
+                "SELECT role_type FROM operational_user_roles WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+            roles = [r["role_type"] for r in roles_rows]
+
+            # Compute permissions
+            permissions: Set[str] = set()
+            for r in roles:
+                try:
+                    rt = UserRoleType(r)
+                    for p in ROLE_PERMISSIONS.get(rt, set()):
+                        permissions.add(p.value)
+                except ValueError:
+                    pass
+
+            conn.execute(
+                """
+                INSERT INTO operational_user_sessions
+                (session_id, user_id, tenant_id, is_internal, token_hash, status, created_at, expires_at_utc)
+                VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
+                """,
+                (session_id, user_id, u_row["tenant_id"], u_row["is_internal"], token_hash, now_str, exp_str),
+            )
+
+        return UserSession(
+            session_id=session_id,
+            user_id=user_id,
+            username=u_row["username"],
+            tenant_id=u_row["tenant_id"],
+            is_internal=bool(u_row["is_internal"]),
+            token=raw_token,
+            roles=roles,
+            permissions=sorted(list(permissions)),
+            status=SessionStatus.ACTIVE.value,
+            created_at=now_str,
+            expires_at_utc=exp_str,
+        )
+
+    def validate_session_token(self, token: str) -> Optional[TenantContext]:
+        """Validates token and returns resolved TenantContext with permissions."""
+        if not token or not token.startswith("aira_tok_"):
+            return None
+
+        token_hash = _hash_token(token)
+        now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        with topology_transaction(self.db_path, write=False) as conn:
+            row = conn.execute(
+                """
+                SELECT s.session_id, s.user_id, s.tenant_id, s.is_internal, s.status, s.expires_at_utc,
+                       u.username, u.is_active, t.status as tenant_status
+                FROM operational_user_sessions s
+                JOIN operational_users u ON s.user_id = u.user_id
+                LEFT JOIN operational_tenants t ON s.tenant_id = t.tenant_id
+                WHERE s.token_hash = ? AND s.status = 'ACTIVE'
+                """,
+                (token_hash,),
+            ).fetchone()
+
+            if not row:
+                return None
+
+            # Expiration check
+            if row["expires_at_utc"] <= now_str:
+                return None
+
+            # User and Tenant Active check
+            if not row["is_active"]:
+                return None
+            if not row["is_internal"] and row["tenant_status"] not in (TenantStatus.ACTIVE.value, TenantStatus.MAINTENANCE.value):
+                return None
+
+            user_id = row["user_id"]
+            username = row["username"]
+            tenant_id = row["tenant_id"]
+            is_internal = bool(row["is_internal"])
+
+            # Load roles & permissions
+            roles_rows = conn.execute(
+                "SELECT role_type FROM operational_user_roles WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+            roles = [r["role_type"] for r in roles_rows]
+            permissions: Set[str] = set()
+            for r in roles:
+                try:
+                    rt = UserRoleType(r)
+                    for p in ROLE_PERMISSIONS.get(rt, set()):
+                        permissions.add(p.value)
+                except ValueError:
+                    pass
+
+            return TenantContext(
+                user_id=user_id,
+                username=username,
+                is_internal=is_internal,
+                tenant_id=tenant_id,
+                roles=roles,
+                permissions=permissions,
+            )
+
+    def revoke_session(self, session_id: str) -> bool:
+        """Revokes an active session."""
+        with topology_transaction(self.db_path, write=True) as conn:
+            cur = conn.execute(
+                "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE session_id = ?",
+                (session_id,),
+            )
+            return cur.rowcount > 0
+
+    def revoke_token(self, token: str) -> bool:
+        """Revokes an active session by token."""
+        token_hash = _hash_token(token)
+        with topology_transaction(self.db_path, write=True) as conn:
+            cur = conn.execute(
+                "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE token_hash = ?",
+                (token_hash,),
+            )
+            return cur.rowcount > 0
+
+
+# ===========================================================================
+# 3. INVENTORY MANAGER (WP 8.3)
+# ===========================================================================
+
+class InventoryManager:
+    """Manages customer sites, site groups, and network devices with RFC 1918 overlap safety."""
+
+    def __init__(self, db_path: Optional[Path] = None) -> None:
+        self.db_path = Path(db_path or DEFAULT_TOPOLOGY_DB_PATH).resolve()
+        ensure_tenant_schema(self.db_path)
+        self.tenant_mgr = TenantManager(self.db_path)
+
+    def create_site(
+        self,
+        tenant_id: str,
+        name: str,
+        slug: str,
+        timezone: str = "Asia/Jakarta",
+        address: Optional[str] = None,
+        contact_person: Optional[str] = None,
+        notes: Optional[str] = None,
+        group_id: Optional[str] = None,
+    ) -> Site:
+        """Creates a site belonging to a tenant, enforcing quota limits."""
+        slug_clean = slug.strip().lower()
+        if not _SLUG_RE.match(slug_clean):
+            raise ValueError(f"Invalid slug format: '{slug_clean}'.")
+
+        # Quota check
+        quota = self.tenant_mgr.get_tenant_quota(tenant_id)
+        if quota.is_site_quota_exceeded:
+            raise ValueError(f"Quota Exceeded: Tenant {tenant_id} has reached maximum sites limit ({quota.max_sites}).")
+
+        site_id = f"site_{uuid.uuid4().hex[:12]}"
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO operational_sites 
+                (site_id, tenant_id, name, slug, group_id, address, timezone, contact_person, notes, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (site_id, tenant_id, name.strip(), slug_clean, group_id, address, timezone, contact_person, notes, now),
+            )
+
+        logger.info("Created site %s (%s) for tenant %s", site_id, name, tenant_id)
+        return Site(
+            site_id=site_id,
+            tenant_id=tenant_id,
+            name=name.strip(),
+            slug=slug_clean,
+            group_id=group_id,
+            address=address,
+            timezone=timezone,
+            contact_person=contact_person,
+            notes=notes,
+            created_at=now,
+        )
+
+    def get_site(self, tenant_id: str, site_id: str) -> Optional[Site]:
+        """Retrieves a site enforcing tenant ownership (IDOR safe)."""
+        with topology_transaction(self.db_path, write=False) as conn:
+            row = conn.execute(
+                "SELECT site_id, tenant_id, name, slug, group_id, address, timezone, contact_person, notes, created_at FROM operational_sites WHERE tenant_id = ? AND site_id = ?",
+                (tenant_id, site_id),
+            ).fetchone()
+            if not row:
+                return None
+            return Site(
+                site_id=row["site_id"],
+                tenant_id=row["tenant_id"],
+                name=row["name"],
+                slug=row["slug"],
+                group_id=row["group_id"],
+                address=row["address"],
+                timezone=row["timezone"],
+                contact_person=row["contact_person"],
+                notes=row["notes"],
+                created_at=row["created_at"],
+            )
+
+    def list_sites(self, tenant_id: str, group_id: Optional[str] = None) -> List[Site]:
+        """Lists sites for a tenant."""
+        query = "SELECT site_id, tenant_id, name, slug, group_id, address, timezone, contact_person, notes, created_at FROM operational_sites WHERE tenant_id = ?"
+        params: List[Any] = [tenant_id]
+        if group_id:
+            query += " AND group_id = ?"
+            params.append(group_id)
+        query += " ORDER BY name ASC"
+
+        with topology_transaction(self.db_path, write=False) as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [
+                Site(
+                    site_id=r["site_id"],
+                    tenant_id=r["tenant_id"],
+                    name=r["name"],
+                    slug=r["slug"],
+                    group_id=r["group_id"],
+                    address=r["address"],
+                    timezone=r["timezone"],
+                    contact_person=r["contact_person"],
+                    notes=r["notes"],
+                    created_at=r["created_at"],
+                )
+                for r in rows
+            ]
+
+    def create_device(
+        self,
+        tenant_id: str,
+        site_id: str,
+        name: str,
+        management_ip: str,
+        management_port: int = 22,
+        device_type: str = DeviceType.ROUTER.value,
+        vendor: str = "MikroTik",
+        model: Optional[str] = None,
+        os_version: Optional[str] = None,
+        gateway_id: Optional[str] = None,
+        credential_ref: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> TenantDevice:
+        """
+        Registers a network device.
+        Enforces RFC 1918 overlap safety: Management IP is unique within (tenant_id, site_id),
+        allowing Tenant A and Tenant B to each operate 192.168.1.1 without conflict.
+        """
+        # Quota check
+        quota = self.tenant_mgr.get_tenant_quota(tenant_id)
+        if quota.is_device_quota_exceeded:
+            raise ValueError(f"Quota Exceeded: Tenant {tenant_id} has reached maximum devices limit ({quota.max_devices}).")
+
+        # Verify site exists and belongs to tenant
+        site = self.get_site(tenant_id, site_id)
+        if not site:
+            raise ValueError(f"Site {site_id} not found under tenant {tenant_id}.")
+
+        device_id = f"dev_{tenant_id[:8]}_{site_id[:8]}_{uuid.uuid4().hex[:8]}"
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO operational_devices
+                (device_id, tenant_id, site_id, name, management_ip, management_port, device_type, vendor, model, os_version, gateway_id, status, credential_ref, notes, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?, ?, ?)
+                """,
+                (device_id, tenant_id, site_id, name.strip(), management_ip.strip(), management_port, device_type.upper(), vendor, model, os_version, gateway_id, credential_ref, notes, now, now),
+            )
+
+        logger.info("Created device %s (%s - %s) for tenant %s site %s", device_id, name, management_ip, tenant_id, site_id)
+        return TenantDevice(
+            device_id=device_id,
+            tenant_id=tenant_id,
+            site_id=site_id,
+            name=name.strip(),
+            management_ip=management_ip.strip(),
+            management_port=management_port,
+            device_type=device_type.upper(),
+            vendor=vendor,
+            model=model or "",
+            os_version=os_version or "",
+            gateway_id=gateway_id,
+            status="ACTIVE",
+            credential_ref=credential_ref,
+            notes=notes,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def get_device(self, tenant_id: str, device_id: str) -> Optional[TenantDevice]:
+        """Retrieves device enforcing tenant ownership (IDOR safe)."""
+        with topology_transaction(self.db_path, write=False) as conn:
+            row = conn.execute(
+                """
+                SELECT device_id, tenant_id, site_id, name, management_ip, management_port, device_type, vendor, model, os_version, gateway_id, status, credential_ref, notes, created_at, updated_at
+                FROM operational_devices
+                WHERE tenant_id = ? AND device_id = ?
+                """,
+                (tenant_id, device_id),
+            ).fetchone()
+            if not row:
+                return None
+            return TenantDevice(
+                device_id=row["device_id"],
+                tenant_id=row["tenant_id"],
+                site_id=row["site_id"],
+                name=row["name"],
+                management_ip=row["management_ip"],
+                management_port=row["management_port"],
+                device_type=row["device_type"],
+                vendor=row["vendor"],
+                model=row["model"] or "",
+                os_version=row["os_version"] or "",
+                gateway_id=row["gateway_id"],
+                status=row["status"],
+                credential_ref=row["credential_ref"],
+                notes=row["notes"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+
+    def get_device_by_ip(self, tenant_id: str, site_id: str, management_ip: str) -> Optional[TenantDevice]:
+        """Scoped resolution by (tenant_id, site_id, management_ip). Overlap RFC 1918 safe."""
+        with topology_transaction(self.db_path, write=False) as conn:
+            row = conn.execute(
+                """
+                SELECT device_id, tenant_id, site_id, name, management_ip, management_port, device_type, vendor, model, os_version, gateway_id, status, credential_ref, notes, created_at, updated_at
+                FROM operational_devices
+                WHERE tenant_id = ? AND site_id = ? AND management_ip = ?
+                """,
+                (tenant_id, site_id, management_ip.strip()),
+            ).fetchone()
+            if not row:
+                return None
+            return TenantDevice(
+                device_id=row["device_id"],
+                tenant_id=row["tenant_id"],
+                site_id=row["site_id"],
+                name=row["name"],
+                management_ip=row["management_ip"],
+                management_port=row["management_port"],
+                device_type=row["device_type"],
+                vendor=row["vendor"],
+                model=row["model"] or "",
+                os_version=row["os_version"] or "",
+                gateway_id=row["gateway_id"],
+                status=row["status"],
+                credential_ref=row["credential_ref"],
+                notes=row["notes"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+
+    def list_devices(
+        self,
+        tenant_id: str,
+        site_id: Optional[str] = None,
+        device_type: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> List[TenantDevice]:
+        """Lists devices for a tenant with optional filtering."""
+        query = """
+            SELECT device_id, tenant_id, site_id, name, management_ip, management_port, device_type, vendor, model, os_version, gateway_id, status, credential_ref, notes, created_at, updated_at
+            FROM operational_devices
+            WHERE tenant_id = ?
+        """
+        params: List[Any] = [tenant_id]
+        if site_id:
+            query += " AND site_id = ?"
+            params.append(site_id)
+        if device_type:
+            query += " AND device_type = ?"
+            params.append(device_type.upper())
+        if status:
+            query += " AND status = ?"
+            params.append(status.upper())
+        query += " ORDER BY name ASC"
+        if limit is not None:
+            query += " LIMIT ? OFFSET ?"
+            params.extend([max(1, limit), max(0, offset)])
+
+        with topology_transaction(self.db_path, write=False) as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [
+                TenantDevice(
+                    device_id=r["device_id"],
+                    tenant_id=r["tenant_id"],
+                    site_id=r["site_id"],
+                    name=r["name"],
+                    management_ip=r["management_ip"],
+                    management_port=r["management_port"],
+                    device_type=r["device_type"],
+                    vendor=r["vendor"],
+                    model=r["model"] or "",
+                    os_version=r["os_version"] or "",
+                    gateway_id=r["gateway_id"],
+                    status=r["status"],
+                    credential_ref=r["credential_ref"],
+                    notes=r["notes"],
+                    created_at=r["created_at"],
+                    updated_at=r["updated_at"],
+                )
+                for r in rows
+            ]
+
+
+# ===========================================================================
+# 4. AUDIT LOGGER
+# ===========================================================================
+
+class AuditLogger:
+    """Appends immutable operational and security audit entries."""
+
+    def __init__(self, db_path: Optional[Path] = None) -> None:
+        self.db_path = Path(db_path or DEFAULT_TOPOLOGY_DB_PATH).resolve()
+        ensure_tenant_schema(self.db_path)
+
+    def log_action(
+        self,
+        username: str,
+        action: str,
+        resource_type: str,
+        resource_id: str,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        ip_address: Optional[str] = None,
+    ) -> AuditEntry:
+        """Appends a tamper-evident audit record."""
+        audit_id = f"aud_{uuid.uuid4().hex[:16]}"
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        det_json = json.dumps(details or {})
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO operational_audit_log
+                (audit_id, tenant_id, user_id, username, action, resource_type, resource_id, details_json, ip_address, timestamp_utc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (audit_id, tenant_id, user_id, username, action, resource_type, resource_id, det_json, ip_address, now),
+            )
+
+        return AuditEntry(
+            audit_id=audit_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            username=username,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            details_json=det_json,
+            ip_address=ip_address,
+            timestamp_utc=now,
+        )
+
+    def list_entries(
+        self,
+        tenant_id: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[AuditEntry]:
+        """Lists audit entries, optionally filtered by tenant."""
+        query = "SELECT audit_id, tenant_id, user_id, username, action, resource_type, resource_id, details_json, ip_address, timestamp_utc FROM operational_audit_log"
+        params: List[Any] = []
+        if tenant_id:
+            query += " WHERE tenant_id = ?"
+            params.append(tenant_id)
+        query += " ORDER BY timestamp_utc DESC LIMIT ? OFFSET ?"
+        params.extend([max(1, limit), max(0, offset)])
+
+        with topology_transaction(self.db_path, write=False) as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [
+                AuditEntry(
+                    audit_id=r["audit_id"],
+                    tenant_id=r["tenant_id"],
+                    user_id=r["user_id"],
+                    username=r["username"],
+                    action=r["action"],
+                    resource_type=r["resource_type"],
+                    resource_id=r["resource_id"],
+                    details_json=r["details_json"] or "{}",
+                    ip_address=r["ip_address"],
+                    timestamp_utc=r["timestamp_utc"],
+                )
+                for r in rows
+            ]
+
+
+# ===========================================================================
+# 5. CUSTOMER SUPPORT REQUEST MANAGER (WP 8.9.9)
+# ===========================================================================
+
+class SupportRequestManager:
+    """Manages customer support requests, lifecycle state transitions, and collaboration."""
+
+    def __init__(self, db_path: Optional[Path] = None) -> None:
+        self.db_path = Path(db_path or DEFAULT_TOPOLOGY_DB_PATH).resolve()
+        ensure_tenant_schema(self.db_path)
+
+    def create_request(
+        self,
+        tenant_id: str,
+        requester_id: str,
+        category: str,
+        subject: str,
+        description: str,
+        priority: str = SupportPriority.MEDIUM.value,
+    ) -> SupportRequest:
+        """Creates a new customer support ticket in OPEN state."""
+        cat_upper = category.upper()
+        if cat_upper not in {c.value for c in SupportCategory}:
+            raise ValueError(f"Invalid support category '{category}'.")
+        prio_upper = priority.upper()
+        if prio_upper not in {p.value for p in SupportPriority}:
+            raise ValueError(f"Invalid support priority '{priority}'.")
+
+        request_id = f"req_{uuid.uuid4().hex[:12]}"
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO operational_support_requests
+                (request_id, tenant_id, requester_id, category, subject, description, priority, status, assigned_operator_id, created_at, updated_at, resolved_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'OPEN', NULL, ?, ?, NULL)
+                """,
+                (request_id, tenant_id, requester_id, cat_upper, subject.strip(), description.strip(), prio_upper, now, now),
+            )
+
+        return SupportRequest(
+            request_id=request_id,
+            tenant_id=tenant_id,
+            requester_id=requester_id,
+            category=cat_upper,
+            subject=subject.strip(),
+            description=description.strip(),
+            priority=prio_upper,
+            status=SupportStatus.OPEN.value,
+            assigned_operator_id=None,
+            created_at=now,
+            updated_at=now,
+            resolved_at=None,
+            comments=[],
+        )
+
+    def get_request(self, tenant_id: str, request_id: str) -> Optional[SupportRequest]:
+        """Retrieves a single support request with its comments, strictly scoped to tenant_id."""
+        with topology_transaction(self.db_path, write=False) as conn:
+            row = conn.execute(
+                """
+                SELECT request_id, tenant_id, requester_id, category, subject, description,
+                       priority, status, assigned_operator_id, created_at, updated_at, resolved_at
+                FROM operational_support_requests
+                WHERE request_id = ? AND tenant_id = ?
+                """,
+                (request_id, tenant_id),
+            ).fetchone()
+            if not row:
+                return None
+
+            c_rows = conn.execute(
+                """
+                SELECT comment_id, request_id, tenant_id, author_id, author_name, is_internal, message, created_at
+                FROM operational_support_request_comments
+                WHERE request_id = ? AND tenant_id = ?
+                ORDER BY created_at ASC
+                """,
+                (request_id, tenant_id),
+            ).fetchall()
+
+            comments = [
+                SupportRequestComment(
+                    comment_id=cr["comment_id"],
+                    request_id=cr["request_id"],
+                    tenant_id=cr["tenant_id"],
+                    author_id=cr["author_id"],
+                    author_name=cr["author_name"],
+                    is_internal=bool(cr["is_internal"]),
+                    message=cr["message"],
+                    created_at=cr["created_at"],
+                )
+                for cr in c_rows
+            ]
+
+            return SupportRequest(
+                request_id=row["request_id"],
+                tenant_id=row["tenant_id"],
+                requester_id=row["requester_id"],
+                category=row["category"],
+                subject=row["subject"],
+                description=row["description"],
+                priority=row["priority"],
+                status=row["status"],
+                assigned_operator_id=row["assigned_operator_id"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                resolved_at=row["resolved_at"],
+                comments=comments,
+            )
+
+    def list_requests(
+        self,
+        tenant_id: str,
+        status: Optional[str] = None,
+        category: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[SupportRequest]:
+        """Lists support requests scoped strictly to tenant_id."""
+        clauses = ["tenant_id = ?"]
+        params: List[Any] = [tenant_id]
+
+        if status:
+            clauses.append("status = ?")
+            params.append(status.upper())
+        if category:
+            clauses.append("category = ?")
+            params.append(category.upper())
+
+        where_sql = " AND ".join(clauses)
+        params.extend([max(1, limit), max(0, offset)])
+
+        with topology_transaction(self.db_path, write=False) as conn:
+            rows = conn.execute(
+                f"""
+                SELECT request_id, tenant_id, requester_id, category, subject, description,
+                       priority, status, assigned_operator_id, created_at, updated_at, resolved_at
+                FROM operational_support_requests
+                WHERE {where_sql}
+                ORDER BY updated_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+
+            return [
+                SupportRequest(
+                    request_id=r["request_id"],
+                    tenant_id=r["tenant_id"],
+                    requester_id=r["requester_id"],
+                    category=r["category"],
+                    subject=r["subject"],
+                    description=r["description"],
+                    priority=r["priority"],
+                    status=r["status"],
+                    assigned_operator_id=r["assigned_operator_id"],
+                    created_at=r["created_at"],
+                    updated_at=r["updated_at"],
+                    resolved_at=r["resolved_at"],
+                    comments=[],
+                )
+                for r in rows
+            ]
+
+    def transition_status(
+        self,
+        tenant_id: str,
+        request_id: str,
+        new_status: str,
+        actor_id: str,
+    ) -> SupportRequest:
+        """Transitions request through validated lifecycle state machine."""
+        req = self.get_request(tenant_id, request_id)
+        if not req:
+            raise KeyError(f"Support request '{request_id}' not found for tenant '{tenant_id}'.")
+
+        curr_st = req.status
+        target_st = new_status.upper()
+        allowed = VALID_SUPPORT_TRANSITIONS.get(curr_st, set())
+
+        if target_st not in allowed:
+            raise ValueError(
+                f"Invalid transition from '{curr_st}' to '{target_st}'. Allowed: {sorted(list(allowed))}"
+            )
+
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        resolved_at = now if target_st in (SupportStatus.RESOLVED.value, SupportStatus.CLOSED.value) else req.resolved_at
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                UPDATE operational_support_requests
+                SET status = ?, updated_at = ?, resolved_at = ?
+                WHERE request_id = ? AND tenant_id = ?
+                """,
+                (target_st, now, resolved_at, request_id, tenant_id),
+            )
+
+        return self.get_request(tenant_id, request_id)  # type: ignore
+
+    def add_comment(
+        self,
+        tenant_id: str,
+        request_id: str,
+        author_id: str,
+        author_name: str,
+        message: str,
+        is_internal: bool = False,
+    ) -> SupportRequestComment:
+        """Appends a comment to an existing support ticket."""
+        req = self.get_request(tenant_id, request_id)
+        if not req:
+            raise KeyError(f"Support request '{request_id}' not found for tenant '{tenant_id}'.")
+
+        comment_id = f"com_{uuid.uuid4().hex[:12]}"
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                INSERT INTO operational_support_request_comments
+                (comment_id, request_id, tenant_id, author_id, author_name, is_internal, message, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (comment_id, request_id, tenant_id, author_id, author_name, 1 if is_internal else 0, message.strip(), now),
+            )
+            # Update request updated_at timestamp
+            conn.execute(
+                "UPDATE operational_support_requests SET updated_at = ? WHERE request_id = ? AND tenant_id = ?",
+                (now, request_id, tenant_id),
+            )
+
+        return SupportRequestComment(
+            comment_id=comment_id,
+            request_id=request_id,
+            tenant_id=tenant_id,
+            author_id=author_id,
+            author_name=author_name,
+            is_internal=is_internal,
+            message=message.strip(),
+            created_at=now,
+        )
+
+
+# ===========================================================================
+# 6. CUSTOMER NOTIFICATION PREFERENCE MANAGER (WP 8.9.8)
+# ===========================================================================
+
+class NotificationPreferenceManager:
+    """Manages tenant user alert and notification preference settings."""
+
+    def __init__(self, db_path: Optional[Path] = None) -> None:
+        self.db_path = Path(db_path or DEFAULT_TOPOLOGY_DB_PATH).resolve()
+        ensure_tenant_schema(self.db_path)
+
+    def get_preferences(self, tenant_id: str, user_id: str) -> CustomerNotificationPreferences:
+        """Retrieves user notification preferences or creates defaults."""
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with topology_transaction(self.db_path, write=False) as conn:
+            row = conn.execute(
+                """
+                SELECT pref_id, tenant_id, user_id, notify_critical_incidents, notify_major_incidents,
+                       notify_service_degradation, notify_gateway_offline, notify_sla_breach,
+                       email_notifications, in_app_notifications, updated_at
+                FROM operational_customer_notification_preferences
+                WHERE tenant_id = ? AND user_id = ?
+                """,
+                (tenant_id, user_id),
+            ).fetchone()
+
+        if row:
+            return CustomerNotificationPreferences(
+                pref_id=row["pref_id"],
+                tenant_id=row["tenant_id"],
+                user_id=row["user_id"],
+                notify_critical_incidents=bool(row["notify_critical_incidents"]),
+                notify_major_incidents=bool(row["notify_major_incidents"]),
+                notify_service_degradation=bool(row["notify_service_degradation"]),
+                notify_gateway_offline=bool(row["notify_gateway_offline"]),
+                notify_sla_breach=bool(row["notify_sla_breach"]),
+                email_notifications=bool(row["email_notifications"]),
+                in_app_notifications=bool(row["in_app_notifications"]),
+                updated_at=row["updated_at"],
+            )
+
+        # Create default
+        pref_id = f"pref_{uuid.uuid4().hex[:12]}"
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO operational_customer_notification_preferences
+                (pref_id, tenant_id, user_id, notify_critical_incidents, notify_major_incidents,
+                 notify_service_degradation, notify_gateway_offline, notify_sla_breach,
+                 email_notifications, in_app_notifications, updated_at)
+                VALUES (?, ?, ?, 1, 1, 1, 1, 1, 1, 1, ?)
+                """,
+                (pref_id, tenant_id, user_id, now),
+            )
+        return CustomerNotificationPreferences(
+            pref_id=pref_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            notify_critical_incidents=True,
+            notify_major_incidents=True,
+            notify_service_degradation=True,
+            notify_gateway_offline=True,
+            notify_sla_breach=True,
+            email_notifications=True,
+            in_app_notifications=True,
+            updated_at=now,
+        )
+
+    def update_preferences(
+        self,
+        tenant_id: str,
+        user_id: str,
+        notify_critical_incidents: Optional[bool] = None,
+        notify_major_incidents: Optional[bool] = None,
+        notify_service_degradation: Optional[bool] = None,
+        notify_gateway_offline: Optional[bool] = None,
+        notify_sla_breach: Optional[bool] = None,
+        email_notifications: Optional[bool] = None,
+        in_app_notifications: Optional[bool] = None,
+    ) -> CustomerNotificationPreferences:
+        """Updates specific notification toggles for a user."""
+        curr = self.get_preferences(tenant_id, user_id)
+        n_crit = curr.notify_critical_incidents if notify_critical_incidents is None else notify_critical_incidents
+        n_maj = curr.notify_major_incidents if notify_major_incidents is None else notify_major_incidents
+        n_deg = curr.notify_service_degradation if notify_service_degradation is None else notify_service_degradation
+        n_gw = curr.notify_gateway_offline if notify_gateway_offline is None else notify_gateway_offline
+        n_sla = curr.notify_sla_breach if notify_sla_breach is None else notify_sla_breach
+        n_email = curr.email_notifications if email_notifications is None else email_notifications
+        n_app = curr.in_app_notifications if in_app_notifications is None else in_app_notifications
+        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        with topology_transaction(self.db_path, write=True) as conn:
+            conn.execute(
+                """
+                UPDATE operational_customer_notification_preferences
+                SET notify_critical_incidents = ?, notify_major_incidents = ?,
+                    notify_service_degradation = ?, notify_gateway_offline = ?,
+                    notify_sla_breach = ?, email_notifications = ?,
+                    in_app_notifications = ?, updated_at = ?
+                WHERE tenant_id = ? AND user_id = ?
+                """,
+                (
+                    1 if n_crit else 0,
+                    1 if n_maj else 0,
+                    1 if n_deg else 0,
+                    1 if n_gw else 0,
+                    1 if n_sla else 0,
+                    1 if n_email else 0,
+                    1 if n_app else 0,
+                    now,
+                    tenant_id,
+                    user_id,
+                ),
+            )
+
+        return CustomerNotificationPreferences(
+            pref_id=curr.pref_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            notify_critical_incidents=n_crit,
+            notify_major_incidents=n_maj,
+            notify_service_degradation=n_deg,
+            notify_gateway_offline=n_gw,
+            notify_sla_breach=n_sla,
+            email_notifications=n_email,
+            in_app_notifications=n_app,
+            updated_at=now,
+        )

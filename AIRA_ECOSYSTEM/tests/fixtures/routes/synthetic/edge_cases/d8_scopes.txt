@@ -1,0 +1,2 @@
+0 A S  dst-address=192.168.200.0/24 gateway=10.1.1.1 distance=1 scope=30 target-scope=10
+1   S  dst-address=192.168.201.0/24 gateway=10.2.2.2 distance=1 scope=255 target-scope=255

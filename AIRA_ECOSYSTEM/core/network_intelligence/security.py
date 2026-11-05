@@ -82,6 +82,9 @@ APPROVED_PRINT_PREFIXES = (
     "/ip dhcp-client print",
     "/routing rule print",
     "/routing table print",
+    "/routing route print",
+    "/routing ospf route print",
+    "/log print",
     "/routing filter rule print",
     "/routing filter print",
     "/routing ospf neighbor print",
@@ -104,13 +107,13 @@ READONLY_ALLOWLIST_PATTERNS = [
 
 # Sensitive keys to redact
 SENSITIVE_KEY_PATTERNS = [
-    re.compile(r'(password=["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
-    re.compile(r'(wpa2?-pre-shared-key=["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
-    re.compile(r'(passphrase=["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
-    re.compile(r'(secret=["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
-    re.compile(r'(community=["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
-    re.compile(r'(token=["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
-    re.compile(r'(private-key=["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
+    re.compile(r'(password[:=]\s*["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
+    re.compile(r'(wpa2?-pre-shared-key[:=]\s*["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
+    re.compile(r'(passphrase[:=]\s*["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
+    re.compile(r'(secret[:=]\s*["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
+    re.compile(r'(community[:=]\s*["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
+    re.compile(r'(token[:=]\s*["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
+    re.compile(r'(private-key[:=]\s*["\']?)([^"\'\s]+)(["\']?)', re.IGNORECASE),
 ]
 
 
@@ -189,6 +192,10 @@ def validate_readonly_command(command: str) -> Tuple[bool, str]:
         return False, "Command mengandung tanda kutip yang tidak tertutup (unclosed quotes)."
 
     normalized = " ".join(cmd_clean.split())
+    tokens = normalized.split()
+    if tokens and tokens[0].startswith("/") and "/" in tokens[0][1:]:
+        sub_path = [t for t in tokens[0].split("/") if t]
+        normalized = "/" + " ".join(sub_path) + (" " + " ".join(tokens[1:]) if len(tokens) > 1 else "")
     norm_lower = normalized.lower()
 
     # 8. Special bounded tool commands
@@ -281,7 +288,7 @@ def execute_safe_readonly_command(
 
     raw_output = res.get("output", "")
     redacted = redact_sensitive_values(raw_output)
-    truncated = sanitize_cli_excerpt(redacted, max_chars=MAX_OUTPUT_CHARACTERS)
+    truncated = sanitize_cli_excerpt(redacted, max_len=MAX_OUTPUT_CHARACTERS)
 
     return {
         "success": True,

@@ -1,0 +1,4 @@
+Flags: X - disabled, A - active, D - dynamic, C - connect, S - static, r - rip, b - bgp, o - ospf, m - mme, B - blackhole, U - unreachable, P - prohibit
+ 0 A S  dst-address=0.0.0.0/0 gateway=192.168.1.1 gateway-status=192.168.1.1 reachable via ether1 distance=1 scope=30 target-scope=10
+ 1 ADC  dst-address=192.168.88.0/24 pref-src=192.168.88.1 gateway=ether2 gateway-status=ether2 reachable distance=0 scope=10
+ 2 ADC  dst-address=10.0.0.0/24 pref-src=10.0.0.150 gateway=ether1 gateway-status=ether1 reachable distance=0 scope=10

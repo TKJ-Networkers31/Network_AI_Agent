@@ -181,6 +181,8 @@ def create_network_mcp_server() -> MCPServer:
             "device_name": device_name,
             "target_ip": target_ip,
             "total_routes": len(routes),
+            "parser_version": "4.6.0",
+            "diagnostic_version": "4.6.0",
             **lpm_result,
         })
 

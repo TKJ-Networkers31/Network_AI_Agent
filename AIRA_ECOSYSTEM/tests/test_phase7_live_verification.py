@@ -121,10 +121,12 @@ def test_phase7_insufficient_evidence_when_live_lab_offline():
     INSUFFICIENT_EVIDENCE with explicit missing evidence items, and never claims HEALTHY.
     """
     inv = NetworkInvestigator()
+    # Gunakan perangkat aktif di inventaris (CHR)
+    dev_name = "CHR"
 
     with patch.object(inv.collector.cm, "execute_for_device", return_value={"success": False, "error": "Connection timed out"}):
         rec = inv.create_and_run_investigation(
-            device_identity="R1",
+            device_identity=dev_name,
             incident_type=IncidentType.LAN_NO_INTERNET,
             correlation_id="phase7_offline_test",
         )

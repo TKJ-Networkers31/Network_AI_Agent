@@ -205,6 +205,8 @@ class EventNames:
 
     # NMS MONITORING
     NMS_DEVICE_STATUS = "nms.device_status"
+    NMS_INTERFACE_STATUS_CHANGED = "nms.interface.status_changed"
+    NMS_INTERFACE_OBSERVED = "nms.interface.observed"
     NMS_CYCLE_COMPLETED = "nms.cycle_completed"
     NMS_INCIDENT = "nms.incident"
 

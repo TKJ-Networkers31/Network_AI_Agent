@@ -1,0 +1,1 @@
+0 A S  dst-address=172.16.1.0/24 gateway=192.168.10.1 gateway-status=192.168.10.1 recursive via 10.0.0.1 ether1 distance=1

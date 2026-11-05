@@ -53,225 +53,41 @@ class ParsedRoute:
 def parse_routeros_routes(raw_text: str) -> List[ParsedRoute]:
     """
     Parses RouterOS v6 and v7 routing table prints into normalized ParsedRoute objects.
-    Robust against spaces in flag columns, detail print output, and varied column alignments.
+    Delegates to authoritative UnifiedRouteParser (Phase 4.6 / WP 4.6.0).
     """
-    routes: List[ParsedRoute] = []
-    lines = (raw_text or "").splitlines()
-
-    # Pattern for destination CIDR: e.g. 0.0.0.0/0 or 192.168.1.0/24
-    dst_cidr_pattern = re.compile(r"\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2})\b")
-
-    for line in lines:
-        line_clean = line.strip()
-        if not line_clean or line_clean.startswith("#") or line_clean.startswith("Flags") or line_clean.startswith("Columns"):
-            continue
-
-        # In RouterOS print detail format:
-        # dst-address=0.0.0.0/0 gateway=192.168.1.1 distance=1 active=yes
-        if "dst-address=" in line_clean:
-            dst_m = re.search(r"dst-address=([0-9\.\/]+)", line_clean)
-            gw_m = re.search(r"gateway=([^\s]+)", line_clean)
-            dist_m = re.search(r"distance=(\d+)", line_clean)
-            prefix = line_clean.split("dst-address=")[0].strip()
-            flags_m = prefix.split()[-1] if prefix else ""
-            active_m = ("A" in flags_m) or ("active=yes" in line_clean) or ("active=no" not in line_clean and not flags_m)
-            dynamic_m = ("D" in flags_m) or ("dynamic=yes" in line_clean)
-            connect_m = ("C" in flags_m.upper()) or ("connect=yes" in line_clean)
-            static_m = ("S" in flags_m.upper()) or ("static=yes" in line_clean)
-            if dst_m:
-                dst = dst_m.group(1)
-                gw = gw_m.group(1) if gw_m else ""
-                dist = int(dist_m.group(1)) if dist_m else 1
-                routes.append(ParsedRoute(
-                    dst_address=dst,
-                    gateway=gw,
-                    distance=dist,
-                    active=active_m,
-                    dynamic=dynamic_m,
-                    connect=connect_m,
-                    static=static_m,
-                    raw_flags=flags_m or "DETAIL",
-                ))
-            continue
-
-        # Line starting with an index number
-        m_idx = re.match(r"^\s*(\d+)\s+(.*)", line)
-        if m_idx:
-            rest = m_idx.group(2)
-            cidr_m = dst_cidr_pattern.search(rest)
-            if cidr_m:
-                dst = cidr_m.group(1)
-                flags = rest[: cidr_m.start()].strip()
-                after_dst = rest[cidr_m.end() :].strip().split()
-
-                gw = ""
-                dist = 1
-                if after_dst:
-                    # Last token is often distance if integer
-                    if after_dst[-1].isdigit():
-                        dist = int(after_dst[-1])
-                        remaining_tokens = after_dst[:-1]
-                    else:
-                        remaining_tokens = after_dst
-
-                    # Gateway is typically the first non-empty token or last non-IP pref-src
-                    if remaining_tokens:
-                        gw = remaining_tokens[-1]
-
-                flags_upper = flags.upper()
-                is_active = "A" in flags_upper or not flags_upper
-                is_dynamic = "D" in flags_upper
-                is_connect = "C" in flags_upper
-                is_static = "S" in flags_upper
-
-                routes.append(ParsedRoute(
-                    dst_address=dst,
-                    gateway=gw,
-                    distance=dist,
-                    active=is_active,
-                    dynamic=is_dynamic,
-                    connect=is_connect,
-                    static=is_static,
-                    raw_flags=flags,
-                ))
-
-    return routes
+    from core.routing.unified_route_parser import UnifiedRouteParser
+    parser = UnifiedRouteParser()
+    normalized = parser.parse(raw_text)
+    return [
+        ParsedRoute(
+            dst_address=r.dst_prefix,
+            gateway=r.gateway,
+            distance=r.distance,
+            active=r.active,
+            dynamic=r.dynamic,
+            connect=r.connect,
+            static=r.static,
+            raw_flags=r.raw_flags,
+            prefix_len=r.prefix_len,
+            network=r.network,
+        )
+        for r in normalized
+    ]
 
 
-def evaluate_longest_prefix_match(routes: List[ParsedRoute], target_ip: str) -> Dict[str, Any]:
+def evaluate_longest_prefix_match(
+    routes: List[Any],
+    target_ip: str,
+    require_active: bool = True,
+    routing_table: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Evaluates Longest Prefix Match (LPM) for target destination IPv4.
-    Finds the most specific active route (highest prefix_len), breaking ties by lowest distance.
+    Delegates to authoritative evaluate_longest_prefix_match in core.routing.unified_route_parser.
+    Remediates Defect D6: Inactive/disabled routes are filtered out of forwarding decisions.
     """
-    clean_ip = normalize_ip(target_ip)
-    if not clean_ip:
-        return {"matched": False, "error": f"Invalid target IPv4 address: '{target_ip}'"}
-
-    try:
-        addr = ipaddress.ip_address(clean_ip)
-    except ValueError as exc:
-        return {"matched": False, "error": str(exc)}
-
-    matching_routes: List[Tuple[ParsedRoute, int]] = []
-
-    for r in routes:
-        if r.network and addr in r.network:
-            matching_routes.append((r, r.prefix_len))
-
-    if not matching_routes:
-        return {
-            "matched": False,
-            "target_ip": clean_ip,
-            "matching_routes_count": 0,
-            "best_route": None,
-            "reason": "No route matches this destination IP (unreachable destination, missing default route).",
-        }
-
-    def route_sort_key(item: Tuple[ParsedRoute, int]):
-        r, plen = item
-        return (1 if r.active else 0, plen, -r.distance)
-
-    matching_routes.sort(key=route_sort_key, reverse=True)
-    best_route, best_plen = matching_routes[0]
-
-    all_matches = [
-        {
-            "dst_address": r.dst_address,
-            "gateway": r.gateway,
-            "prefix_len": r.prefix_len,
-            "distance": r.distance,
-            "active": r.active,
-            "flags": r.raw_flags,
-            "is_default_route": r.dst_address == "0.0.0.0/0",
-        }
-        for r, _ in matching_routes
-    ]
-
-    # Audit D: Check ECMP and recursive gateway indicators
-    ecmp_gateways: List[str] = []
-    if "," in best_route.gateway:
-        ecmp_gateways = [g.strip() for g in best_route.gateway.split(",") if g.strip()]
-    else:
-        # Check if multiple active routes match the same prefix and distance
-        same_cost_routes = [
-            r for r, _ in matching_routes
-            if r.dst_address == best_route.dst_address
-            and r.distance == best_route.distance
-            and r.active == best_route.active
-        ]
-        if len(same_cost_routes) > 1:
-            ecmp_gateways = [r.gateway for r in same_cost_routes]
-
-    is_ecmp = len(ecmp_gateways) > 1 or ("," in best_route.gateway)
-    is_interface_gateway = not bool(re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", best_route.gateway))
-
-    recursive_gateway_candidate = False
-    if best_route.gateway and not is_interface_gateway:
-        try:
-            gw_ip = ipaddress.ip_address(best_route.gateway.split(",")[0].strip())
-            for r in routes:
-                if r.dst_address != "0.0.0.0/0" and r.dst_address != best_route.dst_address and r.network and gw_ip in r.network:
-                    recursive_gateway_candidate = True
-                    break
-        except Exception:
-            pass
-
-    observed_facts = [
-        f"Ditemukan {len(matching_routes)} rute yang mencakup target IP {clean_ip}.",
-        f"Rute terseleksi: dst={best_route.dst_address} via {best_route.gateway} (prefix_len=/{best_route.prefix_len}, distance={best_route.distance}, active={best_route.active}).",
-    ]
-    if is_ecmp:
-        observed_facts.append(f"Rute menggunakan ECMP (multi-gateway: {', '.join(ecmp_gateways) if ecmp_gateways else best_route.gateway}).")
-
-    inferred_hypotheses = [
-        f"LPM memilih rute prefix terpanjang (/{best_route.prefix_len}) dengan prioritas active status dan distance terkecil."
-    ]
-    if recursive_gateway_candidate:
-        inferred_hypotheses.append("Next-hop gateway merupakan IP rute tidak langsung (recursive gateway candidate) yang memerlukan look-up tabel rute sekunder.")
-
-    missing_evidence = [
-        "Routing mark / mangle table rules belum dievaluasi.",
-        "Policy routing rules (/ip route rule atau /routing rule) belum dievaluasi.",
-        "Status resolusi gateway rekursif (scope / target-scope) belum divalidasi terhadap interface fisik.",
-        "Source routing (pref-src selection) belum dipastikan.",
-    ]
-
-    recommendations = []
-    if not best_route.active:
-        recommendations.append("Rute terpilih berstatus INACTIVE. Periksa apakah interface gateway UP atau target scope reachable.")
-    if best_route.dst_address == "0.0.0.0/0":
-        recommendations.append("Trafik menuju host ini bergantung pada default gateway. Pastikan uplink WAN beroperasi normal.")
-
-    return {
-        "matched": True,
-        "target_ip": clean_ip,
-        "matching_routes_count": len(matching_routes),
-        "is_ecmp": is_ecmp,
-        "ecmp_gateways": ecmp_gateways,
-        "recursive_gateway_candidate": recursive_gateway_candidate,
-        "best_route": {
-            "dst_address": best_route.dst_address,
-            "gateway": best_route.gateway,
-            "prefix_len": best_route.prefix_len,
-            "distance": best_route.distance,
-            "active": best_route.active,
-            "flags": best_route.raw_flags,
-            "is_default_route": best_route.dst_address == "0.0.0.0/0",
-            "is_ecmp": is_ecmp,
-            "is_interface_gateway": is_interface_gateway,
-        },
-        "all_matches": all_matches,
-        "is_default_route_match": best_route.dst_address == "0.0.0.0/0",
-        "observed_facts": observed_facts,
-        "inferred_hypotheses": inferred_hypotheses,
-        "missing_evidence": missing_evidence,
-        "recommendations": recommendations,
-        "limits_disclosure": (
-            "LPM mengevaluasi tabel rute 'main' standar. Forwarding aktual pada RouterOS dapat "
-            "berbeda jika terdapat routing-mark (mangle), policy rules (/ip route rule), "
-            "atau VRF terisolasi."
-        ),
-    }
+    from core.routing.unified_route_parser import evaluate_longest_prefix_match as _unified_lpm
+    return _unified_lpm(routes, target_ip, require_active=require_active, routing_table=routing_table)
 
 
 # ---------------------------------------------------------------------------

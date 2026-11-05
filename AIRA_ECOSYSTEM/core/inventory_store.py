@@ -488,6 +488,37 @@ class InventoryStore:
             return {"success": True, "device": self._device_dict(conn, self._device_row(conn, name))}
 
     @_guarded
+    def get_devices_batch(self, names_or_hosts: list[str]) -> dict:
+        """Mengambil beberapa device sekaligus berdasarkan nama atau IP, tanpa error jika sebagian hilang."""
+        found = []
+        missing = []
+        seen_names = set()
+        with closing(self._connect()) as conn:
+            for query in names_or_hosts:
+                try:
+                    row = self._device_row(conn, query)
+                    d = self._device_dict(conn, row)
+                    if d["name"] not in seen_names:
+                        seen_names.add(d["name"])
+                        found.append(d)
+                except InventoryError:
+                    if query not in missing:
+                        missing.append(query)
+        return {"success": True, "devices": found, "missing": missing, "count": len(found)}
+
+    @staticmethod
+    def validate_device_payload(name: str, host: str, port: int = 22, username: Optional[str] = None) -> tuple[bool, Optional[str]]:
+        """Memvalidasi parameter pendaftaran device sebelum insert ke database."""
+        try:
+            _clean_name(name, "nama device")
+            _clean_host(host)
+            _clean_port(port)
+            _opt(username, 80)
+            return True, None
+        except (InventoryError, ValueError) as exc:
+            return False, str(exc)
+
+    @_guarded
     def create_device(
         self, *, name, host, port=22, username=None, device_type="mikrotik",
         snmp_community=None, snmp_port=161, note="", enabled=True,
