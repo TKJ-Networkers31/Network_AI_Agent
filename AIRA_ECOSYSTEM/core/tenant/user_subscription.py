@@ -117,6 +117,10 @@ class UserSubscriptionService:
                 updated_at=row["updated_at"],
             )
 
+    def get_user_subscription(self, user_id: str) -> Optional[UserSubscription]:
+        """Alias for get_subscription."""
+        return self.get_subscription(user_id)
+
     def ensure_user_subscription(self, user_id: str, tenant_id: str, default_tier: str = "FREE") -> UserSubscription:
         """Idempotently ensures user has an active base subscription."""
         sub = self.get_subscription(user_id)
@@ -266,6 +270,7 @@ class UserSubscriptionService:
         now_iso = now.isoformat()
         expired_count = 0
         downgraded_users = []
+        expired_users = []
 
         with topology_transaction(self.db_path, write=True) as conn:
             conn.row_factory = sqlite3.Row
@@ -325,6 +330,7 @@ class UserSubscriptionService:
 
                 expired_count += 1
                 downgraded_users.append(username)
+                expired_users.append(user_id)
 
         if expired_count > 0:
             logger.info("Checked subscriptions: %d expired and gracefully downgraded: %s", expired_count, downgraded_users)
@@ -333,6 +339,7 @@ class UserSubscriptionService:
             "timestamp": now_iso,
             "expired_count": expired_count,
             "downgraded_users": downgraded_users,
+            "expired_users": expired_users,
         }
 
     def list_subscriptions(

@@ -26,6 +26,12 @@ import { ToastProvider } from "./components/Toast.jsx";
 import BootGate from "./components/boot/BootGate.jsx";
 import AccessLocationReporter from "./components/location/AccessLocationReporter.jsx";
 import VoiceCompanionHost from "./components/voice/VoiceCompanionHost.jsx";
+import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
+import LoginModal from "./components/auth/LoginModal.jsx";
+import RegisterModal from "./components/auth/RegisterModal.jsx";
+import LoginRequiredModal from "./components/auth/LoginRequiredModal.jsx";
+import AdminLoginPage from "./pages/AdminLoginPage.jsx";
+
 
 // Helper lazy loader dengan toleransi retry saat kendala jaringan / chunk load error
 function lazyWithRetry(componentImport) {
@@ -157,11 +163,12 @@ class PageErrorBoundary extends Component {
   }
 }
 
-export default function App() {
+function AppShell() {
+  const { isAdmin } = useAuth();
   const [active, setActive] = useState("workspace");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readCollapsed);
-  const Page = PAGES[active] || ChatPage;
+  const Page = (active === "admin" && !isAdmin) ? AdminLoginPage : (PAGES[active] || ChatPage);
   const isFixedHeight = FIXED_HEIGHT_PAGES.has(active);
 
   // Simpan pilihan collapse (di effect, BUKAN di dalam updater setState -
@@ -206,13 +213,7 @@ export default function App() {
   }, []);
 
   return (
-    <ToastProvider>
-      <SessionsProvider>
-        <ChatRuntimeProvider isOnChatPage={active === "chat" || active === "workspace"}>
-          <AccessLocationReporter />
-          <VoiceCompanionHost onNavigate={setActive} />
-          <BootGate>
-            <div className="h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
+    <div className="h-[100dvh] h-screen w-screen flex bg-app text-white overflow-hidden overscroll-none">
               <Sidebar
                 active={active}
                 onChange={setActive}
@@ -243,10 +244,29 @@ export default function App() {
                 onChange={setActive}
                 onOpenMenu={() => setDrawerOpen(true)}
               />
+
+              {/* Authentication & Guest Quota Modals */}
+              <LoginModal />
+              <RegisterModal />
+              <LoginRequiredModal />
             </div>
-          </BootGate>
-        </ChatRuntimeProvider>
-      </SessionsProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <AuthProvider>
+        <SessionsProvider>
+          <ChatRuntimeProvider isOnChatPage={true}>
+            <AccessLocationReporter />
+            <VoiceCompanionHost onNavigate={(id) => window.dispatchEvent(new CustomEvent("aira:navigate", { detail: id }))} />
+            <BootGate>
+              <AppShell />
+            </BootGate>
+          </ChatRuntimeProvider>
+        </SessionsProvider>
+      </AuthProvider>
     </ToastProvider>
   );
 }

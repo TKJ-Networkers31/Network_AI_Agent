@@ -411,12 +411,25 @@ CREATE TABLE IF NOT EXISTS operational_playbooks (
     updated_at TEXT NOT NULL
 );
 
--- Additional Indexes for Phase E
+-- 24. Token Quota Adjustments & Reset History (Directive Section 8)
+CREATE TABLE IF NOT EXISTS operational_token_quota_adjustments (
+    adjustment_id TEXT PRIMARY KEY,
+    admin_id TEXT NOT NULL,
+    target_user_id TEXT NOT NULL,
+    previous_quota INTEGER NOT NULL,
+    new_quota INTEGER NOT NULL,
+    adjustment_type TEXT NOT NULL DEFAULT 'MANUAL' CHECK(adjustment_type IN ('MANUAL', 'BONUS', 'RESET', 'MANUAL_OVERRIDE', 'BONUS_GRANT')),
+    reason TEXT NOT NULL,
+    timestamp_utc TEXT NOT NULL
+);
+
+-- Additional Indexes for Phase E & E.1
 CREATE INDEX IF NOT EXISTS idx_user_sub_status ON operational_user_subscriptions(user_id, subscription_status);
 CREATE INDEX IF NOT EXISTS idx_billing_invoice_user ON operational_billing_invoices(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_billing_txn_user ON operational_billing_transactions(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_billing_webhook ON operational_billing_webhook_events(provider_name, event_type, processed);
 CREATE INDEX IF NOT EXISTS idx_playbooks_tenant ON operational_playbooks(tenant_id, category);
+CREATE INDEX IF NOT EXISTS idx_quota_adj_user ON operational_token_quota_adjustments(target_user_id, timestamp_utc DESC);
 
 """
 
@@ -449,6 +462,17 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
                 conn.execute(f"ALTER TABLE operational_users ADD COLUMN {col_def}")
             except sqlite3.OperationalError:
                 pass  # column already exists
+
+        # Safely add quota reset columns to operational_token_policies
+        for pol_col in [
+            "reset_period TEXT NOT NULL DEFAULT 'MONTHLY'",
+            "reset_type TEXT NOT NULL DEFAULT 'CALENDAR'",
+            "reset_timezone TEXT NOT NULL DEFAULT 'Asia/Jakarta'",
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE operational_token_policies ADD COLUMN {pol_col}")
+            except sqlite3.OperationalError:
+                pass
         now_iso = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
@@ -460,6 +484,22 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
                 "tenant_default",
                 "Default Organization",
                 "default-org",
+                "ACTIVE",
+                "{}",
+                now_iso,
+                now_iso,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO operational_tenants (
+                tenant_id, name, slug, status, config_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "tenant_guest",
+                "Guest Sandbox",
+                "guest-sandbox",
                 "ACTIVE",
                 "{}",
                 now_iso,
@@ -511,6 +551,24 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 """,
                 (*p, now_iso),
+            )
+
+        # Seed default token policies for GUEST, FREE, PRO, ENTERPRISE
+        default_policies = [
+            ("pol_global_guest", "GLOBAL", None, "GUEST", 15000, 2000, 0, "MONTHLY", "CALENDAR", "Asia/Jakarta", 20),
+            ("pol_global_free", "GLOBAL", None, "FREE", 100000, 10000, 0, "MONTHLY", "CALENDAR", "Asia/Jakarta", 30),
+            ("pol_global_pro", "GLOBAL", None, "PRO", 2000000, 200000, 0, "MONTHLY", "CALENDAR", "Asia/Jakarta", 120),
+            ("pol_global_enterprise", "GLOBAL", None, "ENTERPRISE", 10000000, 1000000, 1, "MONTHLY", "CALENDAR", "Asia/Jakarta", 300),
+        ]
+        for pol in default_policies:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO operational_token_policies (
+                    policy_id, scope_type, scope_id, tier, monthly_token_allocation, daily_token_limit,
+                    networking_plus_enabled, reset_period, reset_type, reset_timezone, rate_limit_rpm, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (*pol, now_iso),
             )
 
         logger.info("Multi-Tenant schema initialized successfully in %s", target_path)

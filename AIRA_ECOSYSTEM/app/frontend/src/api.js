@@ -1,14 +1,48 @@
 const BASE = "/api";
 
+export function getAuthHeaders() {
+  const headers = {};
+  if (typeof window !== "undefined") {
+    try {
+      const token = localStorage.getItem("aira_auth_token");
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      let guestId = localStorage.getItem("aira_guest_id");
+      if (!guestId) {
+        guestId = "gst_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+        localStorage.setItem("aira_guest_id", guestId);
+      }
+      headers["X-Guest-ID"] = guestId;
+    } catch {}
+  }
+  return headers;
+}
+
 async function request(path, options = {}) {
+  const authHeaders = getAuthHeaders();
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders,
+      ...(options.headers || {}),
+    },
   });
 
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
-    throw new Error(detail.detail || `Request gagal (${res.status})`);
+    if (res.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("aira:session_expired"));
+    }
+    const err = new Error(
+      typeof detail.detail === "string"
+        ? detail.detail
+        : (detail.detail?.message || detail.message || `Request gagal (${res.status})`)
+    );
+    err.status = res.status;
+    err.payload = detail.detail || detail;
+    throw err;
   }
 
   return res.json();
@@ -29,13 +63,18 @@ function rawCandidates() {
 async function rawRequest(path, options = {}) {
   const bases = rawBase === null ? rawCandidates() : [rawBase];
   let lastError = null;
+  const authHeaders = getAuthHeaders();
 
   for (const base of bases) {
     let res;
     try {
       res = await fetch(`${base}${path}`, {
-        headers: { "Content-Type": "application/json" },
         ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+          ...(options.headers || {}),
+        },
       });
     } catch (err) {
       lastError = err; // CORS / koneksi gagal -> coba kandidat berikutnya
@@ -61,9 +100,15 @@ async function rawRequest(path, options = {}) {
     rawBase = base;
 
     if (!res.ok) {
-      throw new Error(
+      if (res.status === 401 && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("aira:session_expired"));
+      }
+      const err = new Error(
         typeof body.detail === "string" ? body.detail : `Request gagal (${res.status})`
       );
+      err.status = res.status;
+      err.payload = body.detail || body;
+      throw err;
     }
 
     return body;

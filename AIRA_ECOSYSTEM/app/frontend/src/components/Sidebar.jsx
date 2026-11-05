@@ -27,6 +27,7 @@ import { useToast } from "./Toast.jsx";
 import { NAV_GROUPS } from "./navConfig.js";
 import BrandEmblem from "./BrandEmblem.jsx";
 import AccountProfileModal from "./AccountProfileModal.jsx";
+import { useAuth } from "../context/AuthContext.jsx";
 
 const GROUPS_KEY = "aira_sidebar_groups";
 const DEFAULT_OPEN = { main: true, admin: true, sessions: true };
@@ -150,6 +151,7 @@ export default function Sidebar({
     useSessionsContext();
   const { unreadSessionIds, runningSessionIds } = useChatRuntime();
   const { notify } = useToast();
+  const { user, isGuest, subscription, openLogin } = useAuth();
 
   const isDesktop = useIsDesktop();
   const compact = collapsed && isDesktop;
@@ -479,19 +481,33 @@ export default function Sidebar({
         <div className={`shrink-0 border-t border-border ${compact ? "p-2" : "p-3"}`}>
           <button
             type="button"
-            onClick={() => setIsProfileOpen(true)}
+            onClick={() => {
+              if (isGuest) {
+                openLogin();
+              } else {
+                setIsProfileOpen(true);
+              }
+            }}
             className={`w-full flex items-center gap-2.5 rounded-control bg-white/[0.04] hover:bg-white/[0.08] text-left transition ${
               compact ? "justify-center p-1.5" : "px-3 py-2"
             }`}
-            title="Kelola Profil, Langganan & Keamanan Akun"
+            title={isGuest ? "Masuk atau Daftar Akun" : "Kelola Profil, Langganan & Keamanan Akun"}
           >
-            <div className="w-8 h-8 rounded-pill bg-accent-gradient flex items-center justify-center text-xs font-semibold shrink-0 text-white shadow-sm">
-              L
+            <div
+              className={`w-8 h-8 rounded-pill flex items-center justify-center text-xs font-semibold shrink-0 text-white shadow-sm ${
+                isGuest ? "bg-neutral-800 border border-neutral-700 text-neutral-300" : "bg-accent-gradient"
+              }`}
+            >
+              {isGuest ? "G" : (user?.username ? user.username.charAt(0).toUpperCase() : "U")}
             </div>
             {!compact && (
               <div className="min-w-0 flex-1">
-                <div className="text-xs font-medium text-text-primary truncate">Lingga</div>
-                <div className="text-[10px] text-text-secondary truncate">AIRA Workspace</div>
+                <div className="text-xs font-medium text-text-primary truncate">
+                  {isGuest ? "Guest User" : (user?.username || "Pengguna")}
+                </div>
+                <div className="text-[10px] text-text-secondary truncate">
+                  {isGuest ? "Sign In / Register" : (subscription?.plan_id ? `AIRA ${subscription.plan_id}` : "AIRA Workspace")}
+                </div>
               </div>
             )}
           </button>

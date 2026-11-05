@@ -1,0 +1,267 @@
+================================================================================
+AIRA OS — PHASE E.1 COMPLETION REPORT
+AUTHENTICATION FLOW REPAIR, GUEST ACCESS & CHATGPT-STYLE TOKEN QUOTA SYSTEM
+================================================================================
+Date: 2026-11-05
+Branch: feature/aira-phase-e1-auth-repair
+Recovery Checkpoint Tag: checkpoint/before-phase-e1
+Status: COMPLETED (All 25 Acceptance Criteria Verified & Passed)
+Author: Senior Full-Stack Engineer, IAM & Security Engineer, AI Platform Architect
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY & ROOT CAUSE ANALYSIS
+--------------------------------------------------------------------------------
+During the Phase E audit, the system suffered from a critical authentication bug:
+opening the Client Site immediately treated any visitor as 'lingga_admin', the
+login page never appeared, and logging out either retained the session or
+immediately bounced back to 'lingga_admin'.
+
+Investigation identified five compounding root causes:
+1. Hardcoded UI Identity:
+   AIRA_ECOSYSTEM/app/frontend/src/components/Sidebar.jsx hardcoded the bottom-left
+   profile pill with the initial 'L' and label 'Lingga' unconditionally.
+2. Incomplete Frontend Auth State Lifecycle:
+   The frontend lacked a first-class Guest state. Any unauthenticated page load
+   fell back to default profile mocks or stale localStorage artifacts without
+   evaluating session validity against the backend.
+3. Client-Only Logout Without Server-Side Revocation:
+   Clicking 'Sign Out' in AccountProfileModal cleared localStorage but did not
+   revoke the session token hash in 'operational_user_sessions'. Stale tokens or
+   cached interceptor state could immediately restore the session.
+4. Missing Unauthenticated Boundary on Control Plane:
+   AdminPlatformPage did not enforce client-side or router-level access guards.
+   Unauthenticated visitors could view administrative layout containers before
+   any API call failed.
+5. Absence of ChatGPT/Claude-Style Guest & Quota Tiering:
+   There was no differentiated guest persona with scoped token limits, automatic
+   periodic resets, or prompt preservation across authentication challenges.
+
+All root causes have been resolved. The authentication flow, guest onboarding,
+session revocation, and ChatGPT/Claude-style token quota governance are now
+fully integrated and verified.
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL CHANGES & FILES MODIFIED
+--------------------------------------------------------------------------------
+A. Database Schema Upgrades (AIRA_ECOSYSTEM/core/tenant/db.py):
+   - Extended 'operational_token_policies':
+     Added columns: reset_period (TEXT), reset_type (TEXT), reset_timezone (TEXT).
+     Default policies seeded:
+       * GUEST: 15,000 monthly, 2,000 daily, 20 RPM, monthly rolling, Asia/Jakarta.
+       * FREE: 100,000 monthly, 10,000 daily, 30 RPM, monthly calendar, Asia/Jakarta.
+       * PRO: 2,000,000 monthly, 100,000 daily, 60 RPM, monthly calendar, Asia/Jakarta.
+       * ENTERPRISE: 10,000,000 monthly, 500,000 daily, 120 RPM, monthly calendar, Asia/Jakarta.
+   - Seeded 'tenant_guest' in 'operational_tenants' to enforce referential integrity.
+   - Created table 'operational_token_quota_adjustments':
+     (adjustment_id, admin_id, target_user_id, previous_quota, new_quota,
+      adjustment_type, reason, timestamp_utc)
+     Audit trail constraint supports 'MANUAL_OVERRIDE' and 'BONUS_GRANT'.
+
+B. Token Quota & Reset Engine (AIRA_ECOSYSTEM/core/tenant/token_quota_service.py):
+   - Created TokenQuotaService to separate AI Model Tokens, Usage Quotas, and Internal Credits.
+   - Pinned timezone calculations to 'Asia/Jakarta' (WIB / UTC+7).
+   - Atomic quota checks (check_quota_available) and atomic token consumption (consume_tokens).
+   - Rollover reset logic (sweep_due_quotas) zeroes used_tokens when period expires,
+     while preserving the complete immutable transaction ledger in operational_token_ledger.
+   - Admin capabilities: adjust_user_quota, reset_user_quota, list_quota_adjustments,
+     update_plan_policy.
+
+C. Backend API Updates:
+   - AIRA_ECOSYSTEM/api/routers/auth.py:
+     * Updated GET /api/v1/auth/me to return complete token quota metrics.
+     * Added GET /api/v1/auth/guest-quota for guest status inspection.
+     * Updated POST /api/v1/auth/logout to revoke server-side sessions cleanly.
+   - AIRA_ECOSYSTEM/api/routers/chat.py:
+     * Pre-flight token quota validation via check_quota_available().
+     * Returns 403 Forbidden with {"detail": "LOGIN_REQUIRED", "code": "QUOTA_EXHAUSTED"}
+       when guest or user quota is exhausted.
+     * Rejects guest attempts to perform mutating actions (e.g. deploy playbook, reboot)
+       with 403 Forbidden ("LOGIN_REQUIRED").
+     * Atomically consumes tokens and attaches updated quota state in ChatResponse.
+   - AIRA_ECOSYSTEM/api/routers/admin_platform.py:
+     * Added endpoints:
+       POST /api/v1/admin/tokens/adjust
+       POST /api/v1/admin/tokens/reset
+       GET  /api/v1/admin/tokens/adjustments
+       GET  /api/v1/admin/tokens/policies
+       PUT  /api/v1/admin/tokens/plan-policy
+       POST /api/v1/admin/tokens/sweep
+   - AIRA_ECOSYSTEM/api/schemas.py:
+     * Added optional 'quota' dictionary to ChatResponse.
+   - AIRA_ECOSYSTEM/core/tenant/user_subscription.py:
+     * Added get_user_subscription alias and included expired_users in expiration report.
+
+D. Frontend Architecture & Components:
+   - AIRA_ECOSYSTEM/app/frontend/src/api.js:
+     * Automatically attaches 'Authorization: Bearer <token>' and 'X-Guest-ID: <guestId>'.
+     * Emits 'aira:session_expired' event on 401 Unauthorized.
+   - AIRA_ECOSYSTEM/app/frontend/src/context/AuthContext.jsx:
+     * Manages 5 explicit states: INITIALIZING, GUEST, AUTHENTICATED, SESSION_EXPIRED, LOGGING_OUT.
+     * Manages prompt preservation across login modals.
+   - AIRA_ECOSYSTEM/app/frontend/src/components/auth/LoginModal.jsx:
+     * Clean login modal supporting email/password, Google OAuth mock, and 'Continue as Guest'.
+   - AIRA_ECOSYSTEM/app/frontend/src/components/auth/RegisterModal.jsx:
+     * Onboarding modal auto-provisioning Free tier accounts.
+   - AIRA_ECOSYSTEM/app/frontend/src/components/auth/LoginRequiredModal.jsx:
+     * 'Sign in to continue' modal triggered when guest quota is exhausted or a restricted
+       action is attempted. Explicitly notifies the user their prompt draft is preserved.
+   - AIRA_ECOSYSTEM/app/frontend/src/pages/AdminLoginPage.jsx:
+     * Dedicated Admin Login screen guarding /admin route against unauthorized access.
+   - AIRA_ECOSYSTEM/app/frontend/src/components/Sidebar.jsx:
+     * Removed hardcoded 'Lingga' / 'L'.
+     * Renders user initial and username when authenticated.
+     * Renders 'G' / 'Guest User' / 'Sign In / Register' when in Guest mode.
+   - AIRA_ECOSYSTEM/app/frontend/src/components/AccountProfileModal.jsx:
+     * Removed all hardcoded fallbacks to lingga_admin.
+     * Integrated ChatGPT-style Token Usage dashboard (plan badge, progress bar,
+       remaining tokens, reset date in WIB).
+     * Server-backed Sign Out button that revokes backend session and resets to Guest.
+   - AIRA_ECOSYSTEM/app/frontend/src/pages/AdminPlatformPage.jsx:
+     * Added Token Quota Policy table, User Quota Override modal, and Audit Trail log.
+   - AIRA_ECOSYSTEM/app/frontend/src/App.jsx:
+     * Wrapped with AuthProvider, added route protection for /admin, and rendered auth modals.
+
+--------------------------------------------------------------------------------
+3. BEFORE & AFTER WORKFLOW COMPARISON
+--------------------------------------------------------------------------------
+A. First-Time Visitor (Client Site):
+   BEFORE: App opened automatically logged in as 'lingga_admin' with Superadmin rights.
+   AFTER:  App opens in Guest Mode. No account injected. Sidebar shows 'Guest User'.
+           Visitor can immediately test AIRA prompts within guest quota limits.
+
+B. First-Time Visitor (Admin Site):
+   BEFORE: Admin Control Plane opened immediately without requiring credentials.
+   AFTER:  AdminLoginPage appears. Access to Control Plane is strictly blocked until
+           authenticated as an administrator (PLATFORM_SUPERADMIN or PLATFORM_SUPPORT).
+           Customer users attempting to log in on Admin Site are rejected with 403.
+
+C. Logout Operation:
+   BEFORE: Clearing localStorage caused the UI to reload or fall back to 'lingga_admin'.
+   AFTER:  Calling /api/v1/auth/logout revokes the session token hash in the database.
+           AuthContext transitions to LOGGING_OUT and then GUEST.
+           Sidebar and Workspace return to clean Guest mode. Old bearer token is invalid.
+
+D. Token Quota Exhaustion & Prompt Preservation:
+   BEFORE: Requests crashed or threw generic errors; user prompt draft was lost.
+   AFTER:  When guest quota is exhausted, backend responds with 403 LOGIN_REQUIRED.
+           Frontend displays 'LoginRequiredModal' and stores the prompt draft in
+           sessionStorage and AuthContext. After login or quota grant, user resumes
+           without retyping their technical prompt.
+
+--------------------------------------------------------------------------------
+4. GUEST MODE & ACCESS GOVERNANCE SPECIFICATIONS
+--------------------------------------------------------------------------------
+Guest Permissions:
+- Permitted:
+  * Open AIRA Workspace.
+  * Inspect available UI features, topology graph, and navigation.
+  * Write prompts and chat with AI within guest quota.
+  * View read-only device examples.
+  * Access login and registration modals.
+- Strictly Blocked:
+  * Permanently saving or mutating network devices.
+  * Saving credentials or secrets.
+  * Accessing customer NOC metrics or alerting.
+  * Executing automations or playbooks on real network hardware.
+  * Accessing other tenants' isolated workspaces.
+  * Accessing Admin Control Plane.
+
+Guest Quota Specifications:
+- Monthly Quota: 15,000 tokens
+- Daily Quota: 2,000 tokens
+- Rate Limit: 20 Requests Per Minute (RPM)
+- Reset Policy: Monthly Rolling window
+- Isolated Tenant: 'tenant_guest'
+
+--------------------------------------------------------------------------------
+5. CHATGPT / CLAUDE-STYLE TOKEN QUOTA GOVERNANCE
+--------------------------------------------------------------------------------
+Architecture Dimensions:
+1. AI Model Tokens:
+   Raw LLM input and output tokens metered atomically per inference request.
+2. User Usage Quota:
+   Periodic limit assigned to a user or guest based on their subscription tier.
+   Supported reset periods: DAILY, WEEKLY, MONTHLY, CUSTOM.
+3. Internal Operation Credits:
+   Cost accounting for tool execution and playbook actions.
+
+Reset Policy & Timezone:
+- Standard Timezone: Asia/Jakarta (WIB / UTC+7).
+- Next Reset Calculation:
+  * Calendar Monthly: Aligns to 1st of the next month at 00:00:00 WIB.
+  * Rolling Monthly: Exactly 30 days from period start.
+  * Daily: Aligns to next calendar midnight at 00:00:00 WIB.
+- Rollover Logic:
+  * When reset_date is reached, 'used_tokens' is reset to 0.
+  * Quota ceiling is refreshed to the active tier limit.
+  * Historical ledger records in 'operational_token_ledger' are NEVER wiped or altered.
+
+Superadmin Token Controls:
+- Manual Quota Override: Allows platform superadmin to set custom quota ceilings.
+- Bonus Grants: Grants one-time token injections without shifting subscription tier.
+- Instant Reset: Resets a user's used_tokens back to 0 immediately.
+- Tamper-Evident Audit Trail: Every modification logged to 'operational_token_quota_adjustments'.
+
+--------------------------------------------------------------------------------
+6. VERIFICATION & TEST RESULTS
+--------------------------------------------------------------------------------
+Automated Test Suite: AIRA_ECOSYSTEM/tests/test_phase_e1_all.py
+Execution Command: .venv\Scripts\python.exe -m pytest AIRA_ECOSYSTEM/tests/test_phase_e1_all.py -v
+Execution Time: 12.68 seconds
+Total Test Cases: 25
+Passed: 25 (100%)
+Failed: 0 (0%)
+
+Summary of Acceptance Criteria Validation:
+[PASSED] Test 01: Fresh Client Site visitor enters Guest Mode without injected identity
+[PASSED] Test 02: Fresh Admin Site visitor is blocked and presented with Admin Login
+[PASSED] Test 03: Guest can send chat prompt within quota and receives token consumption
+[PASSED] Test 04: Guest attempting restricted action (deploy/reboot) is blocked with LOGIN_REQUIRED
+[PASSED] Test 05: Guest with exhausted quota is blocked with LOGIN_REQUIRED / QUOTA_EXHAUSTED
+[PASSED] Test 06: Valid customer login authenticates user, sets subscription & token quota
+[PASSED] Test 07: Valid superadmin login authenticates administrator to Control Plane
+[PASSED] Test 08: Non-admin user attempting Admin Login is strictly rejected (403 Forbidden)
+[PASSED] Test 09: Logout operation revokes server-side session token in database
+[PASSED] Test 10: Page reload after logout remains in Guest Mode without re-authenticating
+[PASSED] Test 11: Guest tier token quota adheres to specs (15k monthly, 2k daily, 20 RPM)
+[PASSED] Test 12: Free tier token quota adheres to specs (100k monthly, 10k daily, 30 RPM)
+[PASSED] Test 13: Pro tier token quota adheres to specs (2M monthly, 100k daily, 60 RPM)
+[PASSED] Test 14: Enterprise tier token quota adheres to specs (10M monthly, 500k daily, 120 RPM)
+[PASSED] Test 15: Pre-flight check_quota_available correctly detects available and exhausted states
+[PASSED] Test 16: Token consumption is atomic and preserves immutable ledger records
+[PASSED] Test 17: Automatic quota reset zeroes used_tokens while preserving ledger history
+[PASSED] Test 18: Next reset date calculation correctly aligns with Asia/Jakarta (WIB)
+[PASSED] Test 19: Superadmin quota adjustment creates tamper-evident audit trail entry
+[PASSED] Test 20: Superadmin quota reset creates tamper-evident audit trail entry
+[PASSED] Test 21: Revoked session token is strictly rejected with 401 Unauthorized
+[PASSED] Test 22: Customer tokens cannot access Admin platform management endpoints
+[PASSED] Test 23: Guest operations are strictly isolated to tenant_guest
+[PASSED] Test 24: Zero hardcoded superadmin fallback exists across codebase
+[PASSED] Test 25: Subscription expiration gracefully downgrades tier while preserving all inventory
+
+Frontend Build Verification:
+Command: cd AIRA_ECOSYSTEM/app/frontend && npm run build
+Result: Built successfully in 3.35s with 0 errors.
+
+--------------------------------------------------------------------------------
+7. ROLLBACK & DEPLOYMENT INSTRUCTIONS
+--------------------------------------------------------------------------------
+Git Branch: feature/aira-phase-e1-auth-repair
+Recovery Checkpoint Tag: checkpoint/before-phase-e1
+
+To rollback if ever needed:
+  git checkout checkpoint/before-phase-e1
+
+To test backend locally:
+  .venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
+
+To test frontend locally:
+  cd AIRA_ECOSYSTEM/app/frontend
+  npm run dev
+
+To re-run the automated acceptance test suite:
+  .venv\Scripts\python.exe -m pytest AIRA_ECOSYSTEM/tests/test_phase_e1_all.py -v
+
+================================================================================
+END OF REPORT
+================================================================================

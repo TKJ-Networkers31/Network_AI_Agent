@@ -23,6 +23,7 @@ from core.tenant.entitlements import EntitlementManager
 from core.tenant.manager import IdentityManager, TenantManager
 from core.tenant.models import TenantContext, UserRoleType
 from core.tenant.user_subscription import UserSubscriptionService
+from core.tenant.token_quota_service import TokenQuotaService
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -30,6 +31,7 @@ _identity_mgr = IdentityManager()
 _tenant_mgr = TenantManager()
 _entitlement_mgr = EntitlementManager()
 _sub_service = UserSubscriptionService()
+_quota_service = TokenQuotaService()
 
 
 class RegisterRequest(BaseModel):
@@ -119,8 +121,9 @@ def register(payload: RegisterRequest):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    # Initialize Free tier token balance
+    # Initialize Free tier token balance & quota
     _entitlement_mgr.get_or_create_balance(tenant_id=tenant.tenant_id, user_id=user.user_id)
+    quota = _quota_service.get_or_create_user_quota(user_id=user.user_id, tenant_id=tenant.tenant_id, tier="FREE")
 
     # Establish initial session
     session = _identity_mgr.authenticate_user(payload.username, payload.password)
@@ -137,6 +140,7 @@ def register(payload: RegisterRequest):
             "organization_name": tenant.name,
             "role": UserRoleType.CUSTOMER_OWNER.value,
         },
+        "quota": quota.to_dict(),
     }
 
 
@@ -174,10 +178,13 @@ def login(payload: LoginRequest):
     # Fetch token balance and entitlements
     balance = None
     has_net = False
+    quota = None
     if session.tenant_id:
         bal_obj = _entitlement_mgr.get_or_create_balance(session.tenant_id, session.user_id)
         balance = bal_obj.to_dict()
         has_net = sub.has_networking_plus if sub else _entitlement_mgr.has_networking_access(session.tenant_id)
+        quota_state = _quota_service.get_or_create_user_quota(session.user_id, session.tenant_id, tier=sub.plan_id if sub else "FREE")
+        quota = quota_state.to_dict()
 
     return {
         "success": True,
@@ -198,6 +205,7 @@ def login(payload: LoginRequest):
             "tier": sub.plan_id if sub else "FREE",
         },
         "token_balance": balance,
+        "quota": quota,
     }
 
 
@@ -242,7 +250,7 @@ def disable_mfa(ctx: TenantContext = Depends(get_current_user_context)):
 
 
 @router.post("/logout")
-def logout(ctx: TenantContext = Depends(get_current_user_context), authorization: Optional[str] = Header(None)):
+def logout(authorization: Optional[str] = Header(None)):
     """Revokes active session token."""
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1]
@@ -252,15 +260,18 @@ def logout(ctx: TenantContext = Depends(get_current_user_context), authorization
 
 @router.get("/me")
 def get_current_user_profile(ctx: TenantContext = Depends(get_current_user_context)):
-    """Returns profile, roles, active entitlements, and token balance of current user."""
+    """Returns profile, roles, active entitlements, and token quota of current user."""
     balance = None
     has_net = False
     sub = None
+    quota = None
     if ctx.tenant_id:
         sub = _sub_service.ensure_user_subscription(ctx.user_id, ctx.tenant_id)
         bal_obj = _entitlement_mgr.get_or_create_balance(ctx.tenant_id, ctx.user_id)
         balance = bal_obj.to_dict()
         has_net = sub.has_networking_plus if sub else _entitlement_mgr.has_networking_access(ctx.tenant_id)
+        quota_state = _quota_service.get_or_create_user_quota(ctx.user_id, ctx.tenant_id, tier=sub.plan_id if sub else "FREE")
+        quota = quota_state.to_dict()
 
     return {
         "success": True,
@@ -278,7 +289,17 @@ def get_current_user_profile(ctx: TenantContext = Depends(get_current_user_conte
             "tier": sub.plan_id if sub else "FREE",
         },
         "token_balance": balance,
+        "quota": quota,
     }
+
+
+@router.get("/guest-quota")
+def get_guest_quota(guest_id: Optional[str] = Query(None)):
+    """Returns quota information for unauthenticated guest session."""
+    gid = guest_id or "guest_anonymous"
+    quota = _quota_service.get_guest_quota(gid)
+    return {"success": True, "quota": quota.to_dict()}
+
 
 
 @router.get("/google/url")

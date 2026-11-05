@@ -23,6 +23,7 @@ from core.tenant.manager import IdentityManager, TenantManager
 from core.tenant.models import Permission, TenantContext, TenantStatus, UserRoleType
 from core.tenant.user_subscription import UserSubscriptionService
 from core.billing.service import BillingService
+from core.tenant.token_quota_service import TokenQuotaService
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin_platform"])
 
@@ -32,6 +33,7 @@ _entitlement_mgr = EntitlementManager()
 _approval_engine = CentralizedApprovalEngine()
 _sub_service = UserSubscriptionService()
 _billing_service = BillingService()
+_quota_service = TokenQuotaService()
 
 
 def require_platform_admin(authorization: Optional[str] = Header(None)) -> TenantContext:
@@ -296,3 +298,95 @@ def list_platform_users(limit: int = Query(100), admin: TenantContext = Depends(
             (limit,),
         ).fetchall()
         return {"success": True, "users": [dict(r) for r in rows]}
+
+
+class AdjustUserQuotaInput(BaseModel):
+    target_user_id: str
+    new_quota: int = Field(..., ge=0)
+    reason: str = Field(..., min_length=3)
+    adjustment_type: str = "MANUAL_OVERRIDE"
+
+
+class ResetUserQuotaInput(BaseModel):
+    target_user_id: str
+    reason: str = Field(default="Admin manual reset", min_length=3)
+
+
+class UpdatePlanPolicyInput(BaseModel):
+    tier: str
+    monthly_token_allocation: int = Field(..., ge=1000)
+    daily_token_allocation: int = Field(..., ge=500)
+    reset_period: str = "MONTHLY"
+    reset_type: str = "CALENDAR"
+    reset_timezone: str = "Asia/Jakarta"
+    rate_limit_rpm: int = 60
+
+
+@router.post("/tokens/adjust")
+def adjust_user_quota(payload: AdjustUserQuotaInput, admin: TenantContext = Depends(require_platform_admin)):
+    """Manually overrides or grants bonus quota to a user with mandatory audit logging."""
+    try:
+        res = _quota_service.adjust_user_quota(
+            admin_user_id=admin.user_id,
+            target_user_id=payload.target_user_id,
+            new_quota=payload.new_quota,
+            reason=payload.reason,
+            adjustment_type=payload.adjustment_type,
+        )
+        return {"success": True, "adjustment": res}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/tokens/reset")
+def reset_user_quota(payload: ResetUserQuotaInput, admin: TenantContext = Depends(require_platform_admin)):
+    """Manually resets a target user's consumed tokens to zero."""
+    try:
+        res = _quota_service.reset_user_quota(
+            admin_user_id=admin.user_id,
+            target_user_id=payload.target_user_id,
+            reason=payload.reason,
+        )
+        return {"success": True, "result": res}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/tokens/adjustments")
+def list_token_adjustments(limit: int = Query(50), admin: TenantContext = Depends(require_platform_admin)):
+    """Returns audit trail of manual quota overrides and bonus allocations."""
+    adjustments = _quota_service.list_quota_adjustments(limit=limit)
+    return {"success": True, "adjustments": adjustments}
+
+
+@router.get("/tokens/policies")
+def list_plan_token_policies(admin: TenantContext = Depends(require_platform_admin)):
+    """Returns global token quota policies across tiers."""
+    policies = _quota_service.list_plan_policies()
+    return {"success": True, "policies": policies}
+
+
+@router.put("/tokens/plan-policy")
+def update_plan_token_policy(payload: UpdatePlanPolicyInput, admin: TenantContext = Depends(require_platform_admin)):
+    """Updates plan default token allocations, reset cycle, and timezone."""
+    try:
+        res = _quota_service.update_plan_policy(
+            tier=payload.tier,
+            monthly_token_allocation=payload.monthly_token_allocation,
+            daily_token_allocation=payload.daily_token_allocation,
+            reset_period=payload.reset_period,
+            reset_type=payload.reset_type,
+            reset_timezone=payload.reset_timezone,
+            rate_limit_rpm=payload.rate_limit_rpm,
+        )
+        return {"success": True, "policy": res}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/tokens/sweep")
+def trigger_token_sweep(admin: TenantContext = Depends(require_platform_admin)):
+    """Manually triggers background sweep of due token balances."""
+    res = _quota_service.sweep_due_quotas()
+    return {"success": True, "sweep": res}
+

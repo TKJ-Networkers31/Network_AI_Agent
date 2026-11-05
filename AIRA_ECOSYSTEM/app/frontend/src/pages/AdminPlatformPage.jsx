@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import TopBar from "../components/TopBar.jsx";
 import { useToast } from "../components/Toast.jsx";
+import { getAuthHeaders } from "../api.js";
 
 const CONTROL_PLANE_MODULES = [
   { id: "overview", label: "Overview", icon: BarChart3 },
@@ -69,6 +70,13 @@ export default function AdminPlatformPage({ onOpenMenu }) {
   const [transactions, setTransactions] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [tokenPolicy, setTokenPolicy] = useState(null);
+  const [tokenAdjustments, setTokenAdjustments] = useState([]);
+  const [planPolicies, setPlanPolicies] = useState([]);
+  const [quotaModalUser, setQuotaModalUser] = useState(null);
+  const [newQuotaValue, setNewQuotaValue] = useState(100000);
+  const [quotaReason, setQuotaReason] = useState("");
+  const [quotaAdjType, setQuotaAdjType] = useState("MANUAL_OVERRIDE");
+  const [savingQuota, setSavingQuota] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Impersonation modal state
@@ -88,14 +96,17 @@ export default function AdminPlatformPage({ onOpenMenu }) {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [uRes, tRes, sRes, iRes, txRes, aRes, polRes] = await Promise.all([
-        fetch("/api/v1/admin/users?limit=50").then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/tenants").then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/subscriptions?limit=50").then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/billing/invoices?limit=50").then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/billing/transactions?limit=50").then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/approvals?status=PENDING").then((r) => r.json()).catch(() => ({})),
-        fetch("/api/v1/admin/token-policy?tier=PRO").then((r) => r.json()).catch(() => ({})),
+      const headers = getAuthHeaders();
+      const [uRes, tRes, sRes, iRes, txRes, aRes, polRes, adjRes, polsRes] = await Promise.all([
+        fetch("/api/v1/admin/users?limit=50", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/tenants", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/subscriptions?limit=50", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/billing/invoices?limit=50", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/billing/transactions?limit=50", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/approvals?status=PENDING", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/token-policy?tier=PRO", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/tokens/adjustments?limit=50", { headers }).then((r) => r.json()).catch(() => ({})),
+        fetch("/api/v1/admin/tokens/policies", { headers }).then((r) => r.json()).catch(() => ({})),
       ]);
 
       if (uRes.success) setUsers(uRes.users || []);
@@ -105,6 +116,8 @@ export default function AdminPlatformPage({ onOpenMenu }) {
       if (txRes.success) setTransactions(txRes.transactions || []);
       if (aRes.success) setApprovals(aRes.approvals || []);
       if (polRes.success) setTokenPolicy(polRes.policy);
+      if (adjRes.success) setTokenAdjustments(adjRes.adjustments || []);
+      if (polsRes.success) setPlanPolicies(polsRes.policies || []);
     } catch (err) {
       console.warn("Error loading admin data:", err);
     } finally {
@@ -126,7 +139,7 @@ export default function AdminPlatformPage({ onOpenMenu }) {
     try {
       const res = await fetch("/api/v1/admin/impersonate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           target_user_id: impersonateTarget.user_id,
           reason: impersonateReason.trim(),
@@ -150,14 +163,70 @@ export default function AdminPlatformPage({ onOpenMenu }) {
     }
   }
 
-  // Assign subscription action
+  async function handleAdjustQuota() {
+    if (!quotaModalUser || !quotaReason.trim()) {
+      notify({ type: "error", message: "Alasan perubahan kuota wajib diisi untuk audit." });
+      return;
+    }
+    setSavingQuota(true);
+    try {
+      const res = await fetch("/api/v1/admin/tokens/adjust", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          target_user_id: quotaModalUser.user_id,
+          new_quota: parseInt(newQuotaValue) || 0,
+          reason: quotaReason.trim(),
+          adjustment_type: quotaAdjType,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notify({ type: "success", message: `Kuota token user ${quotaModalUser.username} berhasil diperbarui.` });
+        setQuotaModalUser(null);
+        setQuotaReason("");
+        loadData();
+      } else {
+        notify({ type: "error", message: data.detail || "Gagal memperbarui kuota." });
+      }
+    } catch (err) {
+      notify({ type: "error", message: err.message });
+    } finally {
+      setSavingQuota(false);
+    }
+  }
+
+  async function handleResetUserQuota(userId, username) {
+    if (!confirm(`Reset token terpakai user ${username} menjadi 0?`)) return;
+    try {
+      const res = await fetch("/api/v1/admin/tokens/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({
+          target_user_id: userId,
+          reason: "Superadmin manual cycle reset",
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        notify({ type: "success", message: `Token terpakai ${username} direset ke 0.` });
+        loadData();
+      } else {
+        notify({ type: "error", message: data.detail || "Gagal reset token." });
+      }
+    } catch (err) {
+      notify({ type: "error", message: err.message });
+    }
+  }
+
+    // Assign subscription action
   async function handleAssignSubscription() {
     if (!assignSubUser) return;
     setSavingSub(true);
     try {
       const res = await fetch("/api/v1/admin/subscriptions/assign", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           user_id: assignSubUser.user_id,
           plan_id: selectedPlanTier,
@@ -184,7 +253,7 @@ export default function AdminPlatformPage({ onOpenMenu }) {
   // Check expirations manually
   async function handleSweepExpirations() {
     try {
-      const res = await fetch("/api/v1/admin/subscriptions/check-expirations", { method: "POST" });
+      const res = await fetch("/api/v1/admin/subscriptions/check-expirations", { method: "POST", headers: getAuthHeaders() });
       const data = await res.json();
       if (data.success) {
         notify({
@@ -203,7 +272,7 @@ export default function AdminPlatformPage({ onOpenMenu }) {
     try {
       const res = await fetch(`/api/v1/admin/approvals/${encodeURIComponent(approvalId)}/resolve`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ approved, review_notes: approved ? "Approved by Superadmin" : "Rejected" }),
       });
       const data = await res.json();
@@ -751,7 +820,75 @@ export default function AdminPlatformPage({ onOpenMenu }) {
         </div>
       )}
 
-      {/* Subscription Assignment Modal */}
+      {/* User Token Quota Adjustment Modal */}
+      {quotaModalUser && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-[#18181b] border border-white/10 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex justify-between items-start">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Sesuaikan Kuota Token: {quotaModalUser.username}</h3>
+                <p className="text-xs text-neutral-400 mt-0.5">Penetapan kuota token manual dengan jejak audit mandatori</p>
+              </div>
+              <button onClick={() => setQuotaModalUser(null)} className="text-neutral-400 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-neutral-300 block mb-1">Tipe Penyesuaian</label>
+                <select
+                  value={quotaAdjType}
+                  onChange={(e) => setQuotaAdjType(e.target.value)}
+                  className="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-white"
+                >
+                  <option value="MANUAL_OVERRIDE">MANUAL_OVERRIDE (Ganti Total Kuota)</option>
+                  <option value="BONUS_GRANT">BONUS_GRANT (Alokasi Bonus Tambahan)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-neutral-300 block mb-1">Nilai Kuota Token Baru</label>
+                <input
+                  type="number"
+                  value={newQuotaValue}
+                  onChange={(e) => setNewQuotaValue(parseInt(e.target.value) || 0)}
+                  className="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-neutral-300 block mb-1">Alasan Penyesuaian (Wajib Diisi untuk Audit)</label>
+                <textarea
+                  rows={2}
+                  value={quotaReason}
+                  onChange={(e) => setQuotaReason(e.target.value)}
+                  placeholder="mis. Ekstensi kuota khusus proyek PoC Bank Central"
+                  className="w-full p-2 bg-black/40 border border-white/10 rounded-lg text-white resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setQuotaModalUser(null)}
+                className="px-3 py-1.5 text-xs rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 transition"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleAdjustQuota}
+                disabled={savingQuota}
+                className="px-4 py-1.5 text-xs rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium transition"
+              >
+                {savingQuota ? "Menyimpan..." : "Simpan Penyesuaian"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+            {/* Subscription Assignment Modal */}
       {assignSubUser && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
           <div className="bg-[#18181b] border border-white/10 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
