@@ -997,8 +997,23 @@ def get_network_intelligence_overview():
     hist_engine = HistoricalIntelligenceEngine()
     recurring = hist_engine.detect_recurring_incidents()
 
+    from core.inventory_store import get_inventory_store
+    from core.nms_engine import get_nms_engine
+    from core.network_intelligence.action_engine import get_action_engine
+    from core.operations.decision_engine import OperationalDecisionEngine
+
     store = get_network_intelligence_store()
     recent_incidents = store.list_incidents(limit=10)
+    inv_devices = get_inventory_store().list_devices()
+    nms_overview = get_nms_engine().get_overview()
+    action_engine = get_action_engine()
+    recent_actions = action_engine.list_actions(limit=20)
+    pending_approvals = [a for a in recent_actions if a.get("status") == "PENDING_APPROVAL"]
+    decisions_engine = OperationalDecisionEngine()
+    try:
+        recent_decisions = decisions_engine.list_decisions(tenant_id="tenant_internal", limit=5)
+    except Exception:
+        recent_decisions = []
 
     return {
         "success": True,
@@ -1007,13 +1022,20 @@ def get_network_intelligence_overview():
             "health_score": health.get("score", 100.0),
             "dimension_scores": health.get("dimensions", {}),
             "device_health": health.get("device_health", {}),
+            "total_registered_devices": len(inv_devices),
+            "reachable_devices": nms_overview.get("up_count", 0),
+            "unreachable_devices": nms_overview.get("down_count", 0) + nms_overview.get("suspected_count", 0),
+            "active_investigations": len([i for i in recent_incidents if i.investigation_status != "COMPLETED"]),
             "active_incidents_count": len([i for i in recent_incidents if i.investigation_status != "COMPLETED"]),
             "recent_incidents": [i.to_dict() for i in recent_incidents[:5]],
+            "detected_anomalies": len(anomalies),
             "major_anomalies": [a.to_dict() for a in anomalies if a.severity in ("CRITICAL", "HIGH")],
             "recurring_incidents": recurring[:5],
+            "pending_approvals": pending_approvals,
+            "recent_ai_decisions": [d.to_dict() if hasattr(d, "to_dict") else d for d in recent_decisions],
             "evidence_freshness": bundle.freshness_summary,
             "total_evidence_records": len(bundle.records),
-            "observed_devices": list(bundle.device_records.keys()),
+            "observed_devices": list(bundle.device_evidence.keys()) if hasattr(bundle, "device_evidence") else [],
         }
     }
 
@@ -1365,3 +1387,142 @@ def get_canonical_evidence_endpoint(evidence_id: str):
         "success": True,
         "evidence": rec.to_dict(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Workstream D: Automatic Device Onboarding Endpoints
+# ---------------------------------------------------------------------------
+
+class DeviceOnboardIn(BaseModel):
+    name: str = Field(..., min_length=2, max_length=64)
+    host: str = Field(..., min_length=3, max_length=255)
+    port: int = Field(22, ge=1, le=65535)
+    device_type: str = "ROUTER"
+    vendor: str = "MikroTik"
+    username: Optional[str] = None
+    password: Optional[str] = None
+    credential_ref: Optional[str] = None
+    site_id: str = "site_default"
+    tenant_id: str = "tenant_internal"
+
+
+@router.post("/devices/onboard", summary="Execute automated device onboarding, capability discovery, and initial investigation")
+def onboard_device_endpoint(body: DeviceOnboardIn):
+    from core.network_intelligence.onboarding import get_onboarding_engine
+    engine = get_onboarding_engine()
+    return engine.onboard_device(
+        name=body.name,
+        host=body.host,
+        port=body.port,
+        device_type=body.device_type,
+        vendor=body.vendor,
+        username=body.username,
+        password=body.password,
+        credential_ref=body.credential_ref,
+        site_id=body.site_id,
+        tenant_id=body.tenant_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Workstream E: AI Action Management, Approval & Execution Endpoints
+# ---------------------------------------------------------------------------
+
+class ActionProposeIn(BaseModel):
+    action_name: str = Field(..., min_length=2, max_length=128)
+    target_devices: List[str] = Field(default_factory=list)
+    description: str = Field(..., min_length=5)
+    reason: str = Field(..., min_length=5)
+    before_state: Dict[str, Any] = Field(default_factory=dict)
+    proposed_changes: Dict[str, Any] = Field(default_factory=dict)
+    expected_after_state: Dict[str, Any] = Field(default_factory=dict)
+    diff_text: str = ""
+    verification_plan: str = ""
+    rollback_plan: str = ""
+    rollback_supported: bool = False
+    investigation_id: Optional[str] = None
+
+
+class ActionResolveIn(BaseModel):
+    approved: bool
+    notes: str = ""
+
+
+class OperationsPolicyUpdateIn(BaseModel):
+    enable_auto_low_risk: Optional[bool] = None
+    require_medium_risk_approval: Optional[bool] = None
+
+
+@router.get("/actions", summary="List proposed, pending, executing, and completed network actions")
+def list_actions_endpoint(status: Optional[str] = Query(None), limit: int = Query(50, ge=1, le=200)):
+    from core.network_intelligence.action_engine import get_action_engine
+    engine = get_action_engine()
+    actions = engine.list_actions(status=status, limit=limit)
+    return {"success": True, "actions": actions}
+
+
+@router.post("/actions", summary="Propose an evidence-backed network configuration or remediation action")
+def propose_action_endpoint(body: ActionProposeIn):
+    from core.network_intelligence.action_engine import get_action_engine
+    engine = get_action_engine()
+    action = engine.propose_action(
+        action_name=body.action_name,
+        target_devices=body.target_devices,
+        description=body.description,
+        reason=body.reason,
+        before_state=body.before_state,
+        proposed_changes=body.proposed_changes,
+        expected_after_state=body.expected_after_state,
+        diff_text=body.diff_text,
+        verification_plan=body.verification_plan,
+        rollback_plan=body.rollback_plan,
+        rollback_supported=body.rollback_supported,
+        investigation_id=body.investigation_id,
+    )
+    return {"success": True, "action": action.to_dict()}
+
+
+@router.get("/actions/{action_id}", summary="Get detailed action record with diff, verification, and approval info")
+def get_action_endpoint(action_id: str):
+    from core.network_intelligence.action_engine import get_action_engine
+    engine = get_action_engine()
+    action = engine.get_action(action_id)
+    if not action:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Action '{action_id}' not found.")
+    return {"success": True, "action": action}
+
+
+@router.post("/actions/{action_id}/resolve", summary="Approve or reject a pending action (Admin Control)")
+def resolve_action_approval_endpoint(action_id: str, body: ActionResolveIn):
+    from core.network_intelligence.action_engine import get_action_engine
+    engine = get_action_engine()
+    res = engine.resolve_approval(action_id=action_id, approved=body.approved, reviewer_id="admin_user", notes=body.notes)
+    if not res.get("success"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=res.get("error", "Failed to resolve approval"))
+    return res
+
+
+@router.post("/actions/{action_id}/execute", summary="Execute an approved action with precondition validation and post-verification")
+def execute_action_endpoint(action_id: str):
+    from core.network_intelligence.action_engine import get_action_engine
+    engine = get_action_engine()
+    res = engine.execute_and_verify_action(action_id=action_id, operator_id="admin_operator")
+    if not res.get("success"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=res.get("error", "Execution failed"))
+    return res
+
+
+@router.get("/actions/policy", summary="Get AI operations and approval policy")
+def get_operations_policy_endpoint(tenant_id: str = "tenant_internal"):
+    from core.network_intelligence.action_engine import get_action_engine
+    engine = get_action_engine()
+    policy = engine.get_operations_policy(tenant_id=tenant_id)
+    return {"success": True, "policy": policy.to_dict()}
+
+
+@router.put("/actions/policy", summary="Update AI operations policy (Strict: High/Critical approval can never be bypassed)")
+def update_operations_policy_endpoint(body: OperationsPolicyUpdateIn, tenant_id: str = "tenant_internal"):
+    from core.network_intelligence.action_engine import get_action_engine
+    engine = get_action_engine()
+    policy = engine.update_operations_policy(tenant_id=tenant_id, policy_data=body.dict(exclude_none=True))
+    return {"success": True, "policy": policy.to_dict()}

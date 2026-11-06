@@ -227,6 +227,18 @@ class NetworkIntelligenceStore:
             )
             conn.commit()
 
+    def update_incident_evidence(self, incident_id: str, facts_to_add: List[str]) -> bool:
+        """Appends observed facts to an existing incident investigation."""
+        inc = self.get_incident(incident_id)
+        if not inc:
+            return False
+        for f in facts_to_add:
+            if f not in inc.observed_facts:
+                inc.observed_facts.append(f)
+        inc.updated_at = time.time()
+        self.save_incident(inc)
+        return True
+
     def get_incident(self, incident_id: str) -> Optional[IncidentRecord]:
         with closing(self._connect()) as conn:
             row = conn.execute("SELECT * FROM incidents WHERE incident_id = ?", (incident_id,)).fetchone()

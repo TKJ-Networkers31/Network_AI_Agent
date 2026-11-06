@@ -2,6 +2,7 @@
 // Struktur menu navigasi terpadu AIRA OS (dipakai Sidebar.jsx & MobileNav.jsx).
 
 import {
+  Activity,
   Cpu,
   FileText,
   FolderOpen,
@@ -17,6 +18,7 @@ export const NAV_GROUPS = [
     label: "Workspace",
     items: [
       { id: "workspace", label: "Workspace", icon: MessageSquare, requiredPermission: "workspace.view" },
+      { id: "intelligence", label: "Network Intelligence", icon: Activity, requiredPermission: "nms.read" },
       { id: "infrastructure", label: "Infrastructure", icon: Network, requiredPermission: "inventory.view" },
       { id: "automations", label: "Automations", icon: Zap, requiredPermission: "automations.view" },
       { id: "files", label: "Files", icon: FolderOpen, requiredPermission: "files.view" },

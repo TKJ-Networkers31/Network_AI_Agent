@@ -438,7 +438,8 @@ class ContextBuilder:
             except Exception as exc:
                 warnings.append(f"user_memory: unavailable ({type(exc).__name__})")
 
-        legacy = self._text_section(SECTION_MEMORY, "memory", self._memory_text, warnings)
+        # If user is authenticated, enforce strict user isolation: do not leak unisolated legacy facts
+        legacy = None if user_id else self._text_section(SECTION_MEMORY, "memory", self._memory_text, warnings)
         semantic = self._semantic_section(user_input, session_id, warnings)
 
         if not user_mem_text:
@@ -453,10 +454,8 @@ class ContextBuilder:
                 source="memory+semantic_memory",
             )
 
-        text_parts = [p for p in [user_mem_text, getattr(legacy, "text", ""), getattr(semantic, "text", "")] if p]
+        text_parts = [p for p in [user_mem_text, getattr(semantic, "text", "")] if p]
         sources = ["user_memory"]
-        if legacy and legacy.text:
-            sources.append("legacy")
         if semantic and semantic.text:
             sources.append("semantic")
 

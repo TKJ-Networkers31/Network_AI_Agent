@@ -554,6 +554,28 @@ export const api = {
       if (downsamplePoints) q += `&downsample_points=${downsamplePoints}`;
       return request(q);
     },
+    listActions: (status = null, limit = 50) =>
+      request(`/intelligence/actions?limit=${limit}${status ? `&status=${encodeURIComponent(status)}` : ""}`),
+    proposeAction: (body) =>
+      request("/intelligence/actions", { method: "POST", body: JSON.stringify(body) }),
+    getAction: (id) =>
+      request(`/intelligence/actions/${encodeURIComponent(id)}`),
+    resolveActionApproval: (id, approved, notes = "") =>
+      request(`/intelligence/actions/${encodeURIComponent(id)}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({ approved, notes }),
+      }),
+    executeAction: (id) =>
+      request(`/intelligence/actions/${encodeURIComponent(id)}/execute`, { method: "POST" }),
+    getOperationsPolicy: (tenantId = "tenant_internal") =>
+      request(`/intelligence/actions/policy?tenant_id=${encodeURIComponent(tenantId)}`),
+    updateOperationsPolicy: (body, tenantId = "tenant_internal") =>
+      request(`/intelligence/actions/policy?tenant_id=${encodeURIComponent(tenantId)}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onboardDevice: (body) =>
+      request("/intelligence/devices/onboard", { method: "POST", body: JSON.stringify(body) }),
   },
   personalization: {
     getPreferences: () => request("/v1/personalization/preferences"),

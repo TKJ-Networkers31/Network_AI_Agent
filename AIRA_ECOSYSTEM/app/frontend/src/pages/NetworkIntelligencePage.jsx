@@ -1,9 +1,11 @@
 // src/pages/NetworkIntelligencePage.jsx
 //
-// AIRA OS — Network Intelligence, Incident Investigation & Configuration Planning Copilot
-// Menampilkan ringkasan insiden, penjelajah bukti observasi, panel hipotesis terurut,
-// playbooks diagnostik deterministik, perencana konfigurasi desired-state, validasi statis,
-// dan simulasi forwarding. Strictly Read-Only.
+// AIRA OS — Network Intelligence, Incident Investigation & Autonomous Action Center
+// Hybrid Multi-Tenant NOC & Operational Decision Intelligence Platform
+// Section 4.1 3-Section Layout:
+// 1. Overview (Health score, registered devices, reachable/unreachable, active investigations, anomalies, pending approvals, recent AI decisions)
+// 2. Investigations (History, current investigation, detected issues, supporting evidence, affected devices, topology, NMS metrics, AI analysis, recommendations)
+// 3. Action Center (Proposed, pending approvals, approved, rejected, executing, completed, failed, verification results)
 
 import React, { useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
@@ -17,11 +19,18 @@ import PathAnalysisTab from "../components/network-intelligence/PathAnalysisTab.
 import RcaTimelineTab from "../components/network-intelligence/RcaTimelineTab.jsx";
 import HistoricalIntelligenceTab from "../components/network-intelligence/HistoricalIntelligenceTab.jsx";
 import EvidenceInspectorTab from "../components/network-intelligence/EvidenceInspectorTab.jsx";
-import { Activity } from "lucide-react";
+import ActionCenterTab from "../components/network-intelligence/ActionCenterTab.jsx";
+import OnboardDeviceModal from "../components/network-intelligence/OnboardDeviceModal.jsx";
+import OperationsPolicyModal from "../components/network-intelligence/OperationsPolicyModal.jsx";
+import NewActionModal from "../components/network-intelligence/NewActionModal.jsx";
+
 import {
+  Activity,
   AlertCircle,
+  AlertOctagon,
   AlertTriangle,
   ArrowRight,
+  Bot,
   CheckCircle2,
   Clock,
   Code2,
@@ -34,11 +43,13 @@ import {
   Loader2,
   Network,
   Play,
+  PlusCircle,
   RotateCcw,
   Search,
   Server,
   ShieldAlert,
   ShieldCheck,
+  Sliders,
   StopCircle,
   Terminal,
   Zap,
@@ -47,30 +58,52 @@ import {
 export default function NetworkIntelligencePage({ onOpenMenu }) {
   const { notify } = useToast();
 
-  const [activeTab, setActiveTab] = useState("overview"); // overview, evidence, hypotheses, playbook, planner, timeline
+  // Primary 3-Section Navigation: "overview" | "investigations" | "actions"
+  const [activeTab, setActiveTab] = useState("overview");
+
+  // Sub-navigation within Investigations
+  const [invSubTab, setInvSubTab] = useState("details"); // details, nl_investigator, evidence, graph, paths, rca, playbook, planner
+
+  // Core Data States
+  const [overviewData, setOverviewData] = useState(null);
   const [incidents, setIncidents] = useState([]);
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [evidenceItems, setEvidenceItems] = useState([]);
+  const [actions, setActions] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [playbooks, setPlaybooks] = useState([]);
   const [activePlaybookRun, setActivePlaybookRun] = useState(null);
+  const [plans, setPlans] = useState([]);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+
+  // Loading States
   const [loading, setLoading] = useState(false);
+  const [loadingActions, setLoadingActions] = useState(false);
   const [advancingPlaybook, setAdvancingPlaybook] = useState(false);
   const [runningAutoDiag, setRunningAutoDiag] = useState(false);
+  const [investigating, setInvestigating] = useState(false);
+  const [planning, setPlanning] = useState(false);
+
+  // Investigation State
   const [autoDiagResult, setAutoDiagResult] = useState(null);
   const [autoDiagQuery, setAutoDiagQuery] = useState("");
   const [autoDiagTargetIp, setAutoDiagTargetIp] = useState("");
   const [autoDiagTable, setAutoDiagTable] = useState("main");
-  const [routeHistoryOpen, setRouteHistoryOpen] = useState(false);
-  const [overviewData, setOverviewData] = useState(null);
+  const [activeInvestigation, setActiveInvestigation] = useState(null);
   const [graphData, setGraphData] = useState(null);
   const [pathResult, setPathResult] = useState(null);
   const [historicalData, setHistoricalData] = useState(null);
-  const [activeInvestigation, setActiveInvestigation] = useState(null);
-  const [investigating, setInvestigating] = useState(false);
 
-  // New incident form state
-  const [devices, setDevices] = useState([]);
+  // Modals
+  const [showOnboardModal, setShowOnboardModal] = useState(false);
+  const [showPolicyModal, setShowPolicyModal] = useState(false);
+  const [showNewActionModal, setShowNewActionModal] = useState(false);
+  const [prefilledActionData, setPrefilledActionData] = useState(null);
+  const [routeHistoryOpen, setRouteHistoryOpen] = useState(false);
   const [showNewIncidentModal, setShowNewIncidentModal] = useState(false);
+  const [showNewPlanModal, setShowNewPlanModal] = useState(false);
+
+  // Incident & Plan Forms
   const [newIncidentForm, setNewIncidentForm] = useState({
     device_identity: "",
     related_devices: [],
@@ -80,10 +113,6 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
     target_ip: "",
   });
 
-  // Planner state
-  const [plans, setPlans] = useState([]);
-  const [selectedPlan, setSelectedPlan] = useState(null);
-  const [showNewPlanModal, setShowNewPlanModal] = useState(false);
   const [newPlanForm, setNewPlanForm] = useState({
     target_device: "",
     change_type: "ADD_STATIC_ROUTE",
@@ -93,7 +122,10 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
     interface: "bridge",
     subnet: "192.168.100.1/24",
   });
-  const [planning, setPlanning] = useState(false);
+
+  // -------------------------------------------------------------------------
+  // Data Fetching
+  // -------------------------------------------------------------------------
 
   const fetchOverview = async () => {
     try {
@@ -101,6 +133,20 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
       if (res?.overview) setOverviewData(res.overview);
     } catch (e) {
       console.warn("Overview fetch:", e);
+    }
+  };
+
+  const fetchActions = async () => {
+    setLoadingActions(true);
+    try {
+      const res = await api.intelligence.listActions(null, 50);
+      if (res?.actions) {
+        setActions(res.actions);
+      }
+    } catch (e) {
+      console.warn("Actions fetch:", e);
+    } finally {
+      setLoadingActions(false);
     }
   };
 
@@ -122,14 +168,108 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
     }
   };
 
+  const loadInitialData = async () => {
+    setLoading(true);
+    try {
+      const [incRes, pbRes, devRes, planRes] = await Promise.all([
+        api.intelligence.listIncidents(30).catch(() => ({ incidents: [] })),
+        api.intelligence.listPlaybooks().catch(() => ({ playbooks: [] })),
+        api.devices().catch(() => ({ devices: [] })),
+        api.intelligence.listPlans(30).catch(() => ({ plans: [] })),
+      ]);
+
+      const incs = incRes.incidents || [];
+      setIncidents(incs);
+      setPlaybooks(pbRes.playbooks || []);
+      setDevices(devRes.devices || []);
+      setPlans(planRes.plans || []);
+
+      if (incs.length > 0 && !selectedIncident) {
+        loadIncidentDetail(incs[0].incident_id);
+      }
+      if (planRes.plans?.length > 0 && !selectedPlan) {
+        setSelectedPlan(planRes.plans[0]);
+      }
+      if (devRes.devices?.length > 0) {
+        setNewIncidentForm((f) => ({ ...f, device_identity: devRes.devices[0].name }));
+        setNewPlanForm((f) => ({ ...f, target_device: devRes.devices[0].name }));
+      }
+    } catch (err) {
+      notify({ type: "error", message: "Gagal memuat data Network Intelligence." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadIncidentDetail = async (incidentId) => {
+    try {
+      const res = await api.intelligence.getIncident(incidentId);
+      if (res.success) {
+        setSelectedIncident(res.incident);
+        setEvidenceItems(res.evidence_items || []);
+      }
+    } catch {
+      notify({ type: "error", message: "Gagal memuat detail insiden." });
+    }
+  };
+
+  useEffect(() => {
+    loadInitialData();
+    fetchOverview();
+    fetchActions();
+    fetchGraph();
+    fetchHistorical();
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Action Handlers
+  // -------------------------------------------------------------------------
+
+  const handleResolveApproval = async (actionId, approved, notes = "") => {
+    try {
+      const res = await api.intelligence.resolveActionApproval(actionId, approved, notes);
+      if (res.success) {
+        notify({
+          type: approved ? "success" : "info",
+          message: approved ? "Tindakan berhasil disetujui." : "Tindakan ditolak.",
+        });
+        fetchActions();
+        fetchOverview();
+      }
+    } catch (err) {
+      notify({ type: "error", message: `Gagal memperbarui approval: ${err.message}` });
+      throw err;
+    }
+  };
+
+  const handleExecuteAction = async (actionId) => {
+    try {
+      const res = await api.intelligence.executeAction(actionId);
+      if (res.success) {
+        const vr = res.action?.verification_result;
+        notify({
+          type: res.action?.status === "SUCCESS" ? "success" : "warning",
+          message: `Eksekusi selesai: ${res.action?.status}. Verifikasi: ${vr?.passed ? "LULUS" : "GAGAL"}`,
+        });
+        fetchActions();
+        fetchOverview();
+      }
+    } catch (err) {
+      notify({ type: "error", message: `Eksekusi gagal: ${err.message}` });
+      throw err;
+    }
+  };
+
   const handleRunInvestigation = async (body) => {
     setInvestigating(true);
     try {
       const res = await api.intelligence.investigateNL(body);
       if (res?.investigation) {
         setActiveInvestigation(res.investigation);
+        setInvSubTab("nl_investigator");
         notify({ type: "success", message: "Penyelidikan selesai! Hasil dan hipotesis tersedia." });
         if (res.investigation.path) setPathResult(res.investigation.path);
+        fetchOverview();
       }
     } catch (err) {
       notify({ type: "error", message: `Investigasi gagal: ${err.message}` });
@@ -144,6 +284,34 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
       notify({ type: "info", message: "Permintaan pembatalan dikirim." });
     } catch (err) {
       notify({ type: "error", message: `Gagal membatalkan: ${err.message}` });
+    }
+  };
+
+  const handleRunAutoDiagnose = async () => {
+    setRunningAutoDiag(true);
+    try {
+      notify({ type: "info", message: "Menjalankan pipeline diagnostik routing & jaringan otomatis..." });
+      const res = await api.intelligence.autoDiagnose({
+        symptom: autoDiagQuery || undefined,
+        target_ip: autoDiagTargetIp || undefined,
+        routing_table: autoDiagTable || "main",
+      });
+      if (res.success) {
+        setAutoDiagResult(res);
+        await loadInitialData();
+        if (res.incident?.incident_id) {
+          await loadIncidentDetail(res.incident.incident_id);
+        }
+        setActiveTab("investigations");
+        setInvSubTab("details");
+        notify({ type: "success", message: "Diagnostik otomatis selesai! Akar masalah & rekomendasi dirangkum." });
+      } else {
+        notify({ type: "error", message: res.error || "Diagnostik otomatis gagal." });
+      }
+    } catch (err) {
+      notify({ type: "error", message: err.message || "Gagal menjalankan diagnostik otomatis." });
+    } finally {
+      setRunningAutoDiag(false);
     }
   };
 
@@ -181,84 +349,6 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
     }
   };
 
-  const loadInitialData = async () => {
-    setLoading(true);
-    try {
-      const [incRes, pbRes, devRes, planRes] = await Promise.all([
-        api.intelligence.listIncidents(30).catch(() => ({ incidents: [] })),
-        api.intelligence.listPlaybooks().catch(() => ({ playbooks: [] })),
-        api.devices().catch(() => ({ devices: [] })),
-        api.intelligence.listPlans(30).catch(() => ({ plans: [] })),
-      ]);
-
-      setIncidents(incRes.incidents || []);
-      setPlaybooks(pbRes.playbooks || []);
-      setDevices(devRes.devices || []);
-      setPlans(planRes.plans || []);
-
-      if (incRes.incidents?.length > 0 && !selectedIncident) {
-        loadIncidentDetail(incRes.incidents[0].incident_id);
-      }
-      if (planRes.plans?.length > 0 && !selectedPlan) {
-        setSelectedPlan(planRes.plans[0]);
-      }
-      if (devRes.devices?.length > 0) {
-        setNewIncidentForm((f) => ({ ...f, device_identity: devRes.devices[0].name }));
-        setNewPlanForm((f) => ({ ...f, target_device: devRes.devices[0].name }));
-      }
-    } catch (err) {
-      notify({ type: "error", message: "Gagal memuat data Network Intelligence." });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRunAutoDiagnose = async () => {
-    setRunningAutoDiag(true);
-    try {
-      notify({ type: "info", message: "Menjalankan pipeline diagnostik routing & jaringan otomatis..." });
-      const res = await api.intelligence.autoDiagnose({
-        symptom: autoDiagQuery || undefined,
-        target_ip: autoDiagTargetIp || undefined,
-        routing_table: autoDiagTable || "main",
-      });
-      if (res.success) {
-        setAutoDiagResult(res);
-        await loadInitialData();
-        if (res.incident?.incident_id) {
-          await loadIncidentDetail(res.incident.incident_id);
-        }
-        setActiveTab("overview");
-        notify({ type: "success", message: "Diagnostik otomatis selesai! Akar masalah, jalur rute & rekomendasi dirangkum." });
-      } else {
-        notify({ type: "error", message: res.error || "Diagnostik otomatis gagal." });
-      }
-    } catch (err) {
-      notify({ type: "error", message: err.message || "Gagal menjalankan diagnostik otomatis." });
-    } finally {
-      setRunningAutoDiag(false);
-    }
-  };
-
-  const loadIncidentDetail = async (incidentId) => {
-    try {
-      const res = await api.intelligence.getIncident(incidentId);
-      if (res.success) {
-        setSelectedIncident(res.incident);
-        setEvidenceItems(res.evidence_items || []);
-      }
-    } catch {
-      notify({ type: "error", message: "Gagal memuat detail insiden." });
-    }
-  };
-
-  useEffect(() => {
-    loadInitialData();
-    fetchOverview();
-    fetchGraph();
-    fetchHistorical();
-  }, []);
-
   const handleCreateIncident = async (e) => {
     e.preventDefault();
     if (!newIncidentForm.device_identity) {
@@ -295,12 +385,13 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
       if (res.success) {
         notify({ type: "success", message: "Investigasi insiden selesai dianalisis." });
         setShowNewIncidentModal(false);
-        loadInitialData();
-    fetchOverview();
-    fetchGraph();
-    fetchHistorical();
+        await loadInitialData();
+        fetchOverview();
+        fetchGraph();
+        fetchHistorical();
         setSelectedIncident(res.incident);
-        setActiveTab("overview");
+        setActiveTab("investigations");
+        setInvSubTab("details");
       }
     } catch (err) {
       notify({ type: "error", message: err.message || "Gagal membuat investigasi." });
@@ -316,7 +407,7 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
       const res = await api.intelligence.startPlaybook(selectedIncident.incident_id, pbId);
       if (res.success) {
         setActivePlaybookRun(res.playbook_run);
-        setActiveTab("playbook");
+        setInvSubTab("playbook");
         notify({ type: "success", message: "Playbook diagnostik dimulai." });
       }
     } catch (err) {
@@ -375,7 +466,8 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
         setShowNewPlanModal(false);
         setPlans((prev) => [res.plan, ...prev]);
         setSelectedPlan(res.plan);
-        setActiveTab("planner");
+        setActiveTab("investigations");
+        setInvSubTab("planner");
       }
     } catch (err) {
       notify({ type: "error", message: err.message || "Gagal membuat rencana." });
@@ -384,16 +476,18 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
     }
   };
 
+  const pendingApprovalsCount = actions.filter((a) => a.status === "PENDING_APPROVAL").length;
+
   return (
     <div className="space-y-6">
       <TopBar
-        title="Network Intelligence Copilot"
-        subtitle="Investigasi Insiden Berbasis Bukti, Diagnostic Playbook & Simulasi Konfigurasi (Read-Only)"
+        title="Network Intelligence & Autonomous Operations"
+        subtitle="Pusat Investigasi Insiden, Evaluasi Akar Masalah, Perencanaan Tindakan, & Approval Policy (Phase G)"
         onMenuClick={onOpenMenu}
       />
 
       {/* Action Header Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-card border border-border rounded-xl2">
+      <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-card border border-border rounded-xl">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
             <ShieldCheck size={22} />
@@ -401,822 +495,656 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold text-white">Engineering Intelligence Engine</h2>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold">
-                STRICTLY READ-ONLY
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold font-mono">
+                SAFETY-LOCKED
               </span>
             </div>
             <p className="text-xs text-white/50">
-              Analisis deterministik router, validasi rule-order, pelacakan rute, dan mitigasi risiko.
+              Korelasi Inventory, Topology, dan NMS terintegrasi dengan 5-Tier Risk Taxonomy & Non-bypassable Admin Approval.
             </p>
           </div>
         </div>
 
+        {/* Quick Diagnostic Input & Actions */}
         <div className="flex flex-wrap items-center gap-2">
           <input
             type="text"
             value={autoDiagQuery}
             onChange={(e) => setAutoDiagQuery(e.target.value)}
-            placeholder="Tanya rute / gejala (mis. Mengapa LAN tidak bisa ke 10.10.10.0/24?)"
-            className="bg-black/40 border border-white/15 rounded-lg px-3 py-1.5 text-xs text-white w-64 outline-none focus:border-cyan-400"
+            placeholder="Tanya rute / gejala (mis. Mengapa VLAN 20 lambat?)"
+            className="bg-black/40 border border-white/15 rounded-lg px-3 py-1.5 text-xs text-white w-56 outline-none focus:border-cyan-400"
           />
           <input
             type="text"
             value={autoDiagTargetIp}
             onChange={(e) => setAutoDiagTargetIp(e.target.value)}
-            placeholder="Target IP/CIDR (opsional)"
-            className="bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono w-36 outline-none focus:border-cyan-400"
-          />
-          <input
-            type="text"
-            value={autoDiagTable}
-            onChange={(e) => setAutoDiagTable(e.target.value)}
-            placeholder="VRF (main)"
-            className="bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono w-24 outline-none focus:border-cyan-400"
+            placeholder="Target IP/CIDR"
+            className="bg-black/40 border border-white/15 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono w-32 outline-none focus:border-cyan-400"
           />
           <button
             onClick={handleRunAutoDiagnose}
             disabled={runningAutoDiag}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold shadow-lg shadow-cyan-500/20 transition disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold shadow-lg shadow-cyan-500/20 transition disabled:opacity-50"
           >
             <Zap size={14} className={runningAutoDiag ? "animate-spin" : ""} />
-            <span>{runningAutoDiag ? "Menjalankan Pipeline..." : "⚡ Diagnostik Otomatis"}</span>
+            <span>{runningAutoDiag ? "Menganalisis..." : "⚡ Diagnostik Otomatis"}</span>
+          </button>
+
+          <button
+            onClick={() => setShowOnboardModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 text-xs font-medium transition"
+          >
+            <PlusCircle size={14} />
+            <span>Onboard Perangkat</span>
+          </button>
+
+          <button
+            onClick={() => setShowPolicyModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/10 transition"
+          >
+            <Sliders size={14} />
+            <span>AI Operations Policy</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setPrefilledActionData(null);
+              setShowNewActionModal(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/10 transition"
+          >
+            <Code2 size={14} />
+            <span>Propose Action</span>
           </button>
 
           <button
             onClick={() => setRouteHistoryOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/10 transition"
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white border border-white/10 transition"
+            title="Riwayat Rute & Diff"
           >
-            <History size={14} />
-            <span>Riwayat Rute</span>
-          </button>
-
-          <button
-            onClick={() => setShowNewIncidentModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/10 transition"
-          >
-            <Search size={14} />
-            <span>Investigasi Manual</span>
-          </button>
-
-          <button
-            onClick={() => setShowNewPlanModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-medium border border-white/10 transition"
-          >
-            <FileText size={14} />
-            <span>Rencana Konfigurasi</span>
+            <History size={16} />
           </button>
         </div>
       </div>
 
-      {/* Main Grid: Incident Selector Sidebar & Intelligence Tab Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Left Col: Incidents List */}
-        <div className="lg:col-span-1 space-y-3">
-          <div className="flex items-center justify-between px-1">
-            <span className="text-xs font-semibold text-white/70 uppercase tracking-wider">
-              Daftar Investigasi ({incidents.length})
-            </span>
-            <button onClick={loadInitialData} className="text-white/40 hover:text-white transition">
-              <RotateCcw size={13} className={loading ? "animate-spin" : ""} />
+      {/* 3 Primary Navigation Tabs (Section 4.1 Requirement) */}
+      <div className="flex items-center gap-2 border-b border-border pb-1">
+        {[
+          { id: "overview", label: "1. Overview", icon: Activity },
+          { id: "investigations", label: `2. Investigations (${incidents.length})`, icon: Search },
+          { id: "actions", label: "3. Action Center", icon: ShieldAlert, badge: pendingApprovalsCount },
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-t-xl text-sm font-semibold transition relative ${
+                isActive
+                  ? "bg-card text-cyan-400 border-t border-l border-r border-border shadow-sm"
+                  : "text-white/60 hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Icon size={16} />
+              <span>{tab.label}</span>
+              {tab.badge > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                  {tab.badge}
+                </span>
+              )}
+              {isActive && (
+                <div className="absolute bottom-[-1px] left-0 right-0 h-[2px] bg-cyan-400" />
+              )}
             </button>
-          </div>
+          );
+        })}
+      </div>
 
-          <div className="space-y-2 max-h-[680px] overflow-y-auto pr-1">
-            {incidents.length === 0 ? (
-              <div className="p-6 text-center text-xs text-white/40 bg-card border border-border rounded-xl">
-                Belum ada investigasi insiden.
-              </div>
-            ) : (
-              incidents.map((inc) => {
-                const isSelected = selectedIncident?.incident_id === inc.incident_id;
-                return (
-                  <div
-                    key={inc.incident_id}
-                    onClick={() => loadIncidentDetail(inc.incident_id)}
-                    className={`p-3.5 rounded-xl border text-left cursor-pointer transition ${
-                      isSelected
-                        ? "bg-cyan-500/10 border-cyan-500/40 text-white"
-                        : "bg-card border-border hover:border-white/20 text-white/70"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="text-xs font-semibold text-white truncate">
-                        {inc.device_identity}
-                      </span>
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-mono ${
-                          inc.severity === "CRITICAL"
-                            ? "bg-red-500/20 text-red-300"
-                            : inc.severity === "HIGH"
-                            ? "bg-amber-500/20 text-amber-300"
-                            : "bg-blue-500/20 text-blue-300"
-                        }`}
-                      >
-                        {inc.incident_type}
-                      </span>
-                    </div>
+      {/* ------------------------------------------------------------------- */}
+      {/* SECTION 1: OVERVIEW TAB */}
+      {/* ------------------------------------------------------------------- */}
+      {activeTab === "overview" && (
+        <OverviewTab
+          overview={overviewData}
+          loading={loading}
+          onRefresh={fetchOverview}
+          onOpenOnboard={() => setShowOnboardModal(true)}
+          onOpenPolicy={() => setShowPolicyModal(true)}
+          onNavigateToTab={(tab) => {
+            setActiveTab(tab);
+            if (tab === "investigations") setInvSubTab("details");
+          }}
+        />
+      )}
 
-                    <p className="text-[11px] text-white/50 line-clamp-2">
-                      {inc.user_description || (inc.symptoms && inc.symptoms[0]) || "Investigasi otomatis"}
-                    </p>
-
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5 text-[10px] text-white/40">
-                      <span>Status: {inc.investigation_status}</span>
-                      <span>{new Date(inc.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Right Col: 6-Section Intelligence Workspace */}
-        <div className="lg:col-span-3 space-y-4">
-          {/* Tab Navigation */}
-          <div className="flex items-center gap-1 bg-card border border-border p-1.5 rounded-xl">
-            {[
-              { id: "overview", label: "A. Overview", icon: Activity },
-              { id: "investigator", label: "B. Investigator", icon: Zap },
-              { id: "graph", label: "C. Knowledge Graph", icon: Network },
-              { id: "paths", label: "D. Path Analysis", icon: GitBranch },
-              { id: "rca", label: "E. RCA Timeline", icon: ShieldAlert },
-              { id: "history", label: "F. Historical", icon: History },
-              { id: "evidence", label: `G. Bukti (${(activeInvestigation?.evidence_items?.length || evidenceItems.length || overviewData?.total_evidence_records) || 0})`, icon: Layers },
-              { id: "playbook", label: "Diagnostic Playbook", icon: Terminal },
-              { id: "planner", label: `Planner (${plans.length})`, icon: Code2 },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              return (
+      {/* ------------------------------------------------------------------- */}
+      {/* SECTION 2: INVESTIGATIONS TAB */}
+      {/* ------------------------------------------------------------------- */}
+      {activeTab === "investigations" && (
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Left Column: Investigation History Sidebar */}
+          <div className="lg:col-span-1 space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-semibold text-white/70 uppercase tracking-wider">
+                Riwayat Investigasi ({incidents.length})
+              </span>
+              <div className="flex items-center gap-1">
                 <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition ${
-                    activeTab === tab.id
-                      ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
-                      : "text-white/60 hover:text-white hover:bg-white/5"
-                  }`}
+                  onClick={() => setShowNewIncidentModal(true)}
+                  className="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 font-semibold"
+                  title="Investigasi Manual"
                 >
-                  <Icon size={14} />
-                  <span>{tab.label}</span>
+                  + Baru
                 </button>
-              );
-            })}
-          </div>
+                <button onClick={loadInitialData} className="p-1 text-white/40 hover:text-white transition">
+                  <RotateCcw size={13} className={loading ? "animate-spin" : ""} />
+                </button>
+              </div>
+            </div>
 
-          {/* Tab Content */}
-          <div className="bg-card border border-border rounded-xl2 p-6 min-h-[520px]">
-            {/* A. NETWORK INTELLIGENCE OVERVIEW */}
-            {activeTab === "overview" && (
-              <OverviewTab overview={overviewData} loading={loading} onRefresh={fetchOverview} />
-            )}
-
-            {/* B. NETWORK INVESTIGATOR (NATURAL LANGUAGE) */}
-            {activeTab === "investigator" && (
-              <InvestigatorTab
-                onRunInvestigation={handleRunInvestigation}
-                onCancelInvestigation={handleCancelInvestigation}
-                activeInvestigation={activeInvestigation}
-                loading={investigating}
-              />
-            )}
-
-            {/* C. KNOWLEDGE GRAPH EXPLORER */}
-            {activeTab === "graph" && (
-              <KnowledgeGraphTab
-                graphData={graphData}
-                loading={loading}
-                onRefreshGraph={fetchGraph}
-              />
-            )}
-
-            {/* D. PATH INTELLIGENCE & LPM */}
-            {activeTab === "paths" && (
-              <PathAnalysisTab
-                pathResult={pathResult}
-                loading={loading}
-                onRunPathAnalysis={handleRunPathAnalysis}
-                devices={devices}
-              />
-            )}
-
-            {/* E. 14-STEP RCA TIMELINE */}
-            {activeTab === "rca" && (
-              <RcaTimelineTab
-                rcaReport={activeInvestigation?.rca}
-                correlations={activeInvestigation?.correlations || []}
-              />
-            )}
-
-            {/* F. HISTORICAL INTELLIGENCE */}
-            {activeTab === "history" && (
-              <HistoricalIntelligenceTab
-                historicalData={historicalData}
-                loading={loading}
-                onCompareSnapshots={handleCompareSnapshots}
-                onRefreshHistory={fetchHistorical}
-              />
-            )}
-
-            {/* G. EVIDENCE INSPECTOR */}
-            {activeTab === "evidence" && (
-              <EvidenceInspectorTab
-                evidenceItems={activeInvestigation?.evidence_items?.length ? activeInvestigation.evidence_items : evidenceItems}
-              />
-            )}
-
-            {/* LEGACY INCIDENT VIEW */}
-            {activeTab === "legacy_incident" && (
-              <div className="space-y-6">
-                {!selectedIncident ? (
-                  <div className="text-center py-16 text-white/40 text-xs">Pilih insiden untuk melihat overview.</div>
-                ) : (
-                  <>
-                    <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-border">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-base font-semibold text-white">
-                            {selectedIncident.device_identity} — {selectedIncident.incident_type}
-                          </h3>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono">
-                            {selectedIncident.incident_id}
-                          </span>
-                        </div>
-                        <p className="text-xs text-white/50 mt-1">
-                          {selectedIncident.user_description || "Pemeriksaan gejala jaringan berbasis bukti."}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-white/50">Confidence:</span>
-                        <span className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold">
-                          {selectedIncident.confidence}
+            <div className="space-y-2 max-h-[720px] overflow-y-auto pr-1">
+              {incidents.length === 0 ? (
+                <div className="p-6 text-center text-xs text-white/40 bg-card border border-border rounded-xl">
+                  Belum ada riwayat investigasi insiden.
+                </div>
+              ) : (
+                incidents.map((inc) => {
+                  const isSelected = selectedIncident?.incident_id === inc.incident_id;
+                  return (
+                    <div
+                      key={inc.incident_id}
+                      onClick={() => {
+                        loadIncidentDetail(inc.incident_id);
+                        setInvSubTab("details");
+                      }}
+                      className={`p-3.5 rounded-xl border text-left cursor-pointer transition ${
+                        isSelected
+                          ? "bg-cyan-500/10 border-cyan-500/40 text-white shadow-sm"
+                          : "bg-card border-border hover:border-white/20 text-white/70"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <span className="text-xs font-semibold text-white truncate max-w-[140px]">
+                          {inc.device_identity}
+                        </span>
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-mono ${
+                            inc.severity === "CRITICAL"
+                              ? "bg-red-500/20 text-red-300"
+                              : inc.severity === "HIGH"
+                              ? "bg-amber-500/20 text-amber-300"
+                              : "bg-blue-500/20 text-blue-300"
+                          }`}
+                        >
+                          {inc.incident_type}
                         </span>
                       </div>
-                    </div>
 
-                    {selectedIncident.related_devices?.length > 0 && (
-                      <div className="flex items-center gap-2 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs">
-                        <Layers size={14} className="shrink-0" />
-                        <span><strong>Multi-Device Topology Aware:</strong> Melibatkan perangkat terkait: {selectedIncident.related_devices.join(", ")}</span>
+                      <p className="text-[11px] text-white/50 line-clamp-2">
+                        {inc.user_description || (inc.symptoms && inc.symptoms[0]) || "Investigasi otomatis"}
+                      </p>
+
+                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5 text-[10px] text-white/40">
+                        <span>{inc.investigation_status}</span>
+                        <span>{new Date(inc.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                    )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
 
-                    {autoDiagResult && (
-                      <div className="p-4 rounded-xl bg-gradient-to-r from-cyan-950/40 to-blue-950/30 border border-cyan-500/30 space-y-4">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* Right Column: Investigation Workspace & Deep-Dive Subtabs */}
+          <div className="lg:col-span-3 space-y-4">
+            {/* Sub-tab Navigation within Investigations */}
+            <div className="flex flex-wrap items-center gap-1.5 bg-card border border-border p-1.5 rounded-xl">
+              {[
+                { id: "details", label: "Laporan Investigasi", icon: FileText },
+                { id: "nl_investigator", label: "NL Investigator", icon: Zap },
+                { id: "evidence", label: `Bukti (${evidenceItems.length || activeInvestigation?.evidence_items?.length || 0})`, icon: Layers },
+                { id: "graph", label: "Knowledge Graph", icon: Network },
+                { id: "paths", label: "Path Analysis", icon: GitBranch },
+                { id: "rca", label: "RCA Timeline", icon: ShieldAlert },
+                { id: "history", label: "Historical Diff", icon: History },
+                { id: "playbook", label: "Playbook", icon: Terminal },
+                { id: "planner", label: `Planner (${plans.length})`, icon: Code2 },
+              ].map((sub) => {
+                const SubIcon = sub.icon;
+                const isSubActive = invSubTab === sub.id;
+                return (
+                  <button
+                    key={sub.id}
+                    onClick={() => setInvSubTab(sub.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                      isSubActive
+                        ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/30"
+                        : "text-white/60 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    <SubIcon size={14} />
+                    <span>{sub.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Subtab Content Area */}
+            <div className="bg-card border border-border rounded-xl p-6 min-h-[560px]">
+              {/* SUBTAB: DETAILS (Section 4.1 & 4.4 Structure) */}
+              {invSubTab === "details" && (
+                <div className="space-y-6">
+                  {!selectedIncident ? (
+                    <div className="text-center py-20 text-white/40 text-xs">
+                      Pilih salah satu investigasi di bilah kiri atau jalankan Investigasi NL baru.
+                    </div>
+                  ) : (
+                    <>
+                      {/* Investigation Header */}
+                      <div className="flex flex-wrap items-start justify-between gap-4 pb-4 border-b border-border">
+                        <div>
                           <div className="flex items-center gap-2">
-                            <Zap size={16} className="text-cyan-400" />
-                            <span className="text-xs font-semibold text-white">
-                              Ringkasan Pipeline Diagnostik Otomatis ({autoDiagResult.routing_intent || "MULTI_DEVICE"})
+                            <span className="text-xs font-mono text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/30">
+                              {selectedIncident.incident_id}
                             </span>
-                            {autoDiagResult.epistemic_classification && (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
-                                {autoDiagResult.epistemic_classification}
-                              </span>
-                            )}
+                            <h3 className="text-base font-bold text-white">
+                              {selectedIncident.device_identity} — {selectedIncident.incident_type}
+                            </h3>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold ${
+                              selectedIncident.severity === "CRITICAL"
+                                ? "bg-red-500/20 text-red-300 border border-red-500/40"
+                                : selectedIncident.severity === "HIGH"
+                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                                : "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                            }`}>
+                              {selectedIncident.severity}
+                            </span>
                           </div>
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">
-                            {autoDiagResult.pipeline_id} · VRF: {autoDiagResult.routing_table || "main"}
-                          </span>
+                          <p className="text-xs text-white/60 mt-1">
+                            {selectedIncident.user_description || "Pemeriksaan gejala anomali jaringan berbasis bukti kanonikal."}
+                          </p>
                         </div>
 
-                        <p className="text-xs text-white/80 whitespace-pre-line leading-relaxed">
-                          {autoDiagResult.summary}
-                        </p>
-
-                        {/* Per-Device Evidence Collection Status */}
-                        {autoDiagResult.collection_status && Object.keys(autoDiagResult.collection_status).length > 0 && (
-                          <div className="space-y-1.5">
-                            <span className="text-[10px] uppercase tracking-wider font-semibold text-cyan-300/80">
-                              Status Koleksi Bukti Rute Multi-Perangkat
+                        <div className="flex items-center gap-3">
+                          <div className="text-right text-xs">
+                            <div className="text-white/40 text-[10px]">STATUS INVESTIGASI</div>
+                            <span className="font-semibold text-emerald-400">
+                              {selectedIncident.investigation_status}
                             </span>
-                            <div className="flex flex-wrap gap-2">
-                              {Object.entries(autoDiagResult.collection_status).map(([devId, st]) => (
-                                <span
-                                  key={devId}
-                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-mono border ${
-                                    st.completeness === "COMPLETE"
-                                      ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-200"
-                                      : "bg-amber-500/15 border-amber-500/30 text-amber-200"
-                                  }`}
-                                >
-                                  {devId}: {st.completeness} ({st.active_route_count}/{st.route_count} rute)
-                                </span>
-                              ))}
-                            </div>
                           </div>
-                        )}
+                          <button
+                            onClick={() => {
+                              setPrefilledActionData({
+                                target_device: selectedIncident.device_identity,
+                                action_type: "REMEDIATE_INCIDENT",
+                                description: `Remediasi untuk ${selectedIncident.incident_type} pada ${selectedIncident.device_identity}`,
+                                risk_level: "MEDIUM",
+                                commands: selectedIncident.inferred_hypotheses?.[0]?.recommended_test
+                                  ? [selectedIncident.inferred_hypotheses[0].recommended_test]
+                                  : ["/ip route print"],
+                              });
+                              setShowNewActionModal(true);
+                            }}
+                            className="px-3.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-semibold flex items-center gap-1.5 transition"
+                          >
+                            <ShieldAlert size={14} />
+                            <span>Ajukan Action Plan</span>
+                          </button>
+                        </div>
+                      </div>
 
-                        {/* Partial Evidence Warnings */}
-                        {autoDiagResult.partial_evidence_warnings?.length > 0 && (
-                          <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 space-y-1">
-                            <div className="font-semibold flex items-center gap-1.5">
-                              <AlertTriangle size={13} /> Peringatan Bukti Parsial
-                            </div>
-                            <ul className="list-disc pl-4 space-y-0.5">
-                              {autoDiagResult.partial_evidence_warnings.map((w, i) => (
-                                <li key={i}>{w}</li>
-                              ))}
-                            </ul>
+                      {/* Metadata Grid: Affected Devices, Interfaces, Topology Context */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="p-3.5 rounded-xl bg-white/5 border border-white/5 space-y-1">
+                          <span className="text-[10px] font-mono text-white/40 uppercase">Perangkat Terdampak</span>
+                          <div className="text-sm font-semibold text-white flex items-center gap-1.5">
+                            <Server size={14} className="text-cyan-400" />
+                            <span>{selectedIncident.device_identity}</span>
                           </div>
-                        )}
-
-                        {/* Reconstructed Route Path Visualization */}
-                        {autoDiagResult.route_intelligence?.path_evaluation?.primary_hops?.length > 0 && (
-                          <div className="p-3 rounded-xl bg-black/30 border border-white/10 space-y-2">
-                            <div className="flex items-center justify-between text-[11px]">
-                              <span className="font-semibold text-cyan-300 flex items-center gap-1">
-                                <GitBranch size={13} /> Rekonstruksi Jalur Rute ({autoDiagResult.destination})
-                              </span>
-                              <span className="font-mono text-[10px] text-white/70">
-                                State: {autoDiagResult.route_intelligence.path_evaluation.state} · Conf:{" "}
-                                {Math.round((autoDiagResult.route_intelligence.path_evaluation.confidence || 0) * 100)}%
-                              </span>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
-                              {autoDiagResult.route_intelligence.path_evaluation.primary_hops.map((hop, idx) => (
-                                <React.Fragment key={idx}>
-                                  <div className="px-2.5 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/25 text-white">
-                                    <div className="font-bold text-cyan-200">
-                                      #{hop.hop_index} {hop.device_id}
-                                    </div>
-                                    <div className="text-[10px] text-white/60">
-                                      {hop.matched_prefix || "no-route"} → {hop.gateway || hop.hop_state} ({hop.egress_interface || "—"})
-                                    </div>
-                                  </div>
-                                  {idx < autoDiagResult.route_intelligence.path_evaluation.primary_hops.length - 1 && (
-                                    <ArrowRight size={14} className="text-cyan-400" />
-                                  )}
-                                </React.Fragment>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Dependency & Historical Summary */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
-                          {autoDiagResult.route_intelligence?.dependency_summary && (
-                            <div className="p-2.5 rounded-lg bg-black/30 border border-white/10">
-                              <div className="font-semibold text-purple-300">Inspeksi Dependensi Rute & Rekursif</div>
-                              <div className="text-white/70 font-mono text-[10px] mt-1">
-                                Nodes: {autoDiagResult.route_intelligence.dependency_summary.nodes_count} · Edges:{" "}
-                                {autoDiagResult.route_intelligence.dependency_summary.edges_count} · Unresolved:{" "}
-                                {autoDiagResult.route_intelligence.dependency_summary.unresolved_routes?.length || 0}
-                              </div>
+                          {selectedIncident.related_devices?.length > 0 && (
+                            <div className="text-[11px] text-white/50 pt-1">
+                              Terkait: {selectedIncident.related_devices.join(", ")}
                             </div>
                           )}
-                          <div className="p-2.5 rounded-lg bg-black/30 border border-white/10 flex items-center justify-between">
-                            <div>
-                              <div className="font-semibold text-sky-300">Perbandingan Riwayat Rute</div>
-                              <div className="text-white/70 font-mono text-[10px] mt-1">
-                                Perubahan tercatat:{" "}
-                                {autoDiagResult.route_intelligence?.historical_comparison?.total_recorded_changes ?? 0}
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => setRouteHistoryOpen(true)}
-                              className="px-2.5 py-1 rounded bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/30 text-sky-200 text-[10px] font-semibold"
-                            >
-                              Buka Diff
-                            </button>
+                        </div>
+
+                        <div className="p-3.5 rounded-xl bg-white/5 border border-white/5 space-y-1">
+                          <span className="text-[10px] font-mono text-white/40 uppercase">Konteks Topologi</span>
+                          <div className="text-sm font-semibold text-indigo-300 flex items-center gap-1.5">
+                            <Network size={14} className="text-indigo-400" />
+                            <span>{selectedIncident.topology_context || "Single-Node Core Hop"}</span>
+                          </div>
+                          <div className="text-[11px] text-white/50 pt-1">
+                            L2/L3 Adjacency Verified
                           </div>
                         </div>
 
-                        {/* Structured Root Causes with Confidence & Alternative Hypotheses */}
-                        {autoDiagResult.root_causes?.length > 0 && (
-                          <div className="space-y-2">
-                            <span className="text-[10px] uppercase tracking-wider font-semibold text-cyan-300/80">
-                              Analisis Akar Masalah Terstruktur ({autoDiagResult.root_causes.length})
-                            </span>
-                            {autoDiagResult.root_causes.slice(0, 4).map((rc) => (
-                              <div key={rc.root_cause_id} className="p-3 rounded-lg bg-black/35 border border-white/10 text-xs space-y-1">
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="font-semibold text-white">
-                                    {rc.affected_device} ({rc.affected_prefix})
-                                  </span>
-                                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-200">
-                                    {rc.epistemic_tier} · {Math.round((rc.confidence || 0) * 100)}%
-                                  </span>
-                                </div>
-                                <p className="text-white/80 text-[11px]">{rc.description}</p>
-                                {rc.alternative_explanations?.length > 0 && (
-                                  <p className="text-[10px] text-white/50">
-                                    <strong>Hipotesis Alternatif:</strong> {rc.alternative_explanations.join(" | ")}
-                                  </p>
-                                )}
-                              </div>
-                            ))}
+                        <div className="p-3.5 rounded-xl bg-white/5 border border-white/5 space-y-1">
+                          <span className="text-[10px] font-mono text-white/40 uppercase">Waktu Terdeteksi</span>
+                          <div className="text-sm font-semibold text-white flex items-center gap-1.5">
+                            <Clock size={14} className="text-emerald-400" />
+                            <span>{new Date(selectedIncident.created_at * 1000).toLocaleString()}</span>
                           </div>
-                        )}
+                          <div className="text-[11px] text-white/50 pt-1">
+                            Confidence: {selectedIncident.confidence || "HIGH"}
+                          </div>
+                        </div>
+                      </div>
 
-                        {/* Read-Only Verification Recommendations */}
-                        {autoDiagResult.verification_recommendations?.length > 0 && (
-                          <div className="space-y-1.5">
-                            <span className="text-[10px] uppercase tracking-wider font-semibold text-emerald-300/90">
-                              Rekomendasi Perintah Verifikasi Aman (100% Read-Only)
-                            </span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {autoDiagResult.verification_recommendations.map((vr, i) => (
-                                <code
-                                  key={i}
-                                  className="px-2 py-1 rounded bg-black/50 border border-emerald-500/25 text-emerald-300 text-[10px] font-mono"
-                                >
-                                  {vr.command}
-                                </code>
-                              ))}
+                      {/* Observations & Supporting Evidence */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-semibold text-white/80 uppercase tracking-wider flex items-center gap-1.5">
+                            <Layers size={14} className="text-cyan-400" />
+                            <span>Fakta Terobservasi &amp; Bukti Pendukung ({selectedIncident.observed_facts?.length || 0})</span>
+                          </h4>
+                          <span className="text-[10px] font-mono text-white/40">Read-Only Telemetry</span>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {selectedIncident.observed_facts?.map((fact, idx) => (
+                            <div key={idx} className="flex items-start gap-2 p-2.5 rounded-lg bg-white/5 border border-white/5 text-xs text-white/80">
+                              <CheckCircle2 size={14} className="text-emerald-400 shrink-0 mt-0.5" />
+                              <span>{fact}</span>
                             </div>
-                          </div>
-                        )}
+                          ))}
+                        </div>
+                      </div>
 
-                        {autoDiagResult.recommended_plan && (
-                          <div className="pt-2 border-t border-cyan-500/20 flex items-center justify-between">
-                            <span className="text-xs text-cyan-300 font-medium">
-                              Proposal Rencana Non-Mutating: {autoDiagResult.recommended_plan.plan_id}
-                            </span>
-                            <button
-                              onClick={() => {
-                                setSelectedPlan(autoDiagResult.recommended_plan);
-                                setActiveTab("planner");
-                              }}
-                              className="text-xs text-cyan-400 underline hover:text-cyan-300"
-                            >
-                              Lihat Rencana di Planner &rarr;
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                      {/* AI Root Cause Hypotheses (Epistemic Separation: Facts vs Indications vs Hypotheses) */}
+                      <div className="space-y-3">
+                        <h4 className="text-xs font-semibold text-white/80 uppercase tracking-wider flex items-center gap-1.5">
+                          <Bot size={14} className="text-amber-400" />
+                          <span>Hipotesis Akar Masalah &amp; Analisis AI</span>
+                        </h4>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div className="p-4 rounded-xl bg-white/[0.02] border border-border">
-                        <span className="text-[11px] text-white/50 uppercase">Investigation Status</span>
-                        <p className="text-sm font-semibold text-white mt-1">{selectedIncident.investigation_status}</p>
+                        <div className="space-y-3">
+                          {selectedIncident.inferred_hypotheses?.map((h, idx) => (
+                            <div key={idx} className="p-4 rounded-xl bg-white/5 border border-white/5 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-sm text-cyan-300">
+                                  #{idx + 1} {h.title}
+                                </span>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                  Confidence: {h.confidence}
+                                </span>
+                              </div>
+                              <p className="text-xs text-white/70 leading-relaxed">{h.explanation}</p>
+                              {h.recommended_test && (
+                                <div className="p-2 rounded bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-300 font-mono">
+                                  Rekomendasi verifikasi: {h.recommended_test}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <div className="p-4 rounded-xl bg-white/[0.02] border border-border">
-                        <span className="text-[11px] text-white/50 uppercase">Tingkat Keparahan</span>
-                        <p className="text-sm font-semibold text-amber-400 mt-1">{selectedIncident.severity}</p>
+
+                      {/* Playbook Trigger Bar */}
+                      <div className="p-4 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-between">
+                        <div>
+                          <h4 className="text-xs font-semibold text-cyan-300">Uji Diagnostik Deterministik</h4>
+                          <p className="text-[11px] text-white/60">
+                            Jalankan state machine terpandu untuk memvalidasi hipotesis tanpa risiko.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleStartPlaybook()}
+                          disabled={advancingPlaybook}
+                          className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-semibold transition"
+                        >
+                          <Play size={14} />
+                          <span>Mulai Playbook</span>
+                        </button>
                       </div>
-                      <div className="p-4 rounded-xl bg-white/[0.02] border border-border">
-                        <span className="text-[11px] text-white/50 uppercase">Waktu Observasi</span>
-                        <p className="text-sm font-semibold text-white mt-1">
-                          {new Date(selectedIncident.created_at * 1000).toLocaleString()}
-                        </p>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* SUBTAB: NATURAL LANGUAGE INVESTIGATOR */}
+              {invSubTab === "nl_investigator" && (
+                <InvestigatorTab
+                  onRunInvestigation={handleRunInvestigation}
+                  onCancelInvestigation={handleCancelInvestigation}
+                  activeInvestigation={activeInvestigation}
+                  loading={investigating}
+                />
+              )}
+
+              {/* SUBTAB: EVIDENCE INSPECTOR */}
+              {invSubTab === "evidence" && (
+                <EvidenceInspectorTab
+                  evidenceItems={activeInvestigation?.evidence_items?.length ? activeInvestigation.evidence_items : evidenceItems}
+                />
+              )}
+
+              {/* SUBTAB: KNOWLEDGE GRAPH */}
+              {invSubTab === "graph" && (
+                <KnowledgeGraphTab
+                  graphData={graphData}
+                  loading={loading}
+                  onRefreshGraph={fetchGraph}
+                />
+              )}
+
+              {/* SUBTAB: PATH ANALYSIS */}
+              {invSubTab === "paths" && (
+                <PathAnalysisTab
+                  pathResult={pathResult}
+                  loading={loading}
+                  onRunPathAnalysis={handleRunPathAnalysis}
+                  devices={devices}
+                />
+              )}
+
+              {/* SUBTAB: RCA TIMELINE */}
+              {invSubTab === "rca" && (
+                <RcaTimelineTab
+                  rcaReport={activeInvestigation?.rca}
+                  correlations={activeInvestigation?.correlations || []}
+                />
+              )}
+
+              {/* SUBTAB: HISTORICAL INTELLIGENCE */}
+              {invSubTab === "history" && (
+                <HistoricalIntelligenceTab
+                  historicalData={historicalData}
+                  loading={loading}
+                  onCompareSnapshots={handleCompareSnapshots}
+                  onRefreshHistory={fetchHistorical}
+                />
+              )}
+
+              {/* SUBTAB: PLAYBOOK RUNNER */}
+              {invSubTab === "playbook" && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between pb-2 border-b border-border">
+                    <h3 className="text-sm font-semibold text-white">Diagnostic Playbook Runner</h3>
+                    <span className="text-xs text-white/40">State Machine Deterministik</span>
+                  </div>
+
+                  {!activePlaybookRun ? (
+                    <div className="text-center py-12 space-y-4">
+                      <p className="text-xs text-white/50">Belum ada playbook yang sedang berjalan untuk insiden ini.</p>
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        {playbooks.map((pb) => (
+                          <button
+                            key={pb.playbook_id}
+                            onClick={() => handleStartPlaybook(pb.playbook_id)}
+                            className="px-3.5 py-2 rounded-lg bg-white/5 hover:bg-cyan-500/20 border border-white/10 hover:border-cyan-500/40 text-xs text-white transition text-left"
+                          >
+                            <div className="font-semibold">{pb.name}</div>
+                            <div className="text-[10px] text-white/40">{pb.playbook_id}</div>
+                          </button>
+                        ))}
                       </div>
                     </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="p-4 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-between">
+                        <div>
+                          <span className="text-xs font-semibold text-cyan-300">Playbook Aktif: {activePlaybookRun.playbook_id}</span>
+                          <p className="text-xs text-white/60 mt-0.5">
+                            Status: <strong className="text-white">{activePlaybookRun.status}</strong> | Langkah: {activePlaybookRun.current_step_id || "Selesai"}
+                          </p>
+                        </div>
 
-                    {/* Facts Quick View */}
-                    <div className="space-y-3">
-                      <h4 className="text-xs font-semibold text-white/70 uppercase">Fakta Terkonfirmasi (Observed Facts)</h4>
+                        <div className="flex items-center gap-2">
+                          {activePlaybookRun.status === "RUNNING" && (
+                            <>
+                              <button
+                                onClick={() => handleAdvancePlaybook("step")}
+                                disabled={advancingPlaybook}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-semibold transition"
+                              >
+                                {advancingPlaybook ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                                <span>Langkah Berikutnya</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleAdvancePlaybook("cancel")}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 text-xs transition"
+                              >
+                                <StopCircle size={13} />
+                                <span>Batalkan</span>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Step Execution Logs */}
                       <div className="space-y-2">
-                        {selectedIncident.observed_facts?.map((fact, idx) => (
-                          <div key={idx} className="flex items-start gap-2 p-2.5 rounded-lg bg-white/[0.02] border border-white/5 text-xs text-white/80">
-                            <CheckCircle2 size={15} className="text-emerald-400 shrink-0 mt-0.5" />
-                            <span>{fact}</span>
+                        <h4 className="text-xs font-semibold text-white/70 uppercase">Log Keputusan Langkah</h4>
+                        {activePlaybookRun.step_logs?.map((log, idx) => (
+                          <div key={idx} className="p-3 rounded-lg bg-white/5 border border-white/5 text-xs text-white/80 space-y-1">
+                            <div className="flex items-center justify-between text-white/40 text-[10px]">
+                              <span>{log.step_id || log.event}</span>
+                              <span>{new Date((log.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString()}</span>
+                            </div>
+                            <p>{log.verdict || log.message || log.objective}</p>
                           </div>
                         ))}
                       </div>
                     </div>
-
-                    {/* Playbook Trigger Bar */}
-                    <div className="p-4 rounded-xl bg-cyan-500/5 border border-cyan-500/20 flex items-center justify-between">
-                      <div>
-                        <h4 className="text-xs font-semibold text-cyan-300">Jalankan Diagnostic Playbook</h4>
-                        <p className="text-[11px] text-white/50">
-                          Mulai rangkaian pengujian berurutan untuk memverifikasi akar masalah.
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleStartPlaybook()}
-                        disabled={advancingPlaybook}
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-semibold transition"
-                      >
-                        <Play size={14} />
-                        <span>Mulai Playbook</span>
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* B. EVIDENCE EXPLORER */}
-            {activeTab === "evidence" && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between pb-2 border-b border-border">
-                  <h3 className="text-sm font-semibold text-white">Item Bukti Observasi Read-Only</h3>
-                  <span className="text-xs text-white/40">{evidenceItems.length} artefak terkumpul</span>
+                  )}
                 </div>
+              )}
 
-                {evidenceItems.length === 0 ? (
-                  <div className="text-center py-16 text-white/40 text-xs">Belum ada data bukti yang tersimpan.</div>
-                ) : (
-                  <div className="space-y-3">
-                    {evidenceItems.map((item) => (
-                      <div key={item.evidence_id} className="p-4 rounded-xl bg-white/[0.02] border border-border space-y-2">
-                        <div className="flex items-center justify-between gap-2">
+              {/* SUBTAB: CONFIGURATION PLANNER */}
+              {invSubTab === "planner" && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between pb-2 border-b border-border">
+                    <h3 className="text-sm font-semibold text-white">Perencana Konfigurasi &amp; Simulasi Statis</h3>
+                    <button
+                      onClick={() => setShowNewPlanModal(true)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 text-xs font-semibold border border-cyan-500/40 hover:bg-cyan-500/30 transition"
+                    >
+                      + Buat Desired State Baru
+                    </button>
+                  </div>
+
+                  {!selectedPlan ? (
+                    <div className="text-center py-16 text-white/40 text-xs">Pilih atau buat rencana konfigurasi.</div>
+                  ) : (
+                    <div className="space-y-5">
+                      <div className="p-4 rounded-xl bg-white/5 border border-border flex flex-wrap items-center justify-between gap-3">
+                        <div>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-white">{item.observation_type}</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-white/5 text-white/60 font-mono">
-                              {item.source_command}
+                            <h4 className="text-sm font-semibold text-white">
+                              {selectedPlan.plan_id} — {selectedPlan.desired_state?.change_type}
+                            </h4>
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                selectedPlan.plan_status === "VALID_WITH_WARNINGS"
+                                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                                  : selectedPlan.plan_status === "READY_FOR_REVIEW"
+                                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                                  : "bg-red-500/20 text-red-300 border border-red-500/40"
+                              }`}
+                            >
+                              {selectedPlan.plan_status}
                             </span>
                           </div>
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                            {item.collection_status}
-                          </span>
-                        </div>
-
-                        {/* Raw excerpt with redaction */}
-                        <div className="p-3 rounded-lg bg-black/50 border border-white/5 font-mono text-xs text-white/70 overflow-x-auto max-h-40">
-                          <pre>{item.raw_excerpt || JSON.stringify(item.normalized_value, null, 2)}</pre>
+                          <p className="text-xs text-white/50 mt-0.5">
+                            Target: {selectedPlan.target_devices?.join(", ")} | Risk: {selectedPlan.risk_level}
+                          </p>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
 
-            {/* C. HYPOTHESES PANEL */}
-            {activeTab === "hypotheses" && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between pb-2 border-b border-border">
-                  <h3 className="text-sm font-semibold text-white">Hipotesis Akar Masalah Terurut</h3>
-                  <span className="text-xs text-white/40">Berdasarkan fakta deterministik</span>
+                      {/* Diff View */}
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-semibold text-white/70 uppercase">Diff Konfigurasi (Proposed vs Current)</h4>
+                        <div className="p-4 rounded-xl bg-black/60 border border-white/10 font-mono text-xs text-white/80 overflow-x-auto">
+                          <pre className="text-emerald-400">{selectedPlan.configuration_diff}</pre>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-
-                {!selectedIncident?.inferred_hypotheses?.length ? (
-                  <div className="text-center py-16 text-white/40 text-xs">Tidak ada hipotesis aktif.</div>
-                ) : (
-                  <div className="space-y-4">
-                    {selectedIncident.inferred_hypotheses.map((h, idx) => (
-                      <div key={idx} className="p-5 rounded-xl bg-white/[0.02] border border-border space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-300 text-xs flex items-center justify-center font-bold">
-                              {idx + 1}
-                            </span>
-                            <h4 className="text-sm font-semibold text-white">{h.title}</h4>
-                          </div>
-                          <span className="text-xs px-2.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
-                            Confidence: {h.confidence}
-                          </span>
-                        </div>
-
-                        <p className="text-xs text-white/70">{h.explanation}</p>
-
-                        {h.confidence_explanation && (
-                          <p className="text-[11px] text-cyan-400/80 italic">{h.confidence_explanation}</p>
-                        )}
-
-                        {h.alternative_explanations?.length > 0 && (
-                          <div className="text-[11px] text-white/50 space-y-0.5">
-                            <span className="font-semibold text-white/70">Alternatif dianalisis: </span>
-                            <span>{h.alternative_explanations.join(", ")}</span>
-                          </div>
-                        )}
-
-                        {h.recommended_test && (
-                          <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-300 flex items-start gap-2">
-                            <Zap size={14} className="shrink-0 mt-0.5" />
-                            <span>Rekomendasi Uji Lanjutan: {h.recommended_test}</span>
-                          </div>
-                        )}
-
-                        {h.known_limitations?.length > 0 && (
-                          <div className="p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/20 text-[11px] text-amber-300/80">
-                            <span className="font-semibold text-amber-300">Batasan Observasi: </span>
-                            {h.known_limitations.join(" ")}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* D. DIAGNOSTIC PLAYBOOK */}
-            {activeTab === "playbook" && (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between pb-2 border-b border-border">
-                  <h3 className="text-sm font-semibold text-white">Diagnostic Playbook Runner</h3>
-                  <span className="text-xs text-white/40">State Machine Deterministik</span>
-                </div>
-
-                {!activePlaybookRun ? (
-                  <div className="text-center py-12 space-y-4">
-                    <p className="text-xs text-white/50">Belum ada playbook yang sedang berjalan untuk insiden ini.</p>
-                    <div className="flex flex-wrap gap-2 justify-center">
-                      {playbooks.map((pb) => (
-                        <button
-                          key={pb.playbook_id}
-                          onClick={() => handleStartPlaybook(pb.playbook_id)}
-                          className="px-3.5 py-2 rounded-lg bg-white/5 hover:bg-cyan-500/20 border border-white/10 hover:border-cyan-500/40 text-xs text-white transition text-left"
-                        >
-                          <div className="font-semibold">{pb.name}</div>
-                          <div className="text-[10px] text-white/40">{pb.playbook_id}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="p-4 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-between">
-                      <div>
-                        <span className="text-xs font-semibold text-cyan-300">Playbook Aktif: {activePlaybookRun.playbook_id}</span>
-                        <p className="text-xs text-white/60 mt-0.5">
-                          Status: <strong className="text-white">{activePlaybookRun.status}</strong> | Langkah: {activePlaybookRun.current_step_id || "Selesai"}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {activePlaybookRun.status === "RUNNING" && (
-                          <>
-                            <button
-                              onClick={() => handleAdvancePlaybook("step")}
-                              disabled={advancingPlaybook}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-semibold transition"
-                            >
-                              {advancingPlaybook ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-                              <span>Langkah Berikutnya</span>
-                            </button>
-
-                            <button
-                              onClick={() => handleAdvancePlaybook("cancel")}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 text-xs transition"
-                            >
-                              <StopCircle size={13} />
-                              <span>Batalkan</span>
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Step Execution Logs */}
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-semibold text-white/70 uppercase">Log Keputusan Langkah</h4>
-                      {activePlaybookRun.step_logs?.map((log, idx) => (
-                        <div key={idx} className="p-3 rounded-lg bg-white/[0.02] border border-white/5 text-xs text-white/80 space-y-1">
-                          <div className="flex items-center justify-between text-white/40 text-[10px]">
-                            <span>{log.step_id || log.event}</span>
-                            <span>{new Date((log.timestamp || Date.now() / 1000) * 1000).toLocaleTimeString()}</span>
-                          </div>
-                          <p>{log.verdict || log.message || log.objective}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* E. CONFIGURATION PLANNER & SIMULATOR */}
-            {activeTab === "planner" && (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between pb-2 border-b border-border">
-                  <h3 className="text-sm font-semibold text-white">Perencana Konfigurasi & Simulasi Statis</h3>
-                  <button
-                    onClick={() => setShowNewPlanModal(true)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-cyan-300 text-xs font-semibold border border-cyan-500/40 hover:bg-cyan-500/30 transition"
-                  >
-                    + Buat Desired State Baru
-                  </button>
-                </div>
-
-                {!selectedPlan ? (
-                  <div className="text-center py-16 text-white/40 text-xs">Pilih atau buat rencana konfigurasi.</div>
-                ) : (
-                  <div className="space-y-5">
-                    {/* Plan Header */}
-                    <div className="p-4 rounded-xl bg-white/[0.02] border border-border flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-semibold text-white">
-                            {selectedPlan.plan_id} — {selectedPlan.desired_state?.change_type}
-                          </h4>
-                          <span
-                            className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                              selectedPlan.plan_status === "VALID_WITH_WARNINGS"
-                                ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                                : selectedPlan.plan_status === "READY_FOR_REVIEW"
-                                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                                : "bg-red-500/20 text-red-300 border border-red-500/40"
-                            }`}
-                          >
-                            {selectedPlan.plan_status}
-                          </span>
-                        </div>
-                        <p className="text-xs text-white/50 mt-0.5">
-                          Target: {selectedPlan.target_devices?.join(", ")} | Risk: {selectedPlan.risk_level}
-                        </p>
-                      </div>
-
-                      {selectedPlan.management_connectivity_risk && (
-                        <div className="p-2.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs flex items-center gap-2">
-                          <AlertTriangle size={15} />
-                          <span>Risiko Jalur Manajemen Terdeteksi</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Diff View */}
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-semibold text-white/70 uppercase">Diff Konfigurasi (Proposed vs Current)</h4>
-                      <div className="p-4 rounded-xl bg-black/60 border border-white/10 font-mono text-xs text-white/80 overflow-x-auto">
-                        <pre className="text-emerald-400">{selectedPlan.configuration_diff}</pre>
-                      </div>
-                    </div>
-
-                    {/* Validation Findings */}
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-semibold text-white/70 uppercase">Hasil Validasi Statis Deterministik</h4>
-                      {selectedPlan.validation_results?.length === 0 ? (
-                        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300">
-                          Validasi statis lulus tanpa temuan memblokir.
-                        </div>
-                      ) : (
-                        selectedPlan.validation_results.map((f, idx) => (
-                          <div
-                            key={idx}
-                            className={`p-3 rounded-lg border text-xs ${
-                              f.severity === "ERROR"
-                                ? "bg-red-500/10 border-red-500/30 text-red-300"
-                                : "bg-amber-500/10 border-amber-500/30 text-amber-300"
-                            }`}
-                          >
-                            <span className="font-semibold uppercase font-mono mr-2">[{f.rule_id}]</span>
-                            <span>{f.description}</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    {/* Forwarding Simulation */}
-                    {selectedPlan.simulation_results && (
-                      <div className="space-y-3 p-4 rounded-xl bg-white/[0.02] border border-border">
-                        <div className="flex items-center justify-between">
-                          <h4 className="text-xs font-semibold text-white/70 uppercase">Simulasi Forwarding LPM</h4>
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono">
-                            {selectedPlan.simulation_results.simulation_status}
-                          </span>
-                        </div>
-
-                        {/* Unmodeled Disclosures Notice */}
-                        <div className="p-3 rounded-lg bg-white/5 border border-white/10 text-xs text-white/60 space-y-1">
-                          <div className="font-semibold text-white/80">Batasan Model Forwarding Statis:</div>
-                          <ul className="list-disc list-inside space-y-0.5 text-[11px]">
-                            {selectedPlan.simulation_results.unmodeled_behavior?.slice(0, 3).map((u, i) => (
-                              <li key={i}>{u}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* F. AUDIT TIMELINE */}
-            {activeTab === "timeline" && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between pb-2 border-b border-border">
-                  <h3 className="text-sm font-semibold text-white">Jejak Audit Investigasi & Perencanaan</h3>
-                  <span className="text-xs text-white/40">Immutable Audit Trail</span>
-                </div>
-
-                <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-white/10">
-                  <div className="relative">
-                    <span className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-cyan-400 ring-4 ring-[#0b101b]" />
-                    <div className="text-xs font-semibold text-white">Investigasi Dibuat</div>
-                    <p className="text-[11px] text-white/50">
-                      Target {selectedIncident?.device_identity} diresolusi via CanonicalNetworkRegistry.
-                    </p>
-                  </div>
-
-                  <div className="relative">
-                    <span className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-emerald-400 ring-4 ring-[#0b101b]" />
-                    <div className="text-xs font-semibold text-white">Pengumpulan Bukti Read-Only Selesai</div>
-                    <p className="text-[11px] text-white/50">
-                      {evidenceItems.length} tabel RouterOS dinormalisasi tanpa membebani CPU router.
-                    </p>
-                  </div>
-
-                  <div className="relative">
-                    <span className="absolute -left-6 top-1 w-3 h-3 rounded-full bg-purple-400 ring-4 ring-[#0b101b]" />
-                    <div className="text-xs font-semibold text-white">Evaluasi Hipotesis & Simulasi Rencana</div>
-                    <p className="text-[11px] text-white/50">
-                      Perintah kandidat divalidasi terhadap subnet overlap dan risiko jalur manajemen.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* ------------------------------------------------------------------- */}
+      {/* SECTION 3: ACTION CENTER TAB */}
+      {/* ------------------------------------------------------------------- */}
+      {activeTab === "actions" && (
+        <ActionCenterTab
+          actions={actions}
+          loading={loadingActions}
+          onRefresh={fetchActions}
+          onResolveApproval={handleResolveApproval}
+          onExecuteAction={handleExecuteAction}
+          onOpenPolicyModal={() => setShowPolicyModal(true)}
+          onOpenNewActionModal={() => {
+            setPrefilledActionData(null);
+            setShowNewActionModal(true);
+          }}
+        />
+      )}
+
+      {/* ------------------------------------------------------------------- */}
+      {/* MODALS */}
+      {/* ------------------------------------------------------------------- */}
+
+      <OnboardDeviceModal
+        open={showOnboardModal}
+        onClose={() => setShowOnboardModal(false)}
+        onOnboardSuccess={() => {
+          fetchOverview();
+          loadInitialData();
+        }}
+      />
+
+      <OperationsPolicyModal
+        open={showPolicyModal}
+        onClose={() => setShowPolicyModal(false)}
+      />
+
+      <NewActionModal
+        open={showNewActionModal}
+        onClose={() => {
+          setShowNewActionModal(false);
+          setPrefilledActionData(null);
+        }}
+        onActionCreated={() => {
+          fetchActions();
+          fetchOverview();
+        }}
+        devices={devices}
+        initialData={prefilledActionData}
+      />
+
+      <RouteHistoryModal
+        open={routeHistoryOpen}
+        onClose={() => setRouteHistoryOpen(false)}
+        pushToast={(msg, type) => notify({ type: type || "info", message: msg })}
+      />
 
       {/* Modal: Investigasi Baru */}
       {showNewIncidentModal && (
@@ -1303,7 +1231,7 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
       {showNewPlanModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
           <div className="w-full max-w-lg bg-[#0b101b] border border-white/10 rounded-2xl p-6 text-white space-y-4 shadow-2xl">
-            <h3 className="text-base font-semibold">Buat Desired State & Rencana Konfigurasi</h3>
+            <h3 className="text-base font-semibold">Buat Desired State &amp; Rencana Konfigurasi</h3>
             <form onSubmit={handleCreatePlan} className="space-y-4 text-xs">
               <div>
                 <label className="block text-white/70 mb-1">Target Router</label>
@@ -1328,7 +1256,7 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
                   className="w-full bg-white/5 border border-border rounded-lg px-3 py-2 text-white outline-none focus:border-cyan-400"
                 >
                   <option value="ADD_STATIC_ROUTE">Tambah Rute Statis</option>
-                  <option value="ADD_VLAN">Tambah VLAN & Subnet</option>
+                  <option value="ADD_VLAN">Tambah VLAN &amp; Subnet</option>
                   <option value="CONFIGURE_NAT">Konfigurasi NAT Masquerade</option>
                 </select>
               </div>
@@ -1406,19 +1334,13 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
                   className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-semibold transition"
                 >
                   {planning ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-                  <span>Validasi & Simulasikan Rencana</span>
+                  <span>Validasi &amp; Simulasikan Rencana</span>
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
-
-      <RouteHistoryModal
-        open={routeHistoryOpen}
-        onClose={() => setRouteHistoryOpen(false)}
-        pushToast={(msg, type) => notify({ type: type || "info", message: msg })}
-      />
     </div>
   );
 }

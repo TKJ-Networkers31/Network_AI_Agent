@@ -308,12 +308,19 @@ async def _run_turn(session_id: str, raw: dict, cancel_event: threading.Event) -
     run_id = raw.get("run_id") or uuid.uuid4().hex[:12]
 
     try:
+        # Resolve user_id from session for strict user-isolated memory context
+        user_id = None
+        sess = store.get_session_row(session_id)
+        if sess and sess.get("user_id"):
+            user_id = sess.get("user_id")
+
         # Semua event yang dipublish selama giliran ini (termasuk dari thread
-        # pekerja) otomatis tertandai sesi + run + correlation_id yang sama.
+        # pekerja) otomatis tertandai sesi + run + correlation_id + user_id yang sama.
         with event_scope(
             correlation_id=new_correlation_id(),
             session_id=session_id,
             run_id=run_id,
+            user_id=user_id,
         ):
             await _process_turn(session_id, raw, cancel_event, run_id)
     except Exception:

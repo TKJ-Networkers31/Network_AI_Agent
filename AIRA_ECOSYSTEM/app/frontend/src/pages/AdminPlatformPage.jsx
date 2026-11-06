@@ -52,6 +52,7 @@ const CONTROL_PLANE_MODULES = [
   { id: "overview", label: "Overview", icon: BarChart3 },
   { id: "users", label: "User Management", icon: Users },
   { id: "groups", label: "Groups & Permissions", icon: ShieldCheck },
+  { id: "ai_policy", label: "AI Operations Policy", icon: Sliders },
   { id: "activity", label: "Activity & Sessions", icon: Activity },
 ];
 
@@ -66,6 +67,67 @@ export default function AdminPlatformPage({ onOpenMenu }) {
   const [activityEvents, setActivityEvents] = useState([]);
   const [deviceCount, setDeviceCount] = useState(0);
   const [loading, setLoading] = useState(false);
+
+  // AI Operations Policy states (Phase G)
+  const [policyData, setPolicyData] = useState({
+    tenant_id: "tenant_internal",
+    default_execution_mode: "SEMI_AUTONOMOUS",
+    max_autonomous_risk_level: "LOW",
+    require_human_approval_for_high_risk: true,
+    require_human_approval_for_critical: true,
+    enforce_rollback_plan: true,
+    min_verification_checks: 1,
+    audit_retention_days: 90,
+    allowed_action_types_per_risk: {
+      READ_ONLY: ["TELEMETRY_POLL", "ROUTE_PRINT", "PING_CHECK", "INTERFACE_STATUS"],
+      LOW: ["INTERFACE_COMMENT", "NTP_UPDATE"],
+      MEDIUM: ["DISABLE_UNUSED_PORT", "STATIC_ROUTE_ADD"],
+      HIGH: ["INTERFACE_DOWN", "FIREWALL_RULE_CHANGE"],
+      CRITICAL: ["REBOOT", "ROUTER_OS_UPGRADE", "FACTORY_RESET"]
+    }
+  });
+  const [policyLoading, setPolicyLoading] = useState(false);
+  const [policySaving, setPolicySaving] = useState(false);
+
+  const fetchAiPolicy = useCallback(async () => {
+    setPolicyLoading(true);
+    try {
+      const res = await fetch("/api/intelligence/actions/policy?tenant_id=tenant_internal", {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.policy) setPolicyData(data.policy);
+      }
+    } catch (err) {
+      console.warn("Fetch policy error:", err);
+    } finally {
+      setPolicyLoading(false);
+    }
+  }, []);
+
+  const handleSaveAiPolicy = async (e) => {
+    if (e) e.preventDefault();
+    setPolicySaving(true);
+    try {
+      const res = await fetch("/api/intelligence/actions/policy?tenant_id=tenant_internal", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(policyData),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        notify({ type: "success", message: "AI Operations Policy berhasil diperbarui." });
+        if (data.policy) setPolicyData(data.policy);
+      } else {
+        notify({ type: "error", message: data.detail || "Gagal menyimpan AI policy." });
+      }
+    } catch (err) {
+      notify({ type: "error", message: err.message });
+    } finally {
+      setPolicySaving(false);
+    }
+  };
 
   // User Modals
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
@@ -121,7 +183,8 @@ export default function AdminPlatformPage({ onOpenMenu }) {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    fetchAiPolicy();
+  }, [loadData, fetchAiPolicy]);
 
   // Periodic heartbeat / session refresh
   useEffect(() => {
@@ -977,6 +1040,151 @@ export default function AdminPlatformPage({ onOpenMenu }) {
         )}
 
         {/* 4. ACTIVITY & SESSIONS */}
+        {activeModule === "ai_policy" && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4 p-5 rounded-2xl bg-gradient-to-r from-neutral-900 via-neutral-900 to-rose-950/20 border border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400">
+                  <Sliders size={24} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-white">AIRA Operations Policy Configuration</h3>
+                  <p className="text-xs text-neutral-400">
+                    Kebijakan tata kelola eksekusi otonom, approval matrix, validasi rollback, dan retensi audit log (Phase G).
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleSaveAiPolicy}
+                disabled={policySaving}
+                className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold shadow-lg shadow-rose-500/20 transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {policySaving ? <RefreshCw size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
+                <span>{policySaving ? "Menyimpan..." : "Simpan Perubahan Policy"}</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAiPolicy} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Card 1: Execution Mode & Autonomous Threshold */}
+              <div className="p-5 rounded-2xl bg-neutral-900/60 border border-white/10 space-y-4">
+                <div className="flex items-center gap-2 pb-2 border-b border-white/5">
+                  <Cpu size={16} className="text-rose-400" />
+                  <h4 className="text-xs font-semibold text-white uppercase">Mode Eksekusi &amp; Batas Otonom</h4>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block text-neutral-400 mb-1">Default Execution Mode</label>
+                    <select
+                      value={policyData.default_execution_mode}
+                      onChange={(e) => setPolicyData({ ...policyData, default_execution_mode: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white outline-none focus:border-rose-500"
+                    >
+                      <option value="RECOMMEND_ONLY">RECOMMEND_ONLY (Hanya rekomendasi &amp; analisis)</option>
+                      <option value="SEMI_AUTONOMOUS">SEMI_AUTONOMOUS (Otonom untuk risiko rendah, approval untuk menengah ke atas)</option>
+                      <option value="AUTONOMOUS">AUTONOMOUS (Otonom hingga batas ambang risiko)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-neutral-400 mb-1">Maximum Risk Level for Autonomous Execution</label>
+                    <select
+                      value={policyData.max_autonomous_risk_level}
+                      onChange={(e) => setPolicyData({ ...policyData, max_autonomous_risk_level: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white outline-none focus:border-rose-500"
+                    >
+                      <option value="READ_ONLY">READ_ONLY (Hanya query &amp; telemetri)</option>
+                      <option value="LOW">LOW (Tindakan berdampak minimal)</option>
+                      <option value="MEDIUM">MEDIUM (Konfigurasi minor/rute)</option>
+                    </select>
+                    <p className="text-[10px] text-neutral-500 mt-1">
+                      *Tindakan HIGH dan CRITICAL tidak pernah diizinkan dieksekusi secara otonom penuh tanpa persetujuan manusia.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-neutral-400 mb-1">Minimum Verification Checks Required</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={5}
+                      value={policyData.min_verification_checks || 1}
+                      onChange={(e) => setPolicyData({ ...policyData, min_verification_checks: parseInt(e.target.value) || 1 })}
+                      className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white font-mono outline-none focus:border-rose-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-neutral-400 mb-1">Audit Log Retention Policy (Hari)</label>
+                    <input
+                      type="number"
+                      min={30}
+                      max={365}
+                      value={policyData.audit_retention_days || 90}
+                      onChange={(e) => setPolicyData({ ...policyData, audit_retention_days: parseInt(e.target.value) || 90 })}
+                      className="w-full px-3 py-2 rounded-lg bg-black/50 border border-white/10 text-white font-mono outline-none focus:border-rose-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2: Mandatory Approvals & Rollback Enforcements */}
+              <div className="p-5 rounded-2xl bg-neutral-900/60 border border-white/10 space-y-4">
+                <div className="flex items-center gap-2 pb-2 border-b border-white/5">
+                  <ShieldAlert size={16} className="text-amber-400" />
+                  <h4 className="text-xs font-semibold text-white uppercase">Persetujuan Wajib &amp; Rollback Enforcement</h4>
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  {/* Non-Bypassable High Risk Approval */}
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold text-amber-200">Mandatory Human Approval for HIGH Risk</div>
+                      <div className="text-[11px] text-amber-300/70">Wajib persetujuan engineer sebelum eksekusi HIGH</div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-mono font-bold">
+                      LOCKED ON (NON-BYPASSABLE)
+                    </span>
+                  </div>
+
+                  {/* Non-Bypassable Critical Risk Approval */}
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold text-rose-200">Mandatory Human Approval for CRITICAL Risk</div>
+                      <div className="text-[11px] text-rose-300/70">Reboot, firmware upgrade, router factory reset</div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-mono font-bold">
+                      LOCKED ON (NON-BYPASSABLE)
+                    </span>
+                  </div>
+
+                  {/* Rollback Plan Enforcement */}
+                  <div className="p-3 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between">
+                    <div>
+                      <div className="font-semibold text-white">Rollback Plan Enforcement</div>
+                      <div className="text-[11px] text-neutral-400">Tolak eksekusi mutasi jika tidak ada rencana rollback</div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={!!policyData.enforce_rollback_plan}
+                      onChange={(e) => setPolicyData({ ...policyData, enforce_rollback_plan: e.target.checked })}
+                      className="w-4 h-4 rounded text-rose-500 focus:ring-rose-400"
+                    />
+                  </div>
+
+                  {/* Tenant Scope Override */}
+                  <div className="p-3 rounded-xl bg-white/5 border border-white/5 space-y-1">
+                    <div className="font-semibold text-white">Tenant Policy Scope</div>
+                    <div className="text-[11px] text-neutral-400 font-mono">
+                      Current Target: {policyData.tenant_id} (Multi-Tenant Isolation)
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+        )}
+
         {activeModule === "activity" && (
           <div className="space-y-6">
             {/* Live Sessions */}
