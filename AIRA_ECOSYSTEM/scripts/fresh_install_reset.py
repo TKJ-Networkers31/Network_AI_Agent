@@ -30,6 +30,7 @@ BACKUPS_DIR = DATABASE_DIR / "backups"
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("aira.fresh_install")
 
+
 def create_pre_reset_backup() -> Path:
     """Creates a full timestamped backup of all .db files in database/."""
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -56,9 +57,7 @@ def execute_fresh_install_reset() -> dict:
         "preserved_system_records": {},
     }
 
-    # =========================================================================
     # 1. artifacts.db
-    # =========================================================================
     art_db = DATABASE_DIR / "artifacts.db"
     if art_db.exists():
         with sqlite3.connect(art_db) as conn:
@@ -68,9 +67,7 @@ def execute_fresh_install_reset() -> dict:
             conn.execute("VACUUM")
             report["cleared_databases"]["artifacts.db"] = {"artifacts": cnt}
 
-    # =========================================================================
     # 2. attachments.db
-    # =========================================================================
     att_db = DATABASE_DIR / "attachments.db"
     if att_db.exists():
         with sqlite3.connect(att_db) as conn:
@@ -80,9 +77,7 @@ def execute_fresh_install_reset() -> dict:
             conn.execute("VACUUM")
             report["cleared_databases"]["attachments.db"] = {"attachments": cnt}
 
-    # =========================================================================
     # 3. chat_sessions.db
-    # =========================================================================
     chat_db = DATABASE_DIR / "chat_sessions.db"
     if chat_db.exists():
         with sqlite3.connect(chat_db) as conn:
@@ -94,9 +89,7 @@ def execute_fresh_install_reset() -> dict:
             conn.execute("VACUUM")
             report["cleared_databases"]["chat_sessions.db"] = {"chat_sessions": s_cnt, "chat_turns": t_cnt}
 
-    # =========================================================================
     # 4. interaction_memory.db
-    # =========================================================================
     im_db = DATABASE_DIR / "interaction_memory.db"
     if im_db.exists():
         with sqlite3.connect(im_db) as conn:
@@ -106,9 +99,7 @@ def execute_fresh_install_reset() -> dict:
             conn.execute("VACUUM")
             report["cleared_databases"]["interaction_memory.db"] = {"interaction_context": cnt}
 
-    # =========================================================================
     # 5. inventory.db
-    # =========================================================================
     inv_db = DATABASE_DIR / "inventory.db"
     if inv_db.exists():
         with sqlite3.connect(inv_db) as conn:
@@ -126,9 +117,7 @@ def execute_fresh_install_reset() -> dict:
                 "device_credentials": dc_cnt,
             }
 
-    # =========================================================================
     # 6. logs.db
-    # =========================================================================
     logs_db = DATABASE_DIR / "logs.db"
     if logs_db.exists():
         with sqlite3.connect(logs_db) as conn:
@@ -138,9 +127,7 @@ def execute_fresh_install_reset() -> dict:
             conn.execute("VACUUM")
             report["cleared_databases"]["logs.db"] = {"logs": cnt}
 
-    # =========================================================================
     # 7. long_term_memory.db & semantic_memory.db
-    # =========================================================================
     lt_db = DATABASE_DIR / "long_term_memory.db"
     if lt_db.exists():
         with sqlite3.connect(lt_db) as conn:
@@ -161,9 +148,7 @@ def execute_fresh_install_reset() -> dict:
             conn.execute("VACUUM")
             report["cleared_databases"]["semantic_memory.db"] = {"semantic_memory": cnt}
 
-    # =========================================================================
     # 8. network_intelligence.db
-    # =========================================================================
     ni_db = DATABASE_DIR / "network_intelligence.db"
     if ni_db.exists():
         with sqlite3.connect(ni_db) as conn:
@@ -176,9 +161,7 @@ def execute_fresh_install_reset() -> dict:
             conn.execute("VACUUM")
             report["cleared_databases"]["network_intelligence.db"] = ni_counts
 
-    # =========================================================================
     # 9. selection_context.db
-    # =========================================================================
     sel_db = DATABASE_DIR / "selection_context.db"
     if sel_db.exists():
         with sqlite3.connect(sel_db) as conn:
@@ -188,9 +171,7 @@ def execute_fresh_install_reset() -> dict:
             conn.execute("VACUUM")
             report["cleared_databases"]["selection_context.db"] = {"selection_context": cnt}
 
-    # =========================================================================
     # 10. vision_snapshots/
-    # =========================================================================
     vis_dir = DATABASE_DIR / "vision_snapshots"
     if vis_dir.exists():
         del_img_cnt = 0
@@ -199,15 +180,22 @@ def execute_fresh_install_reset() -> dict:
             del_img_cnt += 1
         report["cleared_databases"]["vision_snapshots"] = {"deleted_images": del_img_cnt}
 
-    # =========================================================================
-    # 11. topology.db (Central Engine Database)
-    # =========================================================================
+    # 11. persona.db
+    p_db = DATABASE_DIR / "persona.db"
+    if p_db.exists():
+        with sqlite3.connect(p_db) as conn:
+            conn.execute("UPDATE persona_profile SET user_name = NULL, active_preset = 'akane'")
+            conn.execute("DELETE FROM persona_presets WHERE is_builtin = 0")
+            conn.commit()
+            conn.execute("VACUUM")
+            report["cleared_databases"]["persona.db"] = {"user_name_reset": True, "custom_presets_cleared": True}
+
+    # 12. topology.db (Central Engine Database)
     top_db = DATABASE_DIR / "topology.db"
     if top_db.exists():
         with sqlite3.connect(top_db) as conn:
             top_cleared = {}
 
-            # Tables to completely clear
             tables_to_clear = [
                 # Topology & Devices
                 "topology_nodes",
@@ -322,17 +310,17 @@ def execute_fresh_install_reset() -> dict:
                 conn.execute(f"DELETE FROM operational_users WHERE user_id IN ({placeholders})", test_user_ids)
             top_cleared["operational_users_test_removed"] = len(test_user_ids)
 
-            conn.commit()
-            conn.execute("VACUUM")
-            report["cleared_databases"]["topology.db"] = top_cleared
-
-            # Record preserved system state
+            # Record preserved system state from topology.db
             report["preserved_system_records"]["operational_users"] = [r[0] for r in conn.execute("SELECT username FROM operational_users").fetchall()]
             report["preserved_system_records"]["operational_tenants"] = [r[0] for r in conn.execute("SELECT slug FROM operational_tenants").fetchall()]
             report["preserved_system_records"]["operational_groups"] = conn.execute("SELECT COUNT(*) FROM operational_groups").fetchone()[0]
             report["preserved_system_records"]["operational_permissions"] = conn.execute("SELECT COUNT(*) FROM operational_permissions").fetchone()[0]
             report["preserved_system_records"]["operational_playbooks"] = conn.execute("SELECT COUNT(*) FROM operational_playbooks").fetchone()[0]
             report["preserved_system_records"]["user_personas_builtin"] = conn.execute("SELECT COUNT(*) FROM user_personas").fetchone()[0]
+
+            conn.commit()
+            conn.execute("VACUUM")
+            report["cleared_databases"]["topology.db"] = top_cleared
 
     # Re-bootstrap superadmin to verify lingga_admin account is pristine & fully privileged
     sys.path.insert(0, str(BASE_DIR))
