@@ -1181,10 +1181,10 @@ class UnifiedEvidenceService:
                         SELECT rs1.*
                         FROM route_snapshots rs1
                         INNER JOIN (
-                            SELECT device_id, MAX(created_at) AS max_ts
+                            SELECT device_id, MAX(collected_at) AS max_ts
                             FROM route_snapshots
                             GROUP BY device_id
-                        ) rs2 ON rs1.device_id = rs2.device_id AND rs1.created_at = rs2.max_ts
+                        ) rs2 ON rs1.device_id = rs2.device_id AND rs1.collected_at = rs2.max_ts
                         """
                     ).fetchall()
                     for r in rs_rows:
@@ -1197,7 +1197,7 @@ class UnifiedEvidenceService:
                                 routes_json = []
                             out["latest_route_snapshot_payloads"][did] = {
                                 "snapshot_id": r["snapshot_id"],
-                                "created_at": float(r["created_at"]),
+                                "created_at": float(r["collected_at"]),
                                 "completeness": r["completeness"] or "COMPLETE",
                                 "routes": routes_json,
                             }

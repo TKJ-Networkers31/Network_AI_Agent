@@ -1004,7 +1004,15 @@ def get_network_intelligence_overview():
 
     store = get_network_intelligence_store()
     recent_incidents = store.list_incidents(limit=10)
-    inv_devices = get_inventory_store().list_devices()
+    inv_res = get_inventory_store().list_devices()
+    inv_dev_list = inv_res.get("devices", []) if isinstance(inv_res, dict) else (inv_res if isinstance(inv_res, list) else [])
+    inv_count = inv_res.get("count", len(inv_dev_list)) if isinstance(inv_res, dict) else len(inv_dev_list)
+    try:
+        from core.topology_engine import get_topology_engine
+        topo_nodes_count = len(get_topology_engine().get_topology().get("nodes", []) or [])
+    except Exception:
+        topo_nodes_count = 0
+    total_devices_count = max(inv_count, topo_nodes_count)
     nms_overview = get_nms_engine().get_overview()
     action_engine = get_action_engine()
     recent_actions = action_engine.list_actions(limit=20)
@@ -1031,7 +1039,7 @@ def get_network_intelligence_overview():
             "health_score": health.get("score", 100.0),
             "dimension_scores": health.get("dimensions", {}),
             "device_health": health.get("device_health", {}),
-            "total_registered_devices": len(inv_devices),
+            "total_registered_devices": total_devices_count,
             "reachable_devices": nms_overview.get("up_count", 0),
             "unreachable_devices": nms_overview.get("down_count", 0) + nms_overview.get("suspected_count", 0),
             "active_investigations": len([i for i in recent_incidents if i.investigation_status != "COMPLETED"]),
