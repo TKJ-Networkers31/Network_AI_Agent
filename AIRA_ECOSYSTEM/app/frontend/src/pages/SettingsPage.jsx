@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 import { useCallback, useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import LocationPanel from "../components/location/LocationPanel.jsx";
@@ -40,6 +41,8 @@ const CATEGORY_COLORS = {
 };
 
 export default function SettingsPage({ onOpenMenu }) {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const { user, role, plan, hasNetworkingPlus, isAdmin, isGuest, hasPermission } = useAuth();
   const { notify } = useToast();
 
@@ -302,7 +305,7 @@ export default function SettingsPage({ onOpenMenu }) {
       notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin memperbarui persona." });
       return;
     }
-    const cloneName = prompt(`Nama untuk kloning persona '${personaName}':`, `${personaName} (Copy)`);
+    const cloneName = await modalPrompt({ message: `Nama untuk kloning persona '${personaName}':`, defaultValue: `${personaName} (Copy)` });
     if (!cloneName || !cloneName.trim()) return;
     try {
       const res = await api.personalization.duplicatePersona(personaId, cloneName.trim());
@@ -320,7 +323,7 @@ export default function SettingsPage({ onOpenMenu }) {
       notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin menghapus persona." });
       return;
     }
-    if (!confirm("Hapus custom persona ini?")) return;
+    if (!await modalConfirm({ message: "Hapus custom persona ini?", isDestructive: true })) return;
     try {
       const res = await api.personalization.deletePersona(personaId);
       if (res.success) {

@@ -1,18 +1,31 @@
 """
-api/routers/persona.py — REST endpoint untuk Persona Engine (Phase 1.3).
+api/routers/persona.py — REST endpoint untuk Persona Engine (Phase 1.3 + Phase F/H).
 
-Murni "pintu HTTP" tipis di atas core/persona/engine.py::PersonaEngine.
-Tidak ada logic persona di sini.
+Murni "pintu HTTP" di atas core/persona/engine.py::PersonaEngine,
+disinkronkan dengan UserPersonaService & UserMemoryService jika user login.
 """
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from core.persona import get_engine
+from core.tenant.manager import IdentityManager
+from core.tenant.persona_service import get_persona_service
+from core.tenant.memory_service import get_memory_service
 
 router = APIRouter(prefix="/api/persona", tags=["persona"])
+
+_id_mgr = IdentityManager()
+
+
+def _get_user_id(authorization: Optional[str]) -> Optional[str]:
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    ctx = _id_mgr.validate_session_token(token)
+    return ctx.user_id if ctx else None
 
 
 def _dump(payload: BaseModel) -> dict:
@@ -52,17 +65,45 @@ class PreviewRequest(BaseModel):
 
 
 @router.get("")
-def get_persona():
-    return get_engine().get_state()
+def get_persona(authorization: Optional[str] = Header(None)):
+    state = get_engine().get_state()
+    user_id = _get_user_id(authorization)
+    if user_id:
+        try:
+            mem_svc = get_memory_service()
+            ident = mem_svc.get_user_identity(user_id)
+            if ident.get("preferred_name") or ident.get("full_name"):
+                state["profile"]["user_name"] = ident.get("preferred_name") or ident.get("full_name")
+            p_svc = get_persona_service()
+            active_p = p_svc.get_active_persona(user_id)
+            if active_p and active_p.get("persona_id"):
+                state["profile"]["active_preset"] = active_p["persona_id"]
+        except Exception:
+            pass
+    return state
 
 
 @router.put("/profile")
-def update_profile(payload: ProfileUpdateRequest):
-    return get_engine().update_profile(_dump(payload))
+def update_profile(payload: ProfileUpdateRequest, authorization: Optional[str] = Header(None)):
+    res = get_engine().update_profile(_dump(payload))
+    user_id = _get_user_id(authorization)
+    if user_id:
+        try:
+            mem_svc = get_memory_service()
+            ident_updates = {}
+            if payload.user_name:
+                ident_updates["preferred_name"] = payload.user_name
+            if payload.language:
+                ident_updates["language"] = payload.language
+            if ident_updates:
+                mem_svc.update_user_identity(user_id, ident_updates)
+        except Exception:
+            pass
+    return res
 
 
 @router.put("/behavior")
-def update_behavior(payload: BehaviorUpdateRequest):
+def update_behavior(payload: BehaviorUpdateRequest, authorization: Optional[str] = Header(None)):
     return get_engine().update_behavior(_dump(payload))
 
 
@@ -82,11 +123,19 @@ def get_preset(preset_id: str):
 
 
 @router.post("/presets/apply")
-def apply_preset(payload: ApplyPresetRequest):
+def apply_preset(payload: ApplyPresetRequest, authorization: Optional[str] = Header(None)):
     result = get_engine().apply_preset(payload.preset_id)
 
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=result.get("error"))
+
+    user_id = _get_user_id(authorization)
+    if user_id:
+        try:
+            p_svc = get_persona_service()
+            p_svc.set_active_persona(user_id, payload.preset_id)
+        except Exception:
+            pass
 
     return result
 
@@ -102,6 +151,15 @@ def clone_preset(payload: ClonePresetRequest):
 
 
 @router.post("/preview")
-def preview(payload: PreviewRequest):
+def preview(payload: PreviewRequest, authorization: Optional[str] = Header(None)):
+    user_id = _get_user_id(authorization)
+    if user_id:
+        try:
+            from core.events import event_scope
+            with event_scope(user_id=user_id):
+                prompt = get_engine().preview(payload.extra_context or "")
+                return {"system_prompt": prompt}
+        except Exception:
+            pass
     prompt = get_engine().preview(payload.extra_context or "")
     return {"system_prompt": prompt}

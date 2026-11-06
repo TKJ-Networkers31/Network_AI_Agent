@@ -7,7 +7,40 @@ import base64
 import logging
 from pathlib import Path
 
-from core.vision.models import VisionResult, VisionStatus
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional, Dict, Any
+
+class VisionStatus(str, Enum):
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+    ERROR = "error"
+
+@dataclass
+class VisionResult:
+    status: str = VisionStatus.UNAVAILABLE.value
+    provider: Optional[str] = None
+    reason: Optional[str] = None
+    text: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "status": self.status,
+            "provider": self.provider,
+            "reason": self.reason,
+            "text": self.text,
+            "metadata": self.metadata,
+        }
+
+@dataclass
+class ImageMetadata:
+    name: Optional[str] = None
+    mime_type: str = "image/png"
+    size: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+
 
 logger = logging.getLogger("aira.file_processing.vision")
 PROMPT = ("Jelaskan isi gambar ini secara faktual dan rinci (perangkat, label, koneksi, IP/VLAN yang "

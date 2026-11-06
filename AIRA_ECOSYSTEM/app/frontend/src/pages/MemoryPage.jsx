@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 // src/pages/MemoryPage.jsx
 //
 // AIRA OS — User Memory & Personal Knowledge Base (Workstream F).
@@ -34,6 +35,8 @@ const CATEGORIES = [
 ];
 
 export default function MemoryPage({ onOpenMenu }) {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const { notify } = useToast();
   const { user } = useAuth();
 
@@ -151,7 +154,7 @@ export default function MemoryPage({ onOpenMenu }) {
   };
 
   const handleClearAll = async () => {
-    if (!window.confirm("Yakin ingin menghapus seluruh memori Anda? Tindakan ini tidak dapat dibatalkan.")) {
+    if (!await modalConfirm({ message: "Yakin ingin menghapus seluruh memori Anda? Tindakan ini tidak dapat dibatalkan.", isDestructive: true })) {
       return;
     }
     try {

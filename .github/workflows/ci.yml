@@ -1,0 +1,85 @@
+name: AIRA OS CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop, "feature/**" ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-test:
+    name: Backend Tests & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run Backend Pytest Suite
+        env:
+          PYTHONPATH: AIRA_ECOSYSTEM
+          AIRA_ENV: test
+        run: |
+          pytest AIRA_ECOSYSTEM/tests/test_phase_h_security_and_governance.py \
+                 AIRA_ECOSYSTEM/tests/test_phase_g_network_intelligence.py \
+                 AIRA_ECOSYSTEM/tests/test_phase_g_memory_isolation.py \
+                 AIRA_ECOSYSTEM/tests/test_persona_engine.py \
+                 AIRA_ECOSYSTEM/tests/test_dio_orchestration.py \
+                 AIRA_ECOSYSTEM/tests/test_dio_parameter_resolution.py \
+                 AIRA_ECOSYSTEM/tests/test_phase_f1_all.py \
+                 AIRA_ECOSYSTEM/tests/test_phase_f2_dynamic_ui_rbac.py -v
+
+  frontend-test:
+    name: Frontend Tests & Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: AIRA_ECOSYSTEM/app/frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: AIRA_ECOSYSTEM/app/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Vitest Unit Tests
+        run: npm test -- --run
+
+      - name: Build Frontend Distribution
+        run: npm run build
+
+  docker-build-check:
+    name: Docker Build Validation
+    needs: [backend-test, frontend-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: aira-os:test

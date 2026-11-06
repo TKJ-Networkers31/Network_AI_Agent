@@ -23,6 +23,7 @@ import ChatPage from "./pages/ChatPage.jsx";
 import { SessionsProvider } from "./context/SessionsContext.jsx";
 import { ChatRuntimeProvider } from "./context/ChatRuntimeContext.jsx";
 import { ToastProvider } from "./components/Toast.jsx";
+import { ModalDialogProvider } from "./context/ModalDialogContext.jsx";
 import BootGate from "./components/boot/BootGate.jsx";
 import AccessLocationReporter from "./components/location/AccessLocationReporter.jsx";
 import VoiceCompanionHost from "./components/voice/VoiceCompanionHost.jsx";
@@ -323,7 +324,8 @@ function AuthenticatedGate({ children }) {
 export default function App() {
   return (
     <ToastProvider>
-      <AuthProvider>
+      <ModalDialogProvider>
+        <AuthProvider>
         <AuthenticatedGate>
         <SessionsProvider>
           <ChatRuntimeProvider isOnChatPage={true}>
@@ -335,7 +337,8 @@ export default function App() {
           </ChatRuntimeProvider>
         </SessionsProvider>
         </AuthenticatedGate>
-      </AuthProvider>
+        </AuthProvider>
+      </ModalDialogProvider>
     </ToastProvider>
   );
 }

@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   ShieldCheck, AlertTriangle, AlertCircle, CheckCircle2, 
@@ -24,6 +25,8 @@ const RISK_BADGES = {
 };
 
 export default function DecisionsPage() {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const [tenantId, setTenantId] = useState('tenant_default');
   const [decisions, setDecisions] = useState([]);
   const [healthSummary, setHealthSummary] = useState(null);
@@ -63,7 +66,7 @@ export default function DecisionsPage() {
   }, [fetchDecisions]);
 
   const handleTransition = async (decisionId, newStatus) => {
-    const reason = prompt(`Masukkan alasan transisi ke ${newStatus}:`, 'Konfirmasi tindakan operasional');
+    const reason = await modalPrompt({ message: `Masukkan alasan transisi ke ${newStatus}:`, defaultValue: 'Konfirmasi tindakan operasional' });
     if (!reason) return;
 
     try {
@@ -82,7 +85,7 @@ export default function DecisionsPage() {
         setSelectedDecision(updated);
       }
     } catch (err) {
-      alert(`Error: ${err.message}`);
+      await modalAlert({ message: `Error: ${err.message}`, type: "danger" });
     }
   };
 
@@ -95,7 +98,7 @@ export default function DecisionsPage() {
         setShowHistoryModal(true);
       }
     } catch (err) {
-      alert(`Gagal mengambil riwayat: ${err.message}`);
+      await modalAlert({ message: `Gagal mengambil riwayat: ${err.message}`, type: "danger" });
     }
   };
 
@@ -115,7 +118,7 @@ export default function DecisionsPage() {
       const data = await res.json();
       setSimResults(data);
     } catch (err) {
-      alert(err.message);
+      await modalAlert({ message: err.message, type: "danger" });
     }
   };
 

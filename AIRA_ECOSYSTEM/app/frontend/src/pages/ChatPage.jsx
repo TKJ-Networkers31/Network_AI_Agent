@@ -598,6 +598,7 @@ function ChatPageInner({ onOpenMenu }) {
                 sessionId={activeId}
                 onCapabilityInvoke={handleCapabilityInvoke}
                 onSelectionAction={handleSelectionAction}
+                onSelectSuggestion={(prompt) => handleSend(prompt)}
               />
             ))}
 

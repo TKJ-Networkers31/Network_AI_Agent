@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 // src/pages/TopologyPage.jsx
 // AIRA OS Topology Fabric V2: Evidence-Based Discovery, ISP Boundary Detection,
 // Device Ownership Governance & Physical-Link Confidence Canvas.
@@ -65,6 +66,8 @@ import {
 } from "../components/topology/routeOverlayApi.js";
 
 export default function TopologyPage({ onOpenMenu }) {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const { pushToast, notify } = useToast();
   const showToast = useCallback((msg, type = "info") => {
     if (typeof pushToast === "function") pushToast(msg, type);
@@ -312,7 +315,7 @@ export default function TopologyPage({ onOpenMenu }) {
       showToast("Topologi tidak dapat dikosongkan dalam mode riwayat snapshot (Read-only).", "warning");
       return;
     }
-    if (!window.confirm("Kosongkan seluruh peta topologi, bukti observasi, dan antrean konflik?")) return;
+    if (!await modalConfirm({ message: "Kosongkan seluruh peta topologi, bukti observasi, dan antrean konflik?", isDestructive: true })) return;
     try {
       setLoading(true);
       const res = await fetch(`${API_BASE}/clear?confirm=true`, { method: "DELETE" });
@@ -516,7 +519,7 @@ export default function TopologyPage({ onOpenMenu }) {
       showToast("Tidak dapat menghapus link dalam mode riwayat snapshot (Read-only).", "warning");
       return;
     }
-    if (!window.confirm("Putuskan link interkoneksi ini?")) return;
+    if (!await modalConfirm({ message: "Putuskan link interkoneksi ini?", isDestructive: true })) return;
     try {
       const res = await fetch(`${API_BASE}/links?link_id=${encodeURIComponent(linkId)}`, {
         method: "DELETE",
@@ -537,7 +540,7 @@ export default function TopologyPage({ onOpenMenu }) {
       showToast("Tidak dapat menghapus node dalam mode riwayat snapshot (Read-only).", "warning");
       return;
     }
-    if (!window.confirm("Hapus perangkat ini beserta link terhubung dari topologi?")) return;
+    if (!await modalConfirm({ message: "Hapus perangkat ini beserta link terhubung dari topologi?", isDestructive: true })) return;
     try {
       const res = await fetch(`${API_BASE}/nodes/${encodeURIComponent(nodeId)}`, { method: "DELETE" });
       const json = await res.json();

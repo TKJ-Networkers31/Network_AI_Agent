@@ -16,9 +16,15 @@ def memory_svc():
     return UserMemoryService()
 
 def test_memory_isolation_and_crud(memory_svc):
-    # Use existing validated user IDs from operational_users
-    user_a = "usr_25b8282cc548"  # lingga_admin
-    user_b = "usr_2f9c08fca05b"  # ryo
+    from core.tenant.manager import IdentityManager
+    id_mgr = IdentityManager()
+    u_admin = id_mgr.get_user_by_username("lingga_admin")
+    user_a = u_admin.user_id if u_admin else "usr_25b8282cc548"
+
+    u_b = id_mgr.get_user_by_username("test_f2_readonly")
+    if not u_b:
+        u_b = id_mgr.create_user(username="test_f2_readonly", password="ReadOnlyPass123!", tenant_id="tenant_default")
+    user_b = u_b.user_id
 
     # Clean test users
     memory_svc.clear_all_memories(user_a)

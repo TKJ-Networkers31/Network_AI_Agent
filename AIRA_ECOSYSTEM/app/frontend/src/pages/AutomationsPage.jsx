@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 // src/pages/AutomationsPage.jsx
 //
 // AIRA OS — Automations & Scheduled Workflows Workspace
@@ -33,6 +34,8 @@ import TopBar from "../components/TopBar.jsx";
 import { useToast } from "../components/Toast.jsx";
 
 export default function AutomationsPage({ onOpenMenu }) {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const { notify } = useToast();
 
   const [automations, setAutomations] = useState([]);
@@ -175,7 +178,7 @@ export default function AutomationsPage({ onOpenMenu }) {
   };
 
   const handleDelete = async (job) => {
-    if (!confirm(`Hapus otomasi '${job.name}'?`)) return;
+    if (!await modalConfirm({ message: `Hapus otomasi '${job.name}'?`, isDestructive: true })) return;
     try {
       const res = await fetch(`/api/v1/automations/${job.job_id}`, { method: "DELETE" });
       const json = await res.json();

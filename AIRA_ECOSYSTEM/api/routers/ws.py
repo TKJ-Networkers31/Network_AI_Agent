@@ -229,8 +229,16 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
 
     await emit("ack", {"message": display_message})
 
+    s_row = store.get_session_row(session_id)
+    turn_user_id = s_row.get("user_id") if s_row else None
+
+    def _run_think():
+        from core.events import event_scope
+        with event_scope(session_id=session_id, user_id=turn_user_id):
+            return brain.think(llm_message, cancel_event, use_stream)
+
     try:
-        result = await asyncio.to_thread(brain.think, llm_message, cancel_event, use_stream)
+        result = await asyncio.to_thread(_run_think)
     except Exception as exc:
         logger.exception("WS think() gagal | session=%s", session_id)
         memory.history = backup_history

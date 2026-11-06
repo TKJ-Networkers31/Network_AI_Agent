@@ -45,7 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from api.routers import (
     chat, providers, memory, devices, sessions, tools, logs, models, persona,
     connections, files, location, settings, selection, attachments,
-    vision, workspace_links, capabilities, artifacts, topology, nms, voice,
+    workspace_links, capabilities, artifacts, topology, nms, voice,
     network_intelligence, operations,
 )
 from api.routers import ws
@@ -106,7 +106,6 @@ app.include_router(location.router)
 app.include_router(settings.router)
 app.include_router(selection.router)
 app.include_router(attachments.router)
-app.include_router(vision.router)          # === SPRINT 2.7.1 P0 FIX ===
 app.include_router(workspace_links.router)  # === SPRINT 2.7.1 P0 FIX ===
 app.include_router(capabilities.router)     # === SPRINT 2.7.1 P0 FIX (baru) ===
 app.include_router(artifacts.router)        # === SPRINT 2.7.1 P0 FIX (baru) ===

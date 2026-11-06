@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 import { useCallback, useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { api } from "../api.js";
@@ -15,6 +16,8 @@ const BEHAVIOR_FIELDS = [
 ];
 
 export default function PersonaPage({ onOpenMenu }) {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const [profile, setProfile] = useState(null);
   const [behavior, setBehavior] = useState(null);
   const [presets, setPresets] = useState([]);
@@ -108,7 +111,7 @@ export default function PersonaPage({ onOpenMenu }) {
   }
 
   async function handleDuplicatePreset(presetId, currentName) {
-    const newName = window.prompt("Nama preset baru:", `${currentName} Copy`);
+    const newName = await modalPrompt({ message: "Nama preset baru:", defaultValue: `${currentName} Copy` });
     if (!newName || !newName.trim()) return;
 
     try {

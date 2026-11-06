@@ -59,6 +59,7 @@ class TestPhaseF2DynamicUIRBAC(unittest.TestCase):
                 display_name="F2 Read Only User",
                 email="f2_readonly@aira.local",
                 group_name="READ_ONLY",
+                tenant_id="tenant_default",
             )
             cls.readonly_uid = created.user_id
         else:

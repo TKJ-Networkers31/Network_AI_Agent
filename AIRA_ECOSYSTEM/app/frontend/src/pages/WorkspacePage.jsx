@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 import { useCallback, useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { api } from "../api.js";
@@ -15,6 +16,8 @@ function parentOf(path) {
 }
 
 export default function WorkspacePage({ onOpenMenu }) {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const { notify } = useToast();
 
   const [hostInfo, setHostInfo] = useState(null);
@@ -100,7 +103,7 @@ export default function WorkspacePage({ onOpenMenu }) {
   }
 
   async function handleCreateFolder() {
-    const name = window.prompt("Nama folder baru:");
+    const name = await modalPrompt({ message: "Nama folder baru:" });
     if (!name || !name.trim()) return;
 
     const path = currentPath ? `${currentPath}/${name.trim()}` : name.trim();
@@ -115,7 +118,7 @@ export default function WorkspacePage({ onOpenMenu }) {
   }
 
   async function handleRename(entry) {
-    const newName = window.prompt("Nama baru:", entry.name);
+    const newName = await modalPrompt({ message: "Nama baru:", defaultValue: entry.name });
     if (!newName || !newName.trim() || newName.trim() === entry.name) return;
 
     const destination = `${parentOf(entry.path)}/${newName.trim()}`.replace(/^\//, "");
@@ -130,10 +133,7 @@ export default function WorkspacePage({ onOpenMenu }) {
   }
 
   async function handleMove(entry) {
-    const destination = window.prompt(
-      "Path tujuan (relatif ke workspace root):",
-      entry.path
-    );
+    const destination = await modalPrompt({ message: "Path tujuan (relatif ke workspace root):", defaultValue: entry.path });
     if (!destination || !destination.trim() || destination.trim() === entry.path) return;
 
     try {
@@ -146,7 +146,7 @@ export default function WorkspacePage({ onOpenMenu }) {
   }
 
   async function handleDelete(entry) {
-    if (!window.confirm(`Hapus "${entry.name}"? Item akan dipindahkan ke Trash.`)) return;
+    if (!await modalConfirm({ message: `Hapus "${entry.name}"? Item akan dipindahkan ke Trash.`, isDestructive: true })) return;
 
     try {
       await api.workspace.delete(entry.path);

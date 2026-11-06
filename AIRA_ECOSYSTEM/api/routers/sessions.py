@@ -12,8 +12,11 @@ from api.state import drop_cache
 from core import chat_sessions as store
 from core.tenant.auth_deps import get_current_authenticated_user
 from core.tenant.models import TenantContext
+from core.tenant.manager import IdentityManager
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+_identity_mgr = IdentityManager()
 
 
 @router.get("")

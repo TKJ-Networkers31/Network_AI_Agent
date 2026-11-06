@@ -1,0 +1,40 @@
+# Git & IDE
+.git
+.gitignore
+.github
+.vscode
+.idea
+*.swp
+*.swo
+
+# Python caches and virtual environments
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+
+# Node & Frontend build caches
+node_modules
+AIRA_ECOSYSTEM/app/frontend/node_modules
+AIRA_ECOSYSTEM/app/frontend/dist
+AIRA_ECOSYSTEM/app/frontend/.vite
+
+# Temporary files and logs
+.tmp
+tmp
+*.log
+AIRA_ECOSYSTEM/logs/*
+!AIRA_ECOSYSTEM/logs/.gitkeep
+AIRA_ECOSYSTEM/database/*.db-journal
+AIRA_ECOSYSTEM/database/*.db-wal
+AIRA_ECOSYSTEM/database/*.db-shm
+
+# OS artifacts
+.DS_Store
+Thumbs.db

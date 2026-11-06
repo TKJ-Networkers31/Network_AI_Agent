@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 // src/pages/GatewaysPage.jsx
 //
 // AIRA OS — Hybrid Edge Gateway Management Console (Networking VIII / WP 8.4.9)
@@ -26,6 +27,8 @@ import {
 } from "lucide-react";
 
 export default function GatewaysPage() {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const [gateways, setGateways] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -85,7 +88,7 @@ export default function GatewaysPage() {
       const data = await res.json();
       setGeneratedToken(data);
     } catch (err) {
-      alert(`Error: ${err.message}`);
+      await modalAlert({ message: `Error: ${err.message}`, type: "danger" });
     } finally {
       setTokenLoading(false);
     }
@@ -100,7 +103,7 @@ export default function GatewaysPage() {
   };
 
   const handleRevoke = async (gatewayId) => {
-    if (!window.confirm(`Revoke gateway '${gatewayId}'? Koneksi edge akan segera diputus.`)) {
+    if (!await modalConfirm({ message: `Revoke gateway '${gatewayId}'? Koneksi edge akan segera diputus.`, isDestructive: true })) {
       return;
     }
     try {
@@ -112,7 +115,7 @@ export default function GatewaysPage() {
       if (!res.ok) throw new Error("Gagal merevoke gateway");
       fetchGateways();
     } catch (err) {
-      alert(`Error: ${err.message}`);
+      await modalAlert({ message: `Error: ${err.message}`, type: "danger" });
     }
   };
 

@@ -27,7 +27,7 @@
 // - Prop baru `onCapabilityInvoke` (opsional), diteruskan apa adanya ke
 //   MessageCapabilityActions. Tidak ada perubahan pada logic Copy/Edit/
 //   Regenerate/DIO yang sudah ada.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ToolStep from "./ToolStep.jsx";
 import Markdown from "./Markdown.jsx";
 import Renderer from "./dio/Renderer.jsx";
@@ -215,6 +215,42 @@ function isDioSubmissionText(text) {
   return /^(📝|❌)/.test(text || "");
 }
 
+
+function extractFollowupSuggestions(rawText) {
+  if (!rawText || typeof rawText !== "string") {
+    return { cleanText: rawText, suggestions: [] };
+  }
+
+  // 1. JSON comment format: <!-- suggestions: ["Saran 1", "Saran 2"] -->
+  const jsonMatch = rawText.match(/<!--\s*suggestions:\s*(\[.*?\])\s*-->/is);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const clean = rawText.replace(jsonMatch[0], "").trim();
+        return { cleanText: clean, suggestions: parsed.map((s) => String(s).trim()).filter(Boolean) };
+      }
+    } catch {}
+  }
+
+  // 2. Bracket tag format: [SUGGESTIONS: "Saran 1", "Saran 2"]
+  const bracketMatch = rawText.match(/\[SUGGESTIONS?:\s*(.+?)\]/is);
+  if (bracketMatch) {
+    try {
+      const items = bracketMatch[1]
+        .split(/[,;\n]/)
+        .map((s) => s.replace(/^["'\s*-]+|["'\s]+$/g, "").trim())
+        .filter(Boolean);
+      if (items.length > 0) {
+        const clean = rawText.replace(bracketMatch[0], "").trim();
+        return { cleanText: clean, suggestions: items };
+      }
+    } catch {}
+  }
+
+  return { cleanText: rawText, suggestions: [] };
+}
+
 export default function MessageBubble({
   role,
   content,
@@ -236,10 +272,14 @@ export default function MessageBubble({
   sessionId = null,
   onSelectionAction,
   onCapabilityInvoke,
-
+  onSelectSuggestion,
 }) {
   const isUser = role === "user";
   const quoted = isUser ? parseQuotedMessage(content) : null;
+  const { cleanText, suggestions } = useMemo(() => {
+    if (isUser) return { cleanText: content, suggestions: [] };
+    return extractFollowupSuggestions(content);
+  }, [isUser, content]);
   const hasInteraction = !isUser && Boolean(interactionSchema);
   const [editing, setEditing] = useState(false);
 
@@ -316,12 +356,29 @@ export default function MessageBubble({
                   content
                 )
               ) : streaming || streamed ? (
-                <StreamingMarkdown content={content} streaming={Boolean(streaming)} />
+                <StreamingMarkdown content={cleanText} streaming={Boolean(streaming)} />
               ) : (
-                <Markdown content={content} />
+                <Markdown content={cleanText} />
               )}
             </div>
           )
+        )}
+
+        {suggestions.length > 0 && !streaming && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5 animate-fadeIn">
+            {suggestions.map((sug, sIdx) => (
+              <button
+                key={sIdx}
+                type="button"
+                onClick={() => onSelectSuggestion?.(sug)}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-cyan-950/40 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20 hover:border-cyan-400 hover:text-white transition-all shadow-[0_0_10px_rgba(6,182,212,0.1)] active:scale-95 disabled:opacity-40"
+              >
+                <span className="text-cyan-400 text-[10px]">✨</span>
+                <span>{sug}</span>
+              </button>
+            ))}
+          </div>
         )}
 
         {selection && (

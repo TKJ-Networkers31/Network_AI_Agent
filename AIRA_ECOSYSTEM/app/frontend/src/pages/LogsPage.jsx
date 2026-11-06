@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { api } from "../api.js";
@@ -166,6 +167,8 @@ function CategoryLegend({ info, open, onToggle }) {
 }
 
 export default function LogsPage({ onOpenMenu }) {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const [logs, setLogs] = useState([]);
   const [categories, setCategories] = useState([]);
   const [total, setTotal] = useState(0);
@@ -238,7 +241,7 @@ export default function LogsPage({ onOpenMenu }) {
 
   async function handleClear() {
     const label = category === "all" ? "SEMUA kategori" : `kategori "${category}"`;
-    if (!window.confirm(`Hapus log ${label}? Tindakan ini tidak bisa dibatalkan.`)) return;
+    if (!await modalConfirm({ message: `Hapus log ${label}? Tindakan ini tidak bisa dibatalkan.`, isDestructive: true })) return;
 
     try {
       const res = await api.logs.clear(category === "all" ? undefined : category);

@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 // src/pages/AdminPlatformPage.jsx
 // AIRA OS — AIRA Control Plane (Admin Site)
 // Phase F.1: Architecture Simplification, MikroTik-Style Group RBAC & User Activity Monitoring
@@ -57,6 +58,8 @@ const CONTROL_PLANE_MODULES = [
 ];
 
 export default function AdminPlatformPage({ onOpenMenu }) {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const [activeModule, setActiveModule] = useState("overview");
 
   // Data states
@@ -270,7 +273,7 @@ export default function AdminPlatformPage({ onOpenMenu }) {
   async function handleToggleUserStatus(user) {
     const nextStatus = !user.account_enabled;
     const actionLabel = nextStatus ? "mengaktifkan" : "menonaktifkan";
-    if (!nextStatus && !confirm(`Yakin ingin ${actionLabel} akun ${user.username}? Semua sesi aktif akan langsung dicabut.`)) {
+    if (!nextStatus && !await modalConfirm({ message: `Yakin ingin ${actionLabel} akun ${user.username}? Semua sesi aktif akan langsung dicabut.`, isDestructive: true })) {
       return;
     }
     try {
@@ -292,7 +295,7 @@ export default function AdminPlatformPage({ onOpenMenu }) {
   }
 
   async function handleRevokeUserSessions(userId, username) {
-    if (!confirm(`Cabut seluruh sesi login aktif untuk user '${username}'?`)) return;
+    if (!await modalConfirm({ message: `Cabut seluruh sesi login aktif untuk user '${username}'?`, isDestructive: true })) return;
     try {
       const res = await fetch(`/api/v1/admin/users/${userId}/sessions`, {
         method: "DELETE",
@@ -311,7 +314,7 @@ export default function AdminPlatformPage({ onOpenMenu }) {
   }
 
   async function handleRevokeSingleSession(sessionId) {
-    if (!confirm("Cabut sesi ini sekarang?")) return;
+    if (!await modalConfirm({ message: "Cabut sesi ini sekarang?", isDestructive: true })) return;
     try {
       const res = await fetch(`/api/v1/admin/sessions/${sessionId}`, {
         method: "DELETE",
@@ -422,7 +425,7 @@ export default function AdminPlatformPage({ onOpenMenu }) {
   }
 
   async function handleDuplicateGroup(group) {
-    const newName = prompt(`Masukkan nama untuk duplikasi grup '${group.name}':`, `${group.name}_Copy`);
+    const newName = await modalPrompt({ message: `Masukkan nama untuk duplikasi grup '${group.name}':`, defaultValue: `${group.name}_Copy` });
     if (!newName || !newName.trim()) return;
 
     try {
@@ -444,7 +447,7 @@ export default function AdminPlatformPage({ onOpenMenu }) {
   }
 
   async function handleDeleteGroup(group) {
-    if (!confirm(`Hapus grup '${group.name}'? Anggota grup akan kehilangan akses dari grup ini.`)) return;
+    if (!await modalConfirm({ message: `Hapus grup '${group.name}'? Anggota grup akan kehilangan akses dari grup ini.`, isDestructive: true })) return;
     try {
       const res = await fetch(`/api/v1/admin/groups/${group.group_id}`, {
         method: "DELETE",

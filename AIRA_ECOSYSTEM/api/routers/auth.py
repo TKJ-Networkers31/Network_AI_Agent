@@ -13,13 +13,20 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from core.security.rate_limiter import auth_rate_limiter
-from core.tenant.manager import IdentityManager
+from core.tenant.manager import IdentityManager, TenantManager
+from core.tenant.entitlements import EntitlementManager
+from core.tenant.token_quota_service import TokenQuotaService
+from core.tenant.user_subscription import UserSubscriptionService
 from core.tenant.models import TenantContext
 from core.tenant.rbac_service import get_rbac_service
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
-_identity_mgr = IdentityManager()
+from core.tenant.auth_deps import _identity_mgr
+_tenant_mgr = TenantManager()
+_entitlement_mgr = EntitlementManager()
+_sub_service = UserSubscriptionService()
+_quota_service = TokenQuotaService()
 
 
 class LoginRequest(BaseModel):

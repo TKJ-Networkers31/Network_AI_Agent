@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { useToast } from "../components/Toast.jsx";
@@ -599,6 +600,8 @@ function CredentialEditPage({ initial, saving, onSubmit, onCancel, onOpenMenu })
 // HALAMAN UTAMA DEVICES (LIST VIEW BERSIH)
 // ============================================================
 export default function DevicesPage({ onOpenMenu }) {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const { notify } = useToast();
 
   const [devices, setDevices] = useState([]);
@@ -659,14 +662,14 @@ export default function DevicesPage({ onOpenMenu }) {
     if (ok) setCredForm(null);
   }
 
-  function removeDevice(device) {
-    if (!window.confirm(`Hapus perangkat "${device.name}" dari inventory? Kredensialnya tetap aman di database.`)) return;
+  async function removeDevice(device) {
+    if (!await modalConfirm({ message: `Hapus perangkat "${device.name}" dari inventory? Kredensialnya tetap aman di database.`, isDestructive: true })) return;
     run(() => inventoryApi.devices.remove(device.name), `"${device.name}" dihapus dari inventory.`);
   }
 
-  function removeCredential(credential) {
+  async function removeCredential(credential) {
     const used = credential.used_by.length ? ` Sedang dipakai oleh: ${credential.used_by.join(", ")}.` : "";
-    if (!window.confirm(`Hapus kredensial "${credential.name}"?${used}`)) return;
+    if (!await modalConfirm({ message: `Hapus kredensial "${credential.name}"?${used}`, isDestructive: true })) return;
     run(() => inventoryApi.credentials.remove(credential.name), `Kredensial "${credential.name}" dihapus.`);
   }
 

@@ -190,7 +190,7 @@ class FileProcessor:
             entry["status"] = FILE_FAILED
 
     def _run_vision(self, result, path, rel, width, height) -> str:
-        from core.vision.models import ImageMetadata, VisionResult
+        from core.file_processing.vision_llm import ImageMetadata, VisionResult
         meta = ImageMetadata(name=Path(rel).name, mime_type=MIME.get(Path(rel).suffix.lower(), "image/*"),
                              size=path.stat().st_size, width=width, height=height)
         try:

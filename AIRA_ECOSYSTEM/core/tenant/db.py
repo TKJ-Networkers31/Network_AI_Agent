@@ -454,7 +454,7 @@ CREATE INDEX IF NOT EXISTS idx_user_pref_user ON user_preferences(user_id);
 CREATE TABLE IF NOT EXISTS user_memories (
     memory_id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES operational_users(user_id) ON DELETE CASCADE,
-    category TEXT NOT NULL CHECK(category IN ('learning', 'technical', 'project', 'communication', 'workflows', 'general')),
+    category TEXT NOT NULL CHECK(category IN ('profile', 'preferences', 'technical', 'project', 'facts', 'learning', 'communication', 'workflows', 'general')),
     content TEXT NOT NULL,
     source TEXT DEFAULT 'USER',
     importance REAL NOT NULL DEFAULT 0.5,
@@ -641,6 +641,33 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
                 conn.execute(f"ALTER TABLE operational_token_policies ADD COLUMN {pol_col}")
             except sqlite3.OperationalError:
                 pass
+        # Safely migrate user_memories category check constraint if needed
+        try:
+            m_sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='user_memories'").fetchone()
+            if m_sql and m_sql[0] and "'profile'" not in m_sql[0]:
+                conn.execute("ALTER TABLE user_memories RENAME TO user_memories_old")
+                conn.execute("""
+                    CREATE TABLE user_memories (
+                        memory_id TEXT PRIMARY KEY,
+                        user_id TEXT NOT NULL REFERENCES operational_users(user_id) ON DELETE CASCADE,
+                        category TEXT NOT NULL CHECK(category IN ('profile', 'preferences', 'technical', 'project', 'facts', 'learning', 'communication', 'workflows', 'general')),
+                        content TEXT NOT NULL,
+                        source TEXT DEFAULT 'USER',
+                        importance REAL NOT NULL DEFAULT 0.5,
+                        is_enabled INTEGER NOT NULL DEFAULT 1,
+                        metadata_json TEXT DEFAULT '{}',
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                """)
+                conn.execute("INSERT OR IGNORE INTO user_memories SELECT * FROM user_memories_old")
+                conn.execute("DROP TABLE user_memories_old")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_user_memories_user ON user_memories(user_id, category)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_user_memories_created ON user_memories(user_id, created_at)")
+                logger.info("MIGRATION: user_memories schema updated to support all Phase F & Directive categories.")
+        except Exception as exc:
+            logger.warning("user_memories migration check: %s", exc)
+
         now_iso = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """

@@ -277,6 +277,67 @@ class UserPersonaService:
             res = conn.execute("DELETE FROM user_personas WHERE user_id = ?", (user_id,))
             return res.rowcount
 
+    def build_effective_persona(self, user_id: str, task: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Builds the unified, deterministic persona context for this user, integrating:
+        1. System Base Personality
+        2. Active Persona preset / custom profile
+        3. User Account Identity (preferred name, title, communication style)
+        4. User custom instructions from user_preferences
+        5. Task-specific behavioral adaptation
+        """
+        active_persona = self.get_active_persona(user_id)
+        
+        identity = {}
+        custom_inst = ""
+        try:
+            from core.tenant.memory_service import get_memory_service
+            mem_svc = get_memory_service()
+            identity = mem_svc.get_user_identity(user_id)
+            pref = mem_svc.get_or_create_user_preferences(user_id)
+            custom_inst = pref.get("custom_instructions", "") or ""
+        except Exception as e:
+            logger.warning(f"Could not load user identity for persona: {e}")
+
+        persona_instructions = active_persona.get("custom_instructions", "") or ""
+        combined_instructions = "\n".join(filter(bool, [custom_inst, persona_instructions]))
+
+        effective = {
+            "persona_id": active_persona.get("persona_id", "preset_technical"),
+            "name": active_persona.get("name", "AIRA Network Assistant"),
+            "response_style": active_persona.get("response_style", "concise"),
+            "language": active_persona.get("language", "id"),
+            "technical_depth": active_persona.get("technical_depth", 80),
+            "explanation_preference": identity.get("explanation_preference") or active_persona.get("explanation_preference", "technical"),
+            "communication_style": identity.get("communication_style", "casual_technical"),
+            "custom_instructions": combined_instructions,
+            "identity": identity,
+            "task": task or "general",
+        }
+
+        prompt_lines = [
+            "=== USER PERSONA & IDENTITY DIRECTIVE ===",
+            f"Active Persona Profile: {effective['name']}",
+            f"Response Style: {effective['response_style']} (Technical Depth: {effective['technical_depth']}/100)",
+            f"Language: {effective['language']}",
+            f"Explanation Approach: {effective['explanation_preference']}",
+            f"Communication Tone: {effective['communication_style']}",
+        ]
+
+        pref_name = identity.get("preferred_name") or identity.get("full_name")
+        if pref_name:
+            prompt_lines.append(f"User Preferred Name / Title: {pref_name}")
+            prompt_lines.append(f"IMPORTANT: Address the user as '{pref_name}' naturally and respectfully in conversations.")
+
+        if identity.get("full_name") and identity.get("full_name") != pref_name:
+            prompt_lines.append(f"User Full Name: {identity['full_name']}")
+
+        if combined_instructions:
+            prompt_lines.append(f"User Instructions: {combined_instructions}")
+
+        effective["prompt_text"] = "\n".join(prompt_lines)
+        return effective
+
     def preview_persona_prompt(self, persona: Dict[str, Any]) -> str:
         """Generates a text preview of how the persona shapes the AI system prompt."""
         lines = [

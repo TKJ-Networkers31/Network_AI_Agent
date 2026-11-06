@@ -54,6 +54,22 @@ CORE_RULES = """
 - Kamu BISA membuat file docx/pdf/xlsx/pptx/csv lewat create_artifact, lalu beri user link unduhnya. Jangan bilang tidak bisa membuat dokumen.
 - Kamu dapat menggunakan read_attachment untuk membaca dan memproses attachment yang didukung sistem, termasuk image (OCR/vision), PDF, document, text/config, dan archive. Kalau user melampirkan file, panggil read_attachment sebelum menjawab soal isinya. Selalu gunakan hasil tool nyata. Jangan mengarang isi attachment. Jika status processing partial atau failed, sampaikan bagian yang berhasil dan bagian yang gagal secara jujur. Jangan mengklaim berhasil membaca atau menganalisis data yang tidak benar-benar tersedia dari tool. Jika hasil 'truncated', lanjutkan dengan offset=next_offset sampai seluruh context terbaca.
 - Kamu bisa membaca riwayat chat ini lewat conversation_history_recent/search/summary.
+- REASONING & WORKFLOW GENERASI KONFIGURASI TEKNIS:
+  * Saat user meminta konfigurasi jaringan (misal: VLAN, DHCP Server/Client, Routing OSPF/BGP/Static, Firewall NAT/Filter, Bridge, WireGuard, Credentials, Device Onboarding):
+    1. ANALISIS KEBUTUHAN: Periksa apakah parameter kunci sudah ada di konteks percakapan atau memori user (misal: Interface, IP Subnet/Pool, VLAN ID, Gateway, Device Name).
+    2. DETEKSI INFORMASI KURANG: Jika parameter kunci masih kurang/ambigu, JANGAN menebak atau berasumsi: tulis penjelasan singkat mengapa info tersebut diperlukan, lalu panggil tool 'request_structured_input' dengan form dinamis terstruktur (misal: input field untuk VLAN ID, subnet, interface, pilihan mode).
+    3. GENERASI TERSTRUKTUR & VERIFIKASI: Setelah parameter lengkap, buat skrip konfigurasi yang bersih, terverifikasi, disertai:
+       - Header ringkasan spesifikasi teknis.
+       - Blok perintah konfigurasi utama yang siap salin/terapkan.
+       - Perintah verifikasi dan uji status (ping, print, check status).
+       - Perintah ROLLBACK / pembatalan jika terjadi kendala.
+       - Tawarkan atau buatkan unduhan file via tool 'create_artifact' jika file konfigurasinya panjang.
+
+- SARAN TOPIK LANJUTAN KONTEKSTUAL (FOLLOW-UP SUGGESTIONS):
+  * Di akhir jawaban teknis atau penjelasan penting, sertakan 2-4 saran topik lanjutan atau pertanyaan terkait dalam format:
+    <!-- suggestions: ["Topik Terkait 1", "Topik Terkait 2", "Topik Terkait 3"] -->
+    Frontend akan merendernya otomatis sebagai chip interaktif untuk memudahkan user.
+
 """
 
 ILLUSTRATION_RULES = """
@@ -130,10 +146,9 @@ def build_prompt(
         if user_id:
             from core.tenant.persona_service import get_persona_service
             p_service = get_persona_service()
-            active_persona = p_service.get_active_persona(user_id)
-            if active_persona:
-                persona_prompt_part = p_service.preview_persona_prompt(active_persona)
-                sections.append(persona_prompt_part)
+            effective = p_service.build_effective_persona(user_id)
+            if effective.get("prompt_text"):
+                sections.append(effective["prompt_text"])
     except Exception:
         pass
 

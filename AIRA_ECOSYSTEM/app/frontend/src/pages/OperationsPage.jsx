@@ -1,3 +1,4 @@
+import { useModalDialog } from "../context/ModalDialogContext.jsx";
 // src/pages/OperationsPage.jsx
 //
 // AIRA OS — Proactive Network Operations Center (Networking VII / WP 7.10)
@@ -37,6 +38,8 @@ import {
 const API_BASE = "http://127.0.0.1:8000/api/operations";
 
 export default function OperationsPage() {
+  const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
+
   const [activeTab, setActiveTab] = useState("overview");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -103,7 +106,7 @@ export default function OperationsPage() {
       const data = await res.json();
       setSimResult(data);
     } catch (err) {
-      alert("Simulation failed: " + err.message);
+      await modalAlert({ message: "Simulation failed: " + err.message, type: "danger" });
     } finally {
       setSimulating(false);
     }
@@ -114,10 +117,10 @@ export default function OperationsPage() {
     try {
       const res = await fetch(`${API_BASE}/scheduler/jobs/${jobId}/run`, { method: "POST" });
       const data = await res.json();
-      alert(`Job run completed: ${data.status} (${data.duration_ms} ms)\n${data.result_summary}`);
+      await modalAlert({ message: `Job run completed: ${data.status} (${data.duration_ms} ms)\n${data.result_summary}`, type: "info" });
       loadOverviewData();
     } catch (err) {
-      alert("Job trigger failed: " + err.message);
+      await modalAlert({ message: "Job trigger failed: " + err.message, type: "danger" });
     }
   };
 
@@ -129,7 +132,7 @@ export default function OperationsPage() {
       const data = await res.json();
       setGeneratedReport(data);
     } catch (err) {
-      alert("Report generation failed: " + err.message);
+      await modalAlert({ message: "Report generation failed: " + err.message, type: "danger" });
     } finally {
       setLoading(false);
     }

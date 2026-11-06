@@ -17,12 +17,25 @@ _identity_mgr = IdentityManager()
 
 def get_current_authenticated_user(
     authorization: Optional[str] = Header(None),
+    x_guest_id: Optional[str] = Header(None, alias="X-Guest-ID"),
 ) -> TenantContext:
     """
-    Enforces mandatory authentication.
-    Anonymous / Guest access is strictly rejected with HTTP 401 Unauthorized.
+    Enforces mandatory authentication or valid guest identification.
+    Anonymous access without login or guest token is rejected with HTTP 401 Unauthorized.
     """
     if not authorization or not authorization.startswith("Bearer "):
+        if x_guest_id and str(x_guest_id).strip().startswith("gst_"):
+            return TenantContext(
+                user_id=str(x_guest_id).strip(),
+                username=f"guest_{str(x_guest_id).strip()[:8]}",
+                email=f"{str(x_guest_id).strip()}@guest.aira.local",
+                tenant_id="tenant_guest",
+                roles=["GUEST"],
+                groups=["READ_ONLY"],
+                is_internal=False,
+                account_enabled=True,
+                permissions={"workspace.view", "ai_assistant.view", "personalization.manage"},
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Autentikasi wajib. Akses tanpa login ditolak.",
@@ -30,7 +43,12 @@ def get_current_authenticated_user(
         )
 
     token = authorization.split(" ", 1)[1].strip()
-    ctx = _identity_mgr.validate_session_token(token)
+    try:
+        import api.routers.auth as _auth_mod
+        mgr = getattr(_auth_mod, "_identity_mgr", _identity_mgr)
+    except Exception:
+        mgr = _identity_mgr
+    ctx = mgr.validate_session_token(token)
     if not ctx:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
