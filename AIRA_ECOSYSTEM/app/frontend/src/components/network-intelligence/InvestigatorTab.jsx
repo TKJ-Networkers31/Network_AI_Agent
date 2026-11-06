@@ -23,6 +23,7 @@ export default function InvestigatorTab({
   onCancelInvestigation,
   activeInvestigation,
   loading,
+  onProposeAction,
 }) {
   const [query, setQuery] = useState("");
   const [targetIp, setTargetIp] = useState("");
@@ -195,9 +196,29 @@ export default function InvestigatorTab({
                   <div className="text-xs font-semibold text-cyan-400">Langkah Remediasi yang Direkomendasikan:</div>
                   <ul className="space-y-1 text-xs text-white/80">
                     {inv.explanation.recommended_actions.map((act, idx) => (
-                      <li key={idx} className="flex items-start gap-2">
-                        <ArrowRight size={13} className="text-cyan-400 mt-0.5 shrink-0" />
-                        <span>{act}</span>
+                      <li key={idx} className="flex items-start justify-between gap-2 p-1.5 rounded hover:bg-white/5 transition">
+                        <div className="flex items-start gap-2">
+                          <ArrowRight size={13} className="text-cyan-400 mt-0.5 shrink-0" />
+                          <span>{act}</span>
+                        </div>
+                        {onProposeAction && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onProposeAction({
+                                description: act,
+                                action_name: `Remediasi: ${act.slice(0, 40)}`,
+                                reason: inv.explanation?.summary || "Rekomendasi dari hasil penyelidikan NL Investigator.",
+                                target_device: inv.user_context?.scoped_devices?.[0] || "",
+                              })
+                            }
+                            className="px-2 py-0.5 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-[10px] font-mono transition shrink-0 flex items-center gap-1"
+                            title="Ajukan rekomendasi ini ke Action Center"
+                          >
+                            <span>Ajukan Action</span>
+                            <ArrowRight size={10} />
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>

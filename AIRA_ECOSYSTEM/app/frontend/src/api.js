@@ -576,6 +576,17 @@ export const api = {
       }),
     onboardDevice: (body) =>
       request("/intelligence/devices/onboard", { method: "POST", body: JSON.stringify(body) }),
+    getSecurityPosture: (tenantId = "tenant_internal") =>
+      request(`/intelligence/security/posture?tenant_id=${encodeURIComponent(tenantId)}`),
+    getSecurityFindings: (tenantId = "tenant_internal", severity = null, status = null) => {
+      const qs = new URLSearchParams();
+      qs.set("tenant_id", tenantId);
+      if (severity) qs.set("severity", severity);
+      if (status) qs.set("status", status);
+      return request(`/intelligence/security/findings?${qs.toString()}`);
+    },
+    assessSecurity: (body = {}) =>
+      request("/intelligence/security/assess", { method: "POST", body: JSON.stringify(body) }),
   },
   personalization: {
     getPreferences: () => request("/v1/personalization/preferences"),

@@ -23,8 +23,9 @@ import {
 import { api } from "../../api.js";
 import { useToast } from "../Toast.jsx";
 
-export default function OnboardDeviceModal({ isOpen, onClose, onOnboardSuccess }) {
+export default function OnboardDeviceModal({ isOpen, open, onClose, onOnboardSuccess }) {
   const { notify } = useToast();
+  const isVisible = open !== undefined ? open : isOpen;
 
   const [form, setForm] = useState({
     name: "",
@@ -40,7 +41,7 @@ export default function OnboardDeviceModal({ isOpen, onClose, onOnboardSuccess }
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
-  if (!isOpen) return null;
+  if (!isVisible) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();

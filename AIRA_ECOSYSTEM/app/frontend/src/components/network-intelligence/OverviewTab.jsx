@@ -28,6 +28,8 @@ export default function OverviewTab({
   onOpenOnboard,
   onOpenPolicy,
   onNavigateToTab,
+  onRunSecurityAssessment,
+  runningSecurityAssessment = false,
 }) {
   if (loading && !overview) {
     return (
@@ -139,7 +141,11 @@ export default function OverviewTab({
       {/* 8-Part Core Network Intelligence Metrics (Section 4.1 Requirement) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-4 gap-3">
         {/* 1. Overall Network Health */}
-        <div className="bg-card border border-border p-3.5 rounded-xl space-y-1">
+        <div
+          onClick={() => onNavigateToTab && onNavigateToTab("investigations", "rca")}
+          className="bg-card border border-border hover:border-cyan-500/40 cursor-pointer p-3.5 rounded-xl space-y-1 transition"
+          title="Klik untuk membuka Root Cause Analysis & Dimensi Kesehatan"
+        >
           <div className="flex items-center justify-between text-xs text-white/60">
             <span>Overall Health</span>
             <Activity size={14} className="text-cyan-400" />
@@ -153,7 +159,13 @@ export default function OverviewTab({
         </div>
 
         {/* 2. Total Registered Devices */}
-        <div className="bg-card border border-border p-3.5 rounded-xl space-y-1">
+        <div
+          onClick={() => {
+            if (onOpenOnboard) onOpenOnboard();
+          }}
+          className="bg-card border border-border hover:border-cyan-500/40 cursor-pointer p-3.5 rounded-xl space-y-1 transition"
+          title="Klik untuk Onboard Perangkat Baru"
+        >
           <div className="flex items-center justify-between text-xs text-white/60">
             <span>Total Devices</span>
             <Server size={14} className="text-indigo-400" />
@@ -161,13 +173,18 @@ export default function OverviewTab({
           <div className="text-xl font-bold font-mono text-white">
             {data.total_registered_devices ?? 0}
           </div>
-          <div className="text-[10px] text-white/40">
-            Inventory Database
+          <div className="text-[10px] text-cyan-400 flex items-center gap-1">
+            <span>+ Onboard Perangkat</span>
+            <ArrowRight size={10} />
           </div>
         </div>
 
         {/* 3. Reachable Devices */}
-        <div className="bg-card border border-border p-3.5 rounded-xl space-y-1">
+        <div
+          onClick={() => onNavigateToTab && onNavigateToTab("investigations", "evidence")}
+          className="bg-card border border-border hover:border-emerald-500/40 cursor-pointer p-3.5 rounded-xl space-y-1 transition"
+          title="Klik untuk melihat bukti telemetri NMS"
+        >
           <div className="flex items-center justify-between text-xs text-white/60">
             <span>Reachable (UP)</span>
             <Wifi size={14} className="text-emerald-400" />
@@ -181,7 +198,11 @@ export default function OverviewTab({
         </div>
 
         {/* 4. Unreachable Devices */}
-        <div className="bg-card border border-border p-3.5 rounded-xl space-y-1">
+        <div
+          onClick={() => onNavigateToTab && onNavigateToTab("investigations", "details")}
+          className="bg-card border border-border hover:border-rose-500/40 cursor-pointer p-3.5 rounded-xl space-y-1 transition"
+          title="Klik untuk melihat investigasi insiden"
+        >
           <div className="flex items-center justify-between text-xs text-white/60">
             <span>Unreachable (DOWN)</span>
             <WifiOff size={14} className="text-rose-400" />
@@ -196,8 +217,9 @@ export default function OverviewTab({
 
         {/* 5. Active Investigations */}
         <div
-          onClick={() => onNavigateToTab && onNavigateToTab("investigations")}
+          onClick={() => onNavigateToTab && onNavigateToTab("investigations", "details")}
           className="bg-card border border-border hover:border-cyan-500/40 cursor-pointer p-3.5 rounded-xl space-y-1 transition"
+          title="Buka daftar investigasi insiden"
         >
           <div className="flex items-center justify-between text-xs text-white/60">
             <span>Active Investigations</span>
@@ -213,7 +235,11 @@ export default function OverviewTab({
         </div>
 
         {/* 6. Detected Anomalies */}
-        <div className="bg-card border border-border p-3.5 rounded-xl space-y-1">
+        <div
+          onClick={() => onNavigateToTab && onNavigateToTab("investigations", "rca")}
+          className="bg-card border border-border hover:border-rose-500/40 cursor-pointer p-3.5 rounded-xl space-y-1 transition"
+          title="Klik untuk membuka Root Cause & Timeline Anomali"
+        >
           <div className="flex items-center justify-between text-xs text-white/60">
             <span>Detected Anomalies</span>
             <AlertTriangle size={14} className="text-rose-400" />
@@ -221,8 +247,9 @@ export default function OverviewTab({
           <div className="text-xl font-bold font-mono text-rose-400">
             {data.detected_anomalies ?? (data.major_anomalies?.length || 0)}
           </div>
-          <div className="text-[10px] text-white/40">
-            Telemetry &amp; Syslog
+          <div className="text-[10px] text-rose-400 flex items-center gap-1">
+            <span>Analisis anomali</span>
+            <ArrowRight size={10} />
           </div>
         </div>
 
@@ -230,6 +257,7 @@ export default function OverviewTab({
         <div
           onClick={() => onNavigateToTab && onNavigateToTab("actions")}
           className="bg-card border border-border hover:border-amber-500/40 cursor-pointer p-3.5 rounded-xl space-y-1 transition"
+          title="Buka Action Center & Persetujuan Operasi"
         >
           <div className="flex items-center justify-between text-xs text-white/60">
             <span>Pending Approvals</span>
@@ -245,7 +273,11 @@ export default function OverviewTab({
         </div>
 
         {/* 8. Recent AI Decisions */}
-        <div className="bg-card border border-border p-3.5 rounded-xl space-y-1">
+        <div
+          onClick={() => onNavigateToTab && onNavigateToTab("actions")}
+          className="bg-card border border-border hover:border-cyan-500/40 cursor-pointer p-3.5 rounded-xl space-y-1 transition"
+          title="Klik untuk melihat Audit Log Keputusan AI"
+        >
           <div className="flex items-center justify-between text-xs text-white/60">
             <span>Recent AI Decisions</span>
             <Bot size={14} className="text-cyan-400" />
@@ -253,8 +285,9 @@ export default function OverviewTab({
           <div className="text-xl font-bold font-mono text-cyan-400">
             {recentDecisionsList.length}
           </div>
-          <div className="text-[10px] text-white/40">
-            Audit Decoupled
+          <div className="text-[10px] text-cyan-400 flex items-center gap-1">
+            <span>Audit log keputusan</span>
+            <ArrowRight size={10} />
           </div>
         </div>
       </div>
@@ -300,6 +333,18 @@ export default function OverviewTab({
               <span className="text-[10px] text-white/50 block">OPEN FINDINGS</span>
               <span className="text-base font-bold">{data.total_open_findings ?? 0}</span>
             </div>
+            {onRunSecurityAssessment && (
+              <button
+                type="button"
+                onClick={onRunSecurityAssessment}
+                disabled={runningSecurityAssessment}
+                className="px-3 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
+                title="Jalankan audit keamanan non-invasif untuk seluruh perangkat"
+              >
+                <ShieldCheck size={13} className={runningSecurityAssessment ? "animate-spin" : ""} />
+                <span>{runningSecurityAssessment ? "Memindai..." : "Audit Keamanan"}</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -378,13 +423,20 @@ export default function OverviewTab({
         </div>
 
         {/* Evidence Freshness */}
-        <div className="bg-card border border-border p-5 rounded-xl space-y-3">
+        <div
+          onClick={() => onNavigateToTab && onNavigateToTab("investigations", "evidence")}
+          className="bg-card border border-border hover:border-cyan-500/40 cursor-pointer p-5 rounded-xl space-y-3 transition"
+          title="Klik untuk membuka Katalog Bukti Kanonikal"
+        >
           <div className="flex items-center justify-between text-xs font-semibold text-white/90">
             <span className="flex items-center gap-1.5">
               <ShieldCheck size={16} className="text-emerald-400" />
               <span>Evidence Freshness Profiles</span>
             </span>
-            <span className="text-white/40 font-mono text-[10px]">Deterministic TTL</span>
+            <span className="text-cyan-400 font-mono text-[10px] flex items-center gap-1">
+              <span>Buka Bukti</span>
+              <ArrowRight size={10} />
+            </span>
           </div>
           <div className="grid grid-cols-2 gap-2 text-xs font-mono pt-1">
             <div className="p-2.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300">

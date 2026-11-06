@@ -77,12 +77,22 @@ export default function PathAnalysisTab({
             <label className="block text-[11px] font-mono text-white/50 mb-1">Source Device (Opsional)</label>
             <input
               type="text"
+              list="registered-devices-list"
               value={sourceDevice}
               onChange={(e) => setSourceDevice(e.target.value)}
               placeholder="Semua / Default"
               disabled={loading}
               className="w-full bg-white/5 border border-border rounded-lg px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-cyan-500/50"
             />
+            {devices && devices.length > 0 && (
+              <datalist id="registered-devices-list">
+                {devices.map((d) => (
+                  <option key={d.name || d.id} value={d.name || d.id}>
+                    {d.name} {d.host ? `(${d.host})` : ""}
+                  </option>
+                ))}
+              </datalist>
+            )}
           </div>
 
           <div>

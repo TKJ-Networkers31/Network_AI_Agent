@@ -15,8 +15,16 @@ import {
 import { api } from "../../api.js";
 import { useToast } from "../Toast.jsx";
 
-export default function NewActionModal({ isOpen, onClose, onActionCreated }) {
+export default function NewActionModal({
+  isOpen,
+  open,
+  onClose,
+  onActionCreated,
+  devices = [],
+  initialData = null,
+}) {
   const { notify } = useToast();
+  const isVisible = open !== undefined ? open : isOpen;
 
   const [form, setForm] = useState({
     action_name: "",
@@ -31,7 +39,22 @@ export default function NewActionModal({ isOpen, onClose, onActionCreated }) {
 
   const [saving, setSaving] = useState(false);
 
-  if (!isOpen) return null;
+  React.useEffect(() => {
+    if (initialData) {
+      setForm((prev) => ({
+        ...prev,
+        action_name: initialData.action_name || (initialData.action_type ? `${initialData.action_type} - ${initialData.target_device || ""}` : prev.action_name),
+        target_devices: Array.isArray(initialData.target_devices)
+          ? initialData.target_devices.join(", ")
+          : (initialData.target_device || prev.target_devices),
+        description: initialData.description || prev.description,
+        reason: initialData.reason || initialData.rationale || prev.reason,
+        diff_text: initialData.diff_text || (initialData.commands ? initialData.commands.join("\n") : prev.diff_text),
+      }));
+    }
+  }, [initialData, isVisible]);
+
+  if (!isVisible) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();

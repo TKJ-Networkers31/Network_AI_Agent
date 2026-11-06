@@ -81,6 +81,7 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
   const [loadingActions, setLoadingActions] = useState(false);
   const [advancingPlaybook, setAdvancingPlaybook] = useState(false);
   const [runningAutoDiag, setRunningAutoDiag] = useState(false);
+  const [runningSecurityAssessment, setRunningSecurityAssessment] = useState(false);
   const [investigating, setInvestigating] = useState(false);
   const [planning, setPlanning] = useState(false);
 
@@ -400,8 +401,33 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
     }
   };
 
+  const handleRunSecurityAudit = async () => {
+    setRunningSecurityAssessment(true);
+    try {
+      notify({ type: "info", message: "Menjalankan audit baseline keamanan jaringan non-invasif..." });
+      const res = await api.intelligence.assessSecurity({});
+      if (res?.success) {
+        notify({
+          type: "success",
+          message: `Audit keamanan selesai! Posture score: ${res.posture?.score ?? 100}/100`,
+        });
+        await fetchOverview();
+      }
+    } catch (err) {
+      notify({ type: "error", message: `Gagal menjalankan audit keamanan: ${err.message}` });
+    } finally {
+      setRunningSecurityAssessment(false);
+    }
+  };
+
   const handleStartPlaybook = async (pbId) => {
-    if (!selectedIncident) return;
+    if (!selectedIncident) {
+      notify({
+        type: "warning",
+        message: "Pilih salah satu investigasi insiden di kolom kiri terlebih dahulu untuk menjalankan playbook.",
+      });
+      return;
+    }
     setAdvancingPlaybook(true);
     try {
       const res = await api.intelligence.startPlaybook(selectedIncident.incident_id, pbId);
@@ -611,10 +637,12 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
           onRefresh={fetchOverview}
           onOpenOnboard={() => setShowOnboardModal(true)}
           onOpenPolicy={() => setShowPolicyModal(true)}
-          onNavigateToTab={(tab) => {
+          onNavigateToTab={(tab, subTab = null) => {
             setActiveTab(tab);
-            if (tab === "investigations") setInvSubTab("details");
+            if (tab === "investigations") setInvSubTab(subTab || "details");
           }}
+          onRunSecurityAssessment={handleRunSecurityAudit}
+          runningSecurityAssessment={runningSecurityAssessment}
         />
       )}
 
@@ -910,6 +938,10 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
                   onCancelInvestigation={handleCancelInvestigation}
                   activeInvestigation={activeInvestigation}
                   loading={investigating}
+                  onProposeAction={(actionData) => {
+                    setPrefilledActionData(actionData);
+                    setShowNewActionModal(true);
+                  }}
                 />
               )}
 
@@ -1113,6 +1145,7 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
       {/* ------------------------------------------------------------------- */}
 
       <OnboardDeviceModal
+        isOpen={showOnboardModal}
         open={showOnboardModal}
         onClose={() => setShowOnboardModal(false)}
         onOnboardSuccess={() => {
@@ -1122,11 +1155,13 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
       />
 
       <OperationsPolicyModal
+        isOpen={showPolicyModal}
         open={showPolicyModal}
         onClose={() => setShowPolicyModal(false)}
       />
 
       <NewActionModal
+        isOpen={showNewActionModal}
         open={showNewActionModal}
         onClose={() => {
           setShowNewActionModal(false);

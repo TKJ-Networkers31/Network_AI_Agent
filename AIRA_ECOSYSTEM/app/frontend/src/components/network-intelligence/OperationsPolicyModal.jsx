@@ -17,8 +17,9 @@ import {
 import { api } from "../../api.js";
 import { useToast } from "../Toast.jsx";
 
-export default function OperationsPolicyModal({ isOpen, onClose }) {
+export default function OperationsPolicyModal({ isOpen, open, onClose }) {
   const { notify } = useToast();
+  const isVisible = open !== undefined ? open : isOpen;
 
   const [policy, setPolicy] = useState({
     enable_auto_investigation: true,
@@ -35,7 +36,7 @@ export default function OperationsPolicyModal({ isOpen, onClose }) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isVisible) return;
     setLoading(true);
     api.intelligence
       .getOperationsPolicy()
@@ -48,9 +49,9 @@ export default function OperationsPolicyModal({ isOpen, onClose }) {
         notify({ type: "error", message: `Gagal memuat kebijakan: ${err.message}` });
       })
       .finally(() => setLoading(false));
-  }, [isOpen, notify]);
+  }, [isVisible, notify]);
 
-  if (!isOpen) return null;
+  if (!isVisible) return null;
 
   const handleSave = async (e) => {
     e.preventDefault();

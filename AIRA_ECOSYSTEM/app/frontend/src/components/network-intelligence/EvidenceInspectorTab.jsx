@@ -138,7 +138,14 @@ export default function EvidenceInspectorTab({ evidenceItems = [] }) {
                     <span className="text-[11px] text-white/40">
                       Confidence: <strong className="text-white/80">{it.confidence || "HIGH"}</strong>
                     </span>
-                    <button className="p-1.5 bg-white/5 hover:bg-white/10 rounded border border-white/10 text-white/70">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedItem(it);
+                      }}
+                      className="p-1.5 bg-white/5 hover:bg-cyan-500/20 rounded border border-white/10 hover:border-cyan-500/40 text-white/70 hover:text-cyan-300 transition"
+                      title="Lihat Detail Bukti"
+                    >
                       <Eye size={13} />
                     </button>
                   </div>
