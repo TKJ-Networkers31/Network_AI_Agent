@@ -206,6 +206,25 @@ class DeviceOnboardingEngine:
 
         duration_sec = time.time() - start_ts
 
+        # 6b. Automatic Non-Invasive Security Baseline Assessment (Workstream D)
+        security_findings: List[Dict[str, Any]] = []
+        try:
+            from core.network_intelligence.security_baseline import get_security_baseline_engine
+            base_engine = get_security_baseline_engine()
+            dev_assess_data = {
+                "device_id": node_id,
+                "name": name,
+                "vendor": vendor,
+                "capabilities": capabilities,
+                "open_ports": [port] if is_reachable else [],
+                "services": [device_type.lower()],
+            }
+            findings = base_engine.assess_device("tenant_internal", dev_assess_data)
+            security_findings = [f.to_dict() for f in findings]
+            base_engine.calculate_posture("tenant_internal")
+        except Exception as exc:
+            logger.warning("Security baseline assessment notice: %s", exc)
+
         result = {
             "success": True,
             "device_name": name,
@@ -220,6 +239,7 @@ class DeviceOnboardingEngine:
             "missing_info": missing_info,
             "topology_status": "REGISTERED",
             "nms_status": "MONITORING_ACTIVE",
+            "security_findings": security_findings,
             "ai_summary": ai_summary,
             "duration_sec": round(duration_sec, 3),
         }

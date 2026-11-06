@@ -374,3 +374,24 @@ def trigger_token_sweep(admin: TenantContext = Depends(require_platform_admin)):
     res = _quota_service.sweep_due_quotas()
     return {"success": True, "sweep": res}
 
+
+class PermissionSimulateInput(BaseModel):
+    user_id: str
+    resource: str
+    action: str
+    site_id: Optional[str] = None
+
+
+@router.post("/permissions/simulate")
+def simulate_permissions(payload: PermissionSimulateInput, admin: TenantContext = Depends(require_platform_admin)):
+    """Simulates permission evaluation across Org -> UserGroup -> Site -> Subtab -> Resource -> Action."""
+    from core.tenant.permission_simulation import get_permission_simulation_service
+    svc = get_permission_simulation_service()
+    result = svc.simulate_permission(
+        user_id=payload.user_id,
+        resource=payload.resource,
+        action=payload.action,
+        site_id=payload.site_id,
+    )
+    return {"success": True, "simulation": result}
+

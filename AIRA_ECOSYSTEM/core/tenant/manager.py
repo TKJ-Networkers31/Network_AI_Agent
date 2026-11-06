@@ -62,14 +62,12 @@ logger = logging.getLogger("aira.tenant.manager")
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_\-]{1,63}$")
 
 
-def _hash_password(password: str, salt: str) -> str:
-    """Computes PBKDF2-HMAC-SHA256 with 100,000 iterations."""
-    return hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode("utf-8"),
-        salt.encode("utf-8"),
-        100_000,
-    ).hex()
+from core.security.password import hash_password, verify_password
+
+
+def _hash_password(password: str, salt: Optional[str] = None) -> str:
+    """Computes Argon2id password hash with PBKDF2 backward compatibility (OWASP ASVS 5.0)."""
+    return hash_password(password)
 
 
 def _hash_token(token: str) -> str:
@@ -308,6 +306,23 @@ class IdentityManager:
             raise ValueError("Password is required.")
         effective_email = email.strip().lower() if email else f"{username.strip().lower()}@aira.local"
         role_upper = role_type.upper().strip() if role_type else "USER"
+
+        if not is_internal and not tenant_id:
+            raise ValueError("Customer users must be associated with a valid tenant_id.")
+
+        internal_roles = {
+            UserRoleType.PLATFORM_SUPER_ADMIN.value,
+            UserRoleType.PLATFORM_OWNER.value,
+            UserRoleType.SUPERADMIN.value,
+            UserRoleType.NOC_ADMIN.value,
+            UserRoleType.NOC_OPERATOR.value,
+            UserRoleType.NETWORK_ENGINEER.value,
+            UserRoleType.NOC_ANALYST.value,
+            UserRoleType.SUPPORT_OPERATOR.value,
+            UserRoleType.AUDITOR.value,
+        }
+        if not is_internal and role_upper in internal_roles:
+            raise PermissionError(f"Privilege Boundary Violation: Customer user cannot be assigned internal NOC role '{role_upper}'.")
 
         user_id = f"usr_{uuid.uuid4().hex[:12]}"
         salt = secrets.token_hex(16)
@@ -660,9 +675,9 @@ class IdentityManager:
                 except Exception:
                     pass
 
-            # Check password
-            expected_hash = _hash_password(password, row["salt"])
-            if not secrets.compare_digest(row["password_hash"], expected_hash):
+            # Check password with Argon2id and transparent legacy migration
+            is_valid, needs_rehash = verify_password(password, row["password_hash"], row["salt"])
+            if not is_valid:
                 new_failed = failed_attempts + 1
                 if new_failed >= 5:
                     lock_time = (now_dt + timedelta(minutes=15)).isoformat()
@@ -690,6 +705,14 @@ class IdentityManager:
                         (new_failed, user_id),
                     )
                     return {"success": False, "error": "Username atau kata sandi tidak valid."}
+
+            if needs_rehash:
+                new_hash = hash_password(password)
+                conn.execute(
+                    "UPDATE operational_users SET password_hash = ?, updated_at = ? WHERE user_id = ?",
+                    (new_hash, now_iso, user_id),
+                )
+                logger.info("Transparently migrated password to Argon2id for user %s", username)
 
             # Verify admin role boundary if logging into admin site
             if admin_only:
@@ -795,6 +818,11 @@ class IdentityManager:
                 WHERE user_id = ?
                 """,
                 (pw_hash, salt, must_change_val, now_iso, user_id),
+            )
+            # Session revocation on password change (OWASP ASVS 5.0)
+            conn.execute(
+                "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE user_id = ? AND status = 'ACTIVE'",
+                (user_id,),
             )
 
             aud_id = f"aud_{uuid.uuid4().hex[:16]}"
@@ -1069,6 +1097,15 @@ class IdentityManager:
                 (token_hash,),
             )
             return cur.rowcount > 0
+
+    def revoke_all_user_sessions(self, user_id: str) -> int:
+        """Revokes all active sessions for a user upon privilege modification, lock, or security event."""
+        with topology_transaction(self.db_path, write=True) as conn:
+            cur = conn.execute(
+                "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE user_id = ? AND status = 'ACTIVE'",
+                (user_id,),
+            )
+            return cur.rowcount
 
 
 # ===========================================================================

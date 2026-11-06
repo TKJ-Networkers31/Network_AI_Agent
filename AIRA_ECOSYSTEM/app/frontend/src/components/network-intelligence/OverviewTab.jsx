@@ -259,6 +259,87 @@ export default function OverviewTab({
         </div>
       </div>
 
+      {/* Network Security Posture & Vulnerability Baseline (Workstream D & F) */}
+      <div className="bg-[#0c1220] border border-white/10 p-5 rounded-xl shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+              <ShieldCheck size={24} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white tracking-wide">
+                  Network Security Posture &amp; Baseline Intelligence
+                </h3>
+                <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold tracking-wider border ${
+                  (data.security_posture_band || "EXCELLENT") === "EXCELLENT" || (data.security_posture_band || "") === "GOOD"
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    : (data.security_posture_band || "") === "MODERATE"
+                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                    : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                }`}>
+                  {data.security_posture_band || "EXCELLENT"} ({data.security_posture_score ?? 100}/100)
+                </span>
+              </div>
+              <p className="text-xs text-white/60 mt-0.5">
+                Cakupan asesmen non-invasif: {Number(data.assessment_coverage_pct ?? 100).toFixed(0)}% across Management Plane, Firewall, Routing, &amp; Service Hardening.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 font-mono text-xs">
+            <div className="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300">
+              <span className="text-[10px] text-rose-400/70 block">CRITICAL FINDINGS</span>
+              <span className="text-base font-bold">{data.critical_findings_count ?? 0}</span>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300">
+              <span className="text-[10px] text-amber-400/70 block">HIGH FINDINGS</span>
+              <span className="text-base font-bold">{data.high_findings_count ?? 0}</span>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/80">
+              <span className="text-[10px] text-white/50 block">OPEN FINDINGS</span>
+              <span className="text-base font-bold">{data.total_open_findings ?? 0}</span>
+            </div>
+          </div>
+        </div>
+
+        {Array.isArray(data.recent_security_findings) && data.recent_security_findings.length > 0 ? (
+          <div className="space-y-2">
+            <div className="text-[11px] font-semibold text-white/70 tracking-wider uppercase font-mono">
+              Temuan Baseline Terdeteksi:
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {data.recent_security_findings.slice(0, 4).map((f, idx) => (
+                <div key={idx} className="p-3 rounded-lg bg-white/[0.03] border border-white/5 space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-white truncate max-w-[240px]">{f.title}</span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                      f.severity === "CRITICAL"
+                        ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                        : f.severity === "HIGH"
+                        ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                        : "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                    }`}>
+                      {f.severity}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-white/60 line-clamp-1">{f.description}</p>
+                  <div className="flex items-center justify-between text-[10px] font-mono text-white/40 pt-1">
+                    <span>{f.device_name} · {f.category}</span>
+                    <span className="text-cyan-400/80">{f.status}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/10 text-xs text-emerald-300 flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+            <span>Seluruh perangkat sesuai dengan baseline keamanan. Tidak ada kerentanan kritis atau deviasi konfigurasi.</span>
+          </div>
+        )}
+      </div>
+
       {/* Mid Section: 8-Dimensional Health & Evidence Freshness */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* 8-Dimensional Health Scores Grid */}

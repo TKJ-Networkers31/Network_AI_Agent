@@ -31,6 +31,8 @@ from core.topology_models import (
     TopologyEdge,
     EdgeEvidence,
 )
+from core.tenant.auth_deps import get_current_authenticated_user
+from core.tenant.models import TenantContext
 
 @pytest.fixture(autouse=True)
 def setup_test_engine(monkeypatch):
@@ -111,7 +113,20 @@ def setup_test_engine(monkeypatch):
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    mock_admin_context = TenantContext(
+        user_id="usr_25b8282cc548",
+        username="lingga_admin",
+        is_internal=True,
+        tenant_id="tenant_internal",
+        roles=["SUPER_ADMIN"],
+        groups=["SUPER_ADMIN"],
+        permissions={"*"},
+        account_enabled=True,
+    )
+    app.dependency_overrides[get_current_authenticated_user] = lambda: mock_admin_context
+    tc = TestClient(app)
+    yield tc
+    app.dependency_overrides.clear()
 
 # -----------------------------------------------------------------------------
 # 1. Snapshot Management API Tests

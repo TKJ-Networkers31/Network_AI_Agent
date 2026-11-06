@@ -482,7 +482,7 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
     <div className="space-y-6">
       <TopBar
         title="Network Intelligence & Autonomous Operations"
-        subtitle="Pusat Investigasi Insiden, Evaluasi Akar Masalah, Perencanaan Tindakan, & Approval Policy (Phase G)"
+        subtitle="Pusat Investigasi Insiden, Evaluasi Akar Masalah, Perencanaan Tindakan, & AI Governance (Phase H)"
         onMenuClick={onOpenMenu}
       />
 

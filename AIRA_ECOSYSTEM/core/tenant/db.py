@@ -541,6 +541,49 @@ CREATE INDEX IF NOT EXISTS idx_billing_webhook ON operational_billing_webhook_ev
 CREATE INDEX IF NOT EXISTS idx_playbooks_tenant ON operational_playbooks(tenant_id, category);
 CREATE INDEX IF NOT EXISTS idx_quota_adj_user ON operational_token_quota_adjustments(target_user_id, timestamp_utc DESC);
 
+-- 32. Phase H: Automatic Network Security Intelligence & Posture
+CREATE TABLE IF NOT EXISTS operational_security_findings (
+    finding_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    site_id TEXT,
+    device_id TEXT NOT NULL,
+    device_name TEXT NOT NULL,
+    category TEXT NOT NULL CHECK(category IN ('MANAGEMENT_PLANE', 'FIREWALL_AND_ACL', 'ROUTING_SECURITY', 'VLAN_AND_SEGMENTATION', 'MONITORING_AND_LOGGING', 'HARDENING_AND_SERVICES')),
+    severity TEXT NOT NULL CHECK(severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFORMATIONAL')),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    remediation_guidance TEXT NOT NULL,
+    remediation_action_name TEXT,
+    status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN', 'ACKNOWLEDGED', 'IN_PROGRESS', 'MITIGATED', 'RESOLVED', 'ACCEPTED_RISK', 'FALSE_POSITIVE')),
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    baseline_rule_id TEXT,
+    first_detected_at TEXT NOT NULL,
+    last_detected_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolved_by TEXT
+);
+
+CREATE TABLE IF NOT EXISTS operational_security_posture (
+    posture_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    site_id TEXT,
+    device_id TEXT,
+    score INTEGER NOT NULL,
+    band TEXT NOT NULL CHECK(band IN ('CRITICAL', 'POOR', 'MODERATE', 'GOOD', 'EXCELLENT')),
+    critical_count INTEGER NOT NULL DEFAULT 0,
+    high_count INTEGER NOT NULL DEFAULT 0,
+    medium_count INTEGER NOT NULL DEFAULT 0,
+    low_count INTEGER NOT NULL DEFAULT 0,
+    info_count INTEGER NOT NULL DEFAULT 0,
+    assessment_coverage_pct REAL NOT NULL DEFAULT 100.0,
+    drift_detected INTEGER NOT NULL DEFAULT 0,
+    calculated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_findings_tenant_device ON operational_security_findings(tenant_id, device_id, status);
+CREATE INDEX IF NOT EXISTS idx_findings_severity ON operational_security_findings(severity, status);
+CREATE INDEX IF NOT EXISTS idx_posture_tenant ON operational_security_posture(tenant_id, calculated_at DESC);
+
 
 """
 

@@ -71,7 +71,14 @@ class DuplicateGroupRequest(BaseModel):
 
 
 class PermissionsPreviewRequest(BaseModel):
-    group_ids: List[str] = Field(default_factory=list)
+    group_ids: List[str]
+
+
+class UserSimulationRequest(BaseModel):
+    user_id: str
+    resource: str
+    action: str
+    site_id: Optional[str] = None
 
 
 # -----------------------------------------------------------------------------
@@ -356,6 +363,23 @@ def preview_effective_permissions(
         "effective_permissions": sorted(list(effective)),
         "count": len(effective),
     }
+
+
+@router.post("/permissions/simulate")
+def simulate_permissions(
+    payload: UserSimulationRequest,
+    ctx: TenantContext = Depends(require_permission("permissions.read")),
+) -> Dict[str, Any]:
+    """Simulates permission evaluation across Org -> UserGroup -> Site -> Subtab -> Resource -> Action."""
+    from core.tenant.permission_simulation import get_permission_simulation_service
+    svc = get_permission_simulation_service()
+    result = svc.simulate_permission(
+        user_id=payload.user_id,
+        resource=payload.resource,
+        action=payload.action,
+        site_id=payload.site_id,
+    )
+    return {"success": True, "simulation": result}
 
 
 # -----------------------------------------------------------------------------

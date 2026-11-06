@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
+from core.security.rate_limiter import auth_rate_limiter
 from core.tenant.manager import IdentityManager
 from core.tenant.models import TenantContext
 from core.tenant.rbac_service import get_rbac_service
@@ -62,13 +63,28 @@ def get_current_user_context(authorization: Optional[str] = Header(None)) -> Ten
 
 
 @router.post("/login")
-def login(payload: LoginRequest):
+def login(payload: LoginRequest, request: Request):
     """Authenticates credentials using username and password, issuing an active session token."""
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+
+    # Rate limiting protection (OWASP ASVS 5.0)
+    allowed, retry_after = auth_rate_limiter.is_allowed(client_ip)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Terlalu banyak percobaan masuk dari IP Anda. Coba lagi dalam {retry_after} detik.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     res = _identity_mgr.authenticate_user_detailed(
         username_or_email=payload.username_or_email,
         password=payload.password,
         totp_code=payload.totp_code,
         admin_only=payload.admin_only,
+        ip_address=client_ip,
     )
 
     if res.get("mfa_required"):
@@ -84,6 +100,9 @@ def login(payload: LoginRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=res.get("error", "Username atau password tidak sesuai."),
         )
+
+    # Reset rate limit counter on success
+    auth_rate_limiter.reset(client_ip)
 
     session = res["session"]
     rbac_svc = get_rbac_service()

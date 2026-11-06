@@ -215,6 +215,82 @@ class NetworkChangeDetector:
         except Exception as exc:
             logger.warning("Error in auto-investigation correlation: %s", exc)
 
+    def evaluate_security_drift(
+        self,
+        tenant_id: str,
+        device_id: str,
+        current_ports: List[int],
+        current_services: List[str],
+        device_meta: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Evaluates open ports and services for security drift compared to cached baseline.
+        If drift is detected, triggers automated non-invasive reassessment and updates posture.
+        """
+        now = time.time()
+        drift_key = f"sec_{device_id}"
+        with self._lock:
+            last_ts = self._last_event_time.get(drift_key, 0.0)
+            if (now - last_ts) < self.debounce_sec:
+                return None
+
+            prev = self._device_state_cache.get(drift_key)
+            if prev is None:
+                self._device_state_cache[drift_key] = {
+                    "ports": sorted(list(current_ports)),
+                    "services": sorted(list(current_services)),
+                    "timestamp": now,
+                }
+                return None
+
+            prev_ports = set(prev.get("ports", []))
+            prev_services = set(prev.get("services", []))
+            curr_ports_set = set(current_ports)
+            curr_services_set = set(current_services)
+
+            ports_added = curr_ports_set - prev_ports
+            services_added = curr_services_set - prev_services
+
+            if not ports_added and not services_added:
+                return None
+
+            # Drift detected!
+            self._last_event_time[drift_key] = now
+            self._device_state_cache[drift_key] = {
+                "ports": sorted(list(current_ports)),
+                "services": sorted(list(current_services)),
+                "timestamp": now,
+            }
+
+            from core.network_intelligence.security_baseline import get_security_baseline_engine
+            engine = get_security_baseline_engine()
+            dev_dict = dict(device_meta or {})
+            dev_dict["device_id"] = device_id
+            dev_dict["open_ports"] = list(current_ports)
+            dev_dict["services"] = list(current_services)
+            findings = engine.assess_device(tenant_id, dev_dict)
+            posture = engine.calculate_posture(tenant_id)
+
+            drift_event = {
+                "event_id": f"secdr_{uuid.uuid4().hex[:12]}",
+                "event_type": "SECURITY_CONFIGURATION_DRIFT",
+                "tenant_id": tenant_id,
+                "device_id": device_id,
+                "ports_added": list(ports_added),
+                "services_added": list(services_added),
+                "new_posture_score": posture.score,
+                "new_posture_band": posture.band,
+                "findings_count": len(findings),
+                "detected_at": now,
+            }
+
+            try:
+                event_bus.publish("network.security_drift", agent="CHANGE_DETECTOR", data=drift_event)
+            except Exception:
+                pass
+
+            return drift_event
+
 
 _change_detector: Optional[NetworkChangeDetector] = None
 

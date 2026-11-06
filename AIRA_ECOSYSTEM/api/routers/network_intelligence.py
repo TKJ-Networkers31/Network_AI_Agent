@@ -1015,6 +1015,15 @@ def get_network_intelligence_overview():
     except Exception:
         recent_decisions = []
 
+    from core.network_intelligence.security_baseline import get_security_baseline_engine
+    baseline_engine = get_security_baseline_engine()
+    try:
+        sec_posture = baseline_engine.calculate_posture(tenant_id="tenant_internal")
+        sec_findings = baseline_engine.list_findings(tenant_id="tenant_internal", limit=5)
+    except Exception:
+        sec_posture = None
+        sec_findings = []
+
     return {
         "success": True,
         "overview": {
@@ -1036,7 +1045,61 @@ def get_network_intelligence_overview():
             "evidence_freshness": bundle.freshness_summary,
             "total_evidence_records": len(bundle.records),
             "observed_devices": list(bundle.device_evidence.keys()) if hasattr(bundle, "device_evidence") else [],
+            "security_posture_score": sec_posture.score if sec_posture else 100,
+            "security_posture_band": sec_posture.band if sec_posture else "EXCELLENT",
+            "critical_findings_count": sec_posture.critical_count if sec_posture else 0,
+            "high_findings_count": sec_posture.high_count if sec_posture else 0,
+            "total_open_findings": (sec_posture.critical_count + sec_posture.high_count + sec_posture.medium_count + sec_posture.low_count) if sec_posture else 0,
+            "assessment_coverage_pct": sec_posture.assessment_coverage_pct if sec_posture else 100.0,
+            "recent_security_findings": sec_findings,
         }
+    }
+
+
+@router.get("/security/posture", summary="Retrieve real-time network security posture score and metrics")
+def get_security_posture_endpoint(tenant_id: str = "tenant_internal"):
+    from core.network_intelligence.security_baseline import get_security_baseline_engine
+    engine = get_security_baseline_engine()
+    posture = engine.calculate_posture(tenant_id=tenant_id)
+    return {"success": True, "posture": posture.to_dict()}
+
+
+@router.get("/security/findings", summary="List detected network security baseline findings")
+def get_security_findings_endpoint(
+    tenant_id: str = "tenant_internal",
+    severity: Optional[str] = None,
+    category: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = Query(default=100, le=500),
+):
+    from core.network_intelligence.security_baseline import get_security_baseline_engine
+    engine = get_security_baseline_engine()
+    findings = engine.list_findings(
+        tenant_id=tenant_id,
+        severity=severity,
+        category=category,
+        status=status,
+        limit=limit,
+    )
+    return {"success": True, "findings": findings, "total": len(findings)}
+
+
+@router.post("/security/assess", summary="Trigger non-invasive security baseline assessment for a device")
+def trigger_security_assessment_endpoint(payload: Dict[str, Any]):
+    from core.network_intelligence.security_baseline import get_security_baseline_engine
+    engine = get_security_baseline_engine()
+    tenant_id = payload.get("tenant_id", "tenant_internal")
+    findings = engine.assess_device(
+        tenant_id=tenant_id,
+        device=payload.get("device", {}),
+        telemetry=payload.get("telemetry"),
+        config_snapshot=payload.get("config_snapshot"),
+    )
+    posture = engine.calculate_posture(tenant_id=tenant_id)
+    return {
+        "success": True,
+        "findings": [f.to_dict() for f in findings],
+        "posture": posture.to_dict(),
     }
 
 

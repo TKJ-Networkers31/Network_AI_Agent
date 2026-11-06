@@ -559,6 +559,28 @@ class TenantContext:
             return True
         return self.tenant_id == target_tenant_id
 
+    def can_perform(
+        self,
+        action: str,
+        resource: str,
+        site_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Evaluates granular action (VIEW, CREATE, UPDATE, DELETE, EXECUTE, APPROVE, EXPORT,
+        MANAGE_PERMISSIONS, ACCESS_SENSITIVE_DATA) on a resource.
+        """
+        if "SUPER_ADMIN" in self.groups or "PLATFORM_OWNER" in self.roles or "PLATFORM_SUPER_ADMIN" in self.roles:
+            return True
+        from core.tenant.permission_simulation import get_permission_simulation_service
+        svc = get_permission_simulation_service()
+        res = svc.simulate_permission(
+            user_id=self.user_id,
+            resource=resource,
+            action=action,
+            site_id=site_id,
+        )
+        return bool(res.get("allowed"))
+
 
 # ===========================================================================
 # 4. CUSTOMER NETWORK INVENTORY MODELS (WP 8.3)

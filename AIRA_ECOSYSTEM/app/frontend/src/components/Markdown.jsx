@@ -4,6 +4,11 @@ import ReactMarkdown from "react-markdown";
 import GraphBlock from "./GraphBlock.jsx";
 import MapBlock from "./MapBlock.jsx";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+import ActionCardBlock from "./ActionCardBlock.jsx";
+import MermaidBlock from "./MermaidBlock.jsx";
 import DOMPurify from "dompurify";
 import CopyButton from "./CopyButton.jsx";
 import { copyText } from "../utils/clipboard.js";
@@ -395,6 +400,16 @@ function CodeBlock({ className, children }) {
     return <MapBlock code={raw} />;
   }
 
+  // Interactive Form & Action Plan card (Workstream H)
+  if (lang === "action-card" || lang === "action" || lang === "action_plan") {
+    return <ActionCardBlock code={raw} />;
+  }
+
+  // Mermaid diagrams (Workstream H)
+  if (lang === "mermaid") {
+    return <MermaidBlock code={raw} />;
+  }
+
  // Diprioritaskan sebelum deteksi SVG: kalau payload sudah berbentuk
  // node/edge terstruktur, pakai layout engine, jangan render sebagai teks.
   if ((lang === "graph" || lang === "json" || !lang) && looksLikeGraphJson(raw)) {
@@ -480,7 +495,7 @@ const components = {
 
 function Markdown({ content }) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>
       {content || ""}
     </ReactMarkdown>
   );
