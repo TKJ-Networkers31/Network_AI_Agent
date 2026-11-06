@@ -20,9 +20,9 @@ the settings module itself; wiring it into api/main.py's router list is
 a one-line, low-risk addition left for integration.
 """
 
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from core.global_settings import read as settings_read
@@ -90,24 +90,76 @@ def update_approval_preferences(body: UpdateApprovalPreferencesIn, tenant_id: st
 
 
 @router.get("/entitlements/summary")
-def get_entitlements_summary(tenant_id: str = "tenant_default"):
+def get_entitlements_summary(
+    tenant_id: str = "tenant_default",
+    authorization: Optional[str] = Header(None),
+):
+    import time
+    from datetime import datetime
     from core.tenant.entitlements import get_entitlement_manager
+    from core.tenant.user_subscription import UserSubscriptionService
+
+    user_id = None
+    if isinstance(authorization, str) and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        try:
+            from core.tenant.manager import IdentityManager
+            ctx = IdentityManager().validate_session_token(token)
+            if ctx:
+                user_id = ctx.user_id
+                tenant_id = ctx.tenant_id or tenant_id
+        except Exception:
+            pass
+
     mgr = get_entitlement_manager()
-    plan = mgr.get_tenant_plan(tenant_id)
-    bal = mgr.get_token_balance(tenant_id)
+    policy = mgr.get_policy(scope_id=tenant_id, scope_type="TENANT")
+    bal = mgr.get_or_create_balance(tenant_id=tenant_id, user_id=user_id)
+
+    # Check user-specific subscription if user_id resolved
+    sub = None
+    if user_id:
+        try:
+            sub_svc = UserSubscriptionService()
+            sub = sub_svc.get_subscription(user_id)
+        except Exception:
+            sub = None
+
+    if sub:
+        tier_val = str(sub.plan_id).lower()
+        has_net = bool(sub.has_networking_plus)
+        monthly_allowance = int(sub.token_quota)
+        used_tokens = int(sub.token_consumed)
+        current_balance = int(sub.remaining_tokens)
+    else:
+        tier_val = getattr(policy.tier, "value", str(policy.tier)).lower()
+        has_net = bool(mgr.has_networking_access(tenant_id))
+        monthly_allowance = int(bal.allocated_tokens or policy.monthly_token_allocation)
+        used_tokens = int(bal.used_tokens)
+        current_balance = int(bal.remaining_tokens)
+
+    period_ends_epoch = None
+    if bal.period_reset_utc:
+        try:
+            dt = datetime.fromisoformat(bal.period_reset_utc.replace("Z", "+00:00"))
+            period_ends_epoch = int(dt.timestamp())
+        except Exception:
+            period_ends_epoch = int(time.time() + 30 * 86400)
+    else:
+        period_ends_epoch = int(time.time() + 30 * 86400)
+
     return {
         "success": True,
         "entitlements": {
-            "tier": plan.tier.value,
-            "has_networking_plus": plan.has_networking_plus,
-            "monthly_allowance": plan.monthly_token_allowance,
+            "tier": tier_val,
+            "has_networking_plus": has_net,
+            "monthly_allowance": monthly_allowance,
         },
         "balance": {
-            "current_balance": bal.current_balance,
-            "monthly_allowance": bal.monthly_allowance,
-            "tokens_used_this_period": bal.tokens_used_this_period,
-            "rollover_tokens": bal.rollover_tokens,
-            "period_ends_at": bal.period_ends_at,
+            "current_balance": current_balance,
+            "monthly_allowance": monthly_allowance,
+            "tokens_used_this_period": used_tokens,
+            "rollover_tokens": 0,
+            "period_ends_at": period_ends_epoch,
         },
     }
 

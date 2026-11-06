@@ -28,7 +28,6 @@ def get_current_authenticated_user(
             return TenantContext(
                 user_id=str(x_guest_id).strip(),
                 username=f"guest_{str(x_guest_id).strip()[:8]}",
-                email=f"{str(x_guest_id).strip()}@guest.aira.local",
                 tenant_id="tenant_guest",
                 roles=["GUEST"],
                 groups=["READ_ONLY"],

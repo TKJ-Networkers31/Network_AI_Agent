@@ -258,20 +258,41 @@ class UserMemoryService:
                 )
                 mem_id = memory_id
             else:
-                # Check near-duplicate in category
                 existing_row = None
-                if cat in ("profile", "preferences"):
-                    # Only one active profile summary needed
-                    existing_row = conn.execute(
-                        "SELECT * FROM user_memories WHERE user_id = ? AND category = ? LIMIT 1",
+                # 1. Exact content match in category
+                existing_row = conn.execute(
+                    "SELECT * FROM user_memories WHERE user_id = ? AND category = ? AND content = ? LIMIT 1",
+                    (user_id, cat, clean_content),
+                ).fetchone()
+
+                # 2. Check metadata key match (e.g. from auto_extract or identity update)
+                meta_key = (metadata or {}).get("key")
+                if not existing_row and meta_key:
+                    rows = conn.execute(
+                        "SELECT * FROM user_memories WHERE user_id = ? AND category = ?",
                         (user_id, cat),
-                    ).fetchone()
-                else:
-                    # Check exact or very high similarity
-                    existing_row = conn.execute(
-                        "SELECT * FROM user_memories WHERE user_id = ? AND category = ? AND content = ? LIMIT 1",
-                        (user_id, cat, clean_content),
-                    ).fetchone()
+                    ).fetchall()
+                    for r in rows:
+                        try:
+                            m_dict = json.loads(r["metadata_json"] or "{}")
+                            if m_dict.get("key") == meta_key:
+                                existing_row = r
+                                break
+                        except Exception:
+                            pass
+
+                # 3. Check specific prefix match for keyed facts (e.g., "panggilan: ...", "nama_lengkap: ...")
+                if not existing_row and ":" in clean_content:
+                    prefix = clean_content.split(":", 1)[0].strip().lower()
+                    if 2 <= len(prefix) <= 35:
+                        rows = conn.execute(
+                            "SELECT * FROM user_memories WHERE user_id = ? AND category = ?",
+                            (user_id, cat),
+                        ).fetchall()
+                        for r in rows:
+                            if r["content"].strip().lower().startswith(f"{prefix}:"):
+                                existing_row = r
+                                break
 
                 if existing_row:
                     mem_id = existing_row["memory_id"]
@@ -514,32 +535,78 @@ class UserMemoryService:
                 "identity": identity,
             }
 
-    def retrieve_context_memories(self, user_id: str, query: str = "", max_items: int = 5) -> List[Dict[str, Any]]:
+    def retrieve_context_memories(self, user_id: str, query: str = "", max_items: int = 6) -> List[Dict[str, Any]]:
         """
         Retrieves top relevant memories for prompt context injection.
         Guarantees STRICT USER ISOLATION: Only user_id memories are queried.
+        Prioritizes user profile/identity and preferences so AIRA always maintains context.
         """
         if is_guest_user(user_id) or not self.is_memory_enabled(user_id):
             return []
 
         with topology_transaction(self.db_path, write=False) as conn:
             conn.row_factory = sqlite3.Row
-            sql = "SELECT * FROM user_memories WHERE user_id = ? AND is_enabled = 1"
-            params: List[Any] = [user_id]
 
-            if query and query.strip():
-                keywords = [k for k in query.lower().split() if len(k) > 3][:3]
+            results: List[Dict[str, Any]] = []
+            seen_ids = set()
+
+            clean_q = (query or "").lower().strip()
+            # Check if query is an identity / preference inquiry
+            is_identity_query = bool(
+                re.search(r"\b(siapa|kamu|nama|panggil|kenal|profil|aku|saya|role|peran|preferensi)\b", clean_q)
+            ) if clean_q else True
+
+            # 1. Fetch high-priority identity/profile/preference memories
+            if is_identity_query or not clean_q:
+                prof_rows = conn.execute(
+                    """
+                    SELECT * FROM user_memories
+                    WHERE user_id = ? AND is_enabled = 1 AND category IN ('profile', 'preferences')
+                    ORDER BY importance DESC, updated_at DESC LIMIT 3
+                    """,
+                    (user_id,),
+                ).fetchall()
+                for r in prof_rows:
+                    if r["memory_id"] not in seen_ids:
+                        seen_ids.add(r["memory_id"])
+                        results.append(dict(r))
+
+            # 2. Topic-specific search with keywords
+            if clean_q:
+                # Filter out pure conversational stop-words
+                stop_words = {"siapa", "kamu", "saya", "tahu", "apakah", "bisa", "tolong", "halo", "dong", "yang", "untuk"}
+                keywords = [k for k in re.findall(r"[A-Za-z0-9\.\-_]{3,}", clean_q) if k not in stop_words][:4]
                 if keywords:
                     clauses = ["content LIKE ?" for _ in keywords]
-                    sql += f" AND ({' OR '.join(clauses)})"
+                    sql = f"SELECT * FROM user_memories WHERE user_id = ? AND is_enabled = 1 AND ({' OR '.join(clauses)})"
+                    params: List[Any] = [user_id]
                     for kw in keywords:
                         params.append(f"%{kw}%")
+                    sql += " ORDER BY importance DESC, updated_at DESC LIMIT ?"
+                    params.append(max_items)
+                    rows = conn.execute(sql, params).fetchall()
+                    for r in rows:
+                        if r["memory_id"] not in seen_ids and len(results) < max_items:
+                            seen_ids.add(r["memory_id"])
+                            results.append(dict(r))
 
-            sql += " ORDER BY importance DESC, updated_at DESC LIMIT ?"
-            params.append(max_items)
+            # 3. If still under limit and not a targeted search, add top general memories
+            if len(results) < max_items and (not clean_q or is_identity_query):
+                remaining = max_items - len(results)
+                general_rows = conn.execute(
+                    """
+                    SELECT * FROM user_memories
+                    WHERE user_id = ? AND is_enabled = 1
+                    ORDER BY importance DESC, updated_at DESC LIMIT ?
+                    """,
+                    (user_id, remaining + len(seen_ids)),
+                ).fetchall()
+                for r in general_rows:
+                    if r["memory_id"] not in seen_ids and len(results) < max_items:
+                        seen_ids.add(r["memory_id"])
+                        results.append(dict(r))
 
-            rows = conn.execute(sql, params).fetchall()
-            return [dict(r) for r in rows]
+            return results
 
     retrieve_relevant_memory = retrieve_context_memories
 
@@ -562,25 +629,54 @@ class UserMemoryService:
 
         text = user_input.strip()
         saved_items = []
+        STOP_WORDS = r"\s*\b(tapi|namun|orang|orang-orang|orng|biasanya|biasa|aku|kamu|pingin|ingin|mau|dan|ya|tolong|saja|aja|dong|deh|bisa|atau|yang|untuk|soalnya|karena|tetapi)\b.*"
 
         # 1. Identity & Preferred Name Patterns
-        # e.g., "Nama saya Mohamad Lingga Syahputra", "Namaku Lingga", "Panggil aku Master", "Panggil saya Pak Lingga"
-        name_match = re.search(r"(?:nama\s+saya|namaku|nama\s+ku)\s+(?:adalah\s+)?([A-Za-z0-9\s]{2,40})", text, re.IGNORECASE)
-        pref_match = re.search(r"panggil\s+(?:aku|saya)\s+([A-Za-z0-9\s]{2,30})", text, re.IGNORECASE)
+        # e.g., "Nama saya Mohamad Lingga Syahputra", "Namaku Lingga", "Panggil aku Master Lingga", "Panggil saya Pak Lingga"
+        name_match = re.search(
+            r"(?:nama\s+lengkap\s+saya|nama\s+lengkapku|nama\s+saya|namaku|nama\s+ku)\s+(?:adalah\s+)?((?:[A-Za-z0-9]{2,20}\s*){1,4})",
+            text, re.IGNORECASE
+        )
+        pref_matches = list(re.finditer(
+            r"(?:nama\s+panggilan\s+saya|nama\s+panggilanku|panggilan\s+saya|panggilanku|panggil\s+(?:aku|saya))\s+(?:adalah\s+)?((?:[A-Za-z0-9]{2,20}\s*){1,3})",
+            text, re.IGNORECASE
+        ))
 
         identity_updates = {}
         if name_match:
             raw_name = name_match.group(1).split(".")[0].split(",")[0].strip()
-            # Clean common trailing words
-            raw_name = re.sub(r"\s*\b(dan|ya|tolong|panggil|bisa)\b.*", "", raw_name, flags=re.IGNORECASE).strip()
-            if len(raw_name) >= 2:
-                identity_updates["full_name"] = raw_name
+            raw_name = re.sub(STOP_WORDS, "", raw_name, flags=re.IGNORECASE).strip()
+            words = raw_name.split()
+            if 1 <= len(words) <= 5 and len(raw_name) >= 2:
+                clean_full = " ".join(words)
+                identity_updates["full_name"] = clean_full
+                saved_full = self.save_memory(
+                    user_id=user_id,
+                    category="profile",
+                    content=f"Nama lengkap: {clean_full}",
+                    source="AUTO_EXTRACTED",
+                    importance=0.9,
+                    metadata={"key": "full_name"},
+                )
+                saved_items.append(saved_full)
 
-        if pref_match:
-            raw_pref = pref_match.group(1).split(".")[0].split(",")[0].strip()
-            raw_pref = re.sub(r"\s*\b(dan|ya|tolong|saja|aja|dong|deh)\b.*", "", raw_pref, flags=re.IGNORECASE).strip()
-            if len(raw_pref) >= 2:
-                identity_updates["preferred_name"] = raw_pref
+        if pref_matches:
+            last_pref = pref_matches[-1]
+            raw_pref = last_pref.group(1).split(".")[0].split(",")[0].strip()
+            raw_pref = re.sub(STOP_WORDS, "", raw_pref, flags=re.IGNORECASE).strip()
+            words = raw_pref.split()
+            if 1 <= len(words) <= 3 and len(raw_pref) >= 2:
+                clean_pref = " ".join(words)
+                identity_updates["preferred_name"] = clean_pref
+                saved_pref = self.save_memory(
+                    user_id=user_id,
+                    category="profile",
+                    content=f"Nama panggilan: {clean_pref}",
+                    source="AUTO_EXTRACTED",
+                    importance=0.95,
+                    metadata={"key": "preferred_name"},
+                )
+                saved_items.append(saved_pref)
 
         # 2. Communication & Style Preferences
         # e.g., "Saya lebih suka penjelasan step by step", "Gunakan bahasa santai tapi teknis"
@@ -606,7 +702,8 @@ class UserMemoryService:
             text, re.IGNORECASE
         )
         if tech_match:
-            tech_val = tech_match.group(1).split(".")[0].strip()
+            tech_val = tech_match.group(1).split(".")[0].split(",")[0].strip()
+            tech_val = re.sub(STOP_WORDS, "", tech_val, flags=re.IGNORECASE).strip()
             if len(tech_val) >= 3:
                 content = f"Lingkungan jaringan pengguna menggunakan {tech_val}."
                 saved = self.save_memory(
@@ -614,7 +711,8 @@ class UserMemoryService:
                     category="technical",
                     content=content,
                     source="AUTO_EXTRACTED",
-                    importance=0.7,
+                    importance=0.75,
+                    metadata={"key": "network_environment"},
                 )
                 saved_items.append(saved)
 

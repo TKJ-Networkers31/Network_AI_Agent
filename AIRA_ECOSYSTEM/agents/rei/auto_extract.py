@@ -4,13 +4,16 @@ agents/rei/auto_extract.py — ekstraksi memori otomatis di background.
 Mendukung:
 - Ekstraksi memori akun global terisolasi per user (UserMemoryService)
 - Ekstraksi kandidat identitas pengguna (nama, panggilan, preferensi komunikasi)
+- Parser JSON tangguh (resilient JSON parsing) dengan pemulihan otomatis
+- Prompt ekstraksi selektif & peka hanya untuk informasi berharga jangka panjang
 - Fallback unisolated legacy memory (remember_fact) untuk mode CLI / unauthenticated
 """
 
 import json
-import threading
 import logging
-from typing import Optional
+import re
+import threading
+from typing import Any, Dict, List, Optional
 
 from agents.rei.provider_client import call_model, EMPTY_RESPONSE_MARKER
 from core.memory import remember_fact
@@ -18,24 +21,99 @@ from core.memory import remember_fact
 logger = logging.getLogger("aira.rei.auto_extract")
 
 EXTRACTION_PROMPT = """
-Kamu adalah modul ekstraksi memori untuk AIRA.
+Kamu adalah modul ekstraksi memori jangka panjang cerdas dan selektif untuk AIRA OS.
 
-Tugasmu HANYA membaca satu potongan percakapan (user + jawaban
-assistant) dan memutuskan apakah ada fakta yang layak diingat
-lintas sesi, TANPA user perlu memintanya secara eksplisit.
+Tugasmu: Analisis percakapan (User + Jawaban Assistant) dan putuskan fakta apa yang BERNILAI TINGGI dan RELEVAN untuk diingat lintas sesi tanpa diminta secara eksplisit.
 
-Fakta yang layak diingat: nama panggilan, preferensi gaya jawab,
-threshold monitoring, konfigurasi/standar perangkat, instruksi
-standing, info personal relevan tentang user/project-nya.
+PRINSIP KEPEKAAN DATA (SANGAT KETAT & SELEKTIF):
+1. SIMPAN HANYA FAKTA PENTING JANGKA PANJANG (High-Value Facts):
+   - Identitas & Sapaan: Nama lengkap, nama panggilan/sapaan akrab, peran/profesi pengguna.
+   - Preferensi Kerja & Standar Teknis: Format jawaban yang disukai (step-by-step, to the point), versi OS jaringan (RouterOS v7, Cisco IOS-XE), kewajiban rollback plan, konvensi penamaan interface/VLAN.
+   - Topologi & Infrastruktur Jaringan: Model router/switch utama (CCR2004, CRS326), nomor AS (ASN BGP), subnet kritis, alokasi IP gateway/DNS/NMS, segmen VLAN kantor/datacenter.
+   - Proyek & Batasan Operasional: Proyek aktif, larangan maintenance window pada jam kerja, penugasan teknis.
 
-Fakta yang TIDAK layak diingat: basa-basi/sapaan, data observasi
-sesaat (hasil ping/resource SAAT INI), pertanyaan umum tanpa
-preferensi/instruksi baru.
+2. JANGAN PERNAH SIMPAN HAL REMEH / SESAMBINGAN (Zero Junk / Ephemeral):
+   - JANGAN simpan basa-basi, salam, atau ekspresi santai ("halo", "selamat pagi", "lagi santai", "terima kasih", "ok mantap").
+   - JANGAN simpan metrik atau observasi sesaat (hasil ping sekarang, CPU load saat ini, status link detik ini).
+   - JANGAN simpan pertanyaan umum/edukasi tanpa fakta spesifik ("apa itu BGP?", "jelaskan cara kerja OSPF").
+   - JANGAN simpan jawaban panjang assistant sebagai fakta pengguna.
 
-Balas HANYA JSON array valid, tanpa teks lain, tanpa markdown code
-fence. Format tiap item: {"category": "profile|preferences|technical|project|facts|workflows", "key": "slug_singkat", "value": "isi fakta"}
-Kalau tidak ada yang layak disimpan, balas persis: []
+3. KATEGORI YANG VALID:
+   - "profile": identitas, nama lengkap, panggilan, peran.
+   - "preferences": preferensi teknis, format jawaban, standar kerja.
+   - "technical": arsitektur jaringan, versi OS perangkat, model router, ASN, VLAN.
+   - "project": nama proyek, batasan arsitektur, deadline/window.
+   - "facts": IP penting, domain, kredensial peran non-rahasia.
+
+Format Keluaran:
+Balas HANYA JSON array valid tanpa teks pengantar dan tanpa markdown code fence. Jika tidak ada fakta penting baru, balas persis: []
+Format tiap elemen:
+[
+  {
+    "category": "profile|preferences|technical|project|facts",
+    "key": "slug_singkat",
+    "value": "ringkasan fakta padat dan jelas",
+    "importance": 0.8
+  }
+]
 """
+
+
+def _parse_extracted_json(content: str) -> List[Dict[str, Any]]:
+    """
+    Robust JSON extractor for LLM responses.
+    Handles markdown code blocks, trailing/leading malformed braces, and recovers individual objects.
+    """
+    if not content or not content.strip():
+        return []
+
+    text = content.strip()
+
+    # 1. Strip markdown fences if present
+    if "```" in text:
+        m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE)
+        if m:
+            text = m.group(1).strip()
+        else:
+            text = text.replace("```json", "").replace("```", "").strip()
+
+    # 2. Fast path: standard json.loads
+    try:
+        data = json.loads(text)
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+        if isinstance(data, dict):
+            for k in ("memories", "facts", "items", "data"):
+                if isinstance(data.get(k), list):
+                    return [d for d in data[k] if isinstance(d, dict)]
+            if "key" in data or "value" in data:
+                return [data]
+    except json.JSONDecodeError:
+        pass
+
+    # 3. Clean trailing or malformed braces like `[ ... ]}`
+    bracket_match = re.search(r"\[([\s\S]*)\]", text)
+    if bracket_match:
+        candidate = bracket_match.group(0).strip()
+        candidate = re.sub(r"[}\]\s]+$", "]", candidate)
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, list):
+                return [d for d in data if isinstance(d, dict)]
+        except json.JSONDecodeError:
+            pass
+
+    # 4. Fallback: regex search for individual JSON objects
+    results = []
+    for obj_match in re.finditer(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text):
+        try:
+            obj = json.loads(obj_match.group(0))
+            if isinstance(obj, dict) and ("key" in obj or "value" in obj or "category" in obj):
+                results.append(obj)
+        except Exception:
+            continue
+
+    return results
 
 
 def _extract(user_input: str, assistant_answer: str, user_id: Optional[str] = None):
@@ -43,7 +121,7 @@ def _extract(user_input: str, assistant_answer: str, user_id: Optional[str] = No
         logger.debug("auto_memory: dilewati, assistant_answer adalah EMPTY_RESPONSE_MARKER.")
         return []
 
-    # 1. First run rule-based candidates extraction if user_id is provided
+    # 1. First run rule-based candidate extraction if user_id is provided
     if user_id:
         try:
             from core.tenant.memory_service import get_memory_service
@@ -67,24 +145,12 @@ def _extract(user_input: str, assistant_answer: str, user_id: Optional[str] = No
         return []
 
     content = response.get("message", {}).get("content", "")
-
     if not content or content.strip() == EMPTY_RESPONSE_MARKER:
         return []
 
-    content = content.strip()
-    if content.startswith("```"):
-        content = content.strip("`")
-        if content.lower().startswith("json"):
-            content = content[4:]
-        content = content.strip()
-
-    try:
-        facts = json.loads(content)
-    except json.JSONDecodeError:
-        logger.error("auto_memory gagal parse JSON: %r", content)
-        return []
-
-    if not isinstance(facts, list):
+    facts = _parse_extracted_json(content)
+    if not facts:
+        logger.debug("auto_memory: tidak ada fakta penting diekstrak dari respon LLM.")
         return []
 
     saved = []
@@ -94,8 +160,13 @@ def _extract(user_input: str, assistant_answer: str, user_id: Optional[str] = No
         key = fact.get("key")
         value = fact.get("value")
         category = fact.get("category", "general")
+        importance = float(fact.get("importance", 0.75))
+
         if not key or not value:
             continue
+
+        clean_key = str(key).strip().replace(" ", "_")
+        clean_val = str(value).strip()
 
         if user_id:
             try:
@@ -104,16 +175,17 @@ def _extract(user_input: str, assistant_answer: str, user_id: Optional[str] = No
                 mem_svc.save_memory(
                     user_id=user_id,
                     category=category,
-                    content=f"{key}: {value}",
+                    content=f"{clean_key}: {clean_val}",
                     source="AUTO_EXTRACTED",
-                    importance=0.7,
+                    importance=importance,
+                    metadata={"key": clean_key},
                 )
-                saved.append(key)
+                saved.append(clean_key)
             except Exception as e:
                 logger.warning(f"auto_memory: error saving user memory: {e}")
         else:
-            remember_fact(key, value)
-            saved.append(key)
+            remember_fact(clean_key, clean_val)
+            saved.append(clean_key)
 
     if saved:
         logger.info("AUTO MEMORY tersimpan otomatis: %s", saved)
