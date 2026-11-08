@@ -59,6 +59,8 @@ class DynamicHealthScoringEngine:
         device_id: str,
         site_id: Optional[str] = None,
         now: Optional[float] = None,
+        persist: bool = True,
+        collector: Optional[List[OperationalHealthScoreRecord]] = None,
     ) -> OperationalHealthScoreRecord:
         """Evaluates health of a specific device."""
         now_ts = float(now) if now is not None else time.time()
@@ -73,7 +75,7 @@ class DynamicHealthScoringEngine:
             ).fetchone()
 
             if not dev_row:
-                return OperationalHealthScoreRecord(
+                record = OperationalHealthScoreRecord(
                     score_id=score_id,
                     tenant_id=tenant_id,
                     site_id=site_id,
@@ -86,6 +88,7 @@ class DynamicHealthScoringEngine:
                     missing_dimensions=["inventory", "telemetry"],
                     calculated_at=now_iso,
                 )
+                return self._handle_record_persistence(record, persist, collector)
 
             effective_site_id = site_id or dev_row["site_id"]
             dev_status = str(dev_row["status"]).upper()
@@ -104,7 +107,7 @@ class DynamicHealthScoringEngine:
 
         # If device marked OFFLINE or UNREACHABLE
         if dev_status in ("OFFLINE", "UNREACHABLE", "DOWN"):
-            return OperationalHealthScoreRecord(
+            record = OperationalHealthScoreRecord(
                 score_id=score_id,
                 tenant_id=tenant_id,
                 site_id=effective_site_id,
@@ -117,9 +120,10 @@ class DynamicHealthScoringEngine:
                 missing_dimensions=[],
                 calculated_at=now_iso,
             )
+            return self._handle_record_persistence(record, persist, collector)
 
         if not metric_rows:
-            return OperationalHealthScoreRecord(
+            record = OperationalHealthScoreRecord(
                 score_id=score_id,
                 tenant_id=tenant_id,
                 site_id=effective_site_id,
@@ -132,6 +136,7 @@ class DynamicHealthScoringEngine:
                 missing_dimensions=["cpu", "memory", "utilization"],
                 calculated_at=now_iso,
             )
+            return self._handle_record_persistence(record, persist, collector)
 
         # Evaluate metrics
         cpu_vals = [r["metric_value"] for r in metric_rows if r["metric_name"] in ("cpu_load", "cpu_utilization")]
@@ -170,7 +175,7 @@ class DynamicHealthScoringEngine:
             missing.append("memory")
 
         if not score_components:
-            return OperationalHealthScoreRecord(
+            record = OperationalHealthScoreRecord(
                 score_id=score_id,
                 tenant_id=tenant_id,
                 site_id=effective_site_id,
@@ -183,6 +188,7 @@ class DynamicHealthScoringEngine:
                 missing_dimensions=missing,
                 calculated_at=now_iso,
             )
+            return self._handle_record_persistence(record, persist, collector)
 
         final_score = sum(score_components) / len(score_components)
         if final_score >= 90.0:
@@ -209,8 +215,7 @@ class DynamicHealthScoringEngine:
             missing_dimensions=missing,
             calculated_at=now_iso,
         )
-        self._persist_score(record)
-        return record
+        return self._handle_record_persistence(record, persist, collector)
 
     # -----------------------------------------------------------------------
     # 2. Gateway Health Scoring
@@ -220,6 +225,8 @@ class DynamicHealthScoringEngine:
         tenant_id: str,
         gateway_id: str,
         now: Optional[float] = None,
+        persist: bool = True,
+        collector: Optional[List[OperationalHealthScoreRecord]] = None,
     ) -> OperationalHealthScoreRecord:
         """Evaluates health of a customer edge gateway."""
         now_ts = float(now) if now is not None else time.time()
@@ -233,7 +240,7 @@ class DynamicHealthScoringEngine:
             ).fetchone()
 
             if not gw_row:
-                return OperationalHealthScoreRecord(
+                record = OperationalHealthScoreRecord(
                     score_id=score_id,
                     tenant_id=tenant_id,
                     site_id=None,
@@ -246,6 +253,7 @@ class DynamicHealthScoringEngine:
                     missing_dimensions=["registration"],
                     calculated_at=now_iso,
                 )
+                return self._handle_record_persistence(record, persist, collector)
 
             site_id = gw_row["site_id"]
             gw_status = gw_row["status"]
@@ -275,8 +283,7 @@ class DynamicHealthScoringEngine:
                 missing_dimensions=[],
                 calculated_at=now_iso,
             )
-            self._persist_score(record)
-            return record
+            return self._handle_record_persistence(record, persist, collector)
 
         if not hb_row:
             record = OperationalHealthScoreRecord(
@@ -292,8 +299,7 @@ class DynamicHealthScoringEngine:
                 missing_dimensions=["heartbeat"],
                 calculated_at=now_iso,
             )
-            self._persist_score(record)
-            return record
+            return self._handle_record_persistence(record, persist, collector)
 
         q_depth = hb_row["queue_depth"]
         col_status = hb_row["collector_status"]
@@ -335,8 +341,7 @@ class DynamicHealthScoringEngine:
             missing_dimensions=[],
             calculated_at=now_iso,
         )
-        self._persist_score(record)
-        return record
+        return self._handle_record_persistence(record, persist, collector)
 
     # -----------------------------------------------------------------------
     # 3. Service Health Scoring
@@ -346,6 +351,8 @@ class DynamicHealthScoringEngine:
         tenant_id: str,
         service_id: str,
         now: Optional[float] = None,
+        persist: bool = True,
+        collector: Optional[List[OperationalHealthScoreRecord]] = None,
     ) -> OperationalHealthScoreRecord:
         """Evaluates health of a business service and its endpoints."""
         now_ts = float(now) if now is not None else time.time()
@@ -359,7 +366,7 @@ class DynamicHealthScoringEngine:
             ).fetchone()
 
             if not svc_row:
-                return OperationalHealthScoreRecord(
+                record = OperationalHealthScoreRecord(
                     score_id=score_id,
                     tenant_id=tenant_id,
                     site_id=None,
@@ -372,6 +379,7 @@ class DynamicHealthScoringEngine:
                     missing_dimensions=["catalog"],
                     calculated_at=now_iso,
                 )
+                return self._handle_record_persistence(record, persist, collector)
 
             ep_rows = conn.execute(
                 "SELECT endpoint_id, endpoint_type, endpoint_value, target_device_id, is_primary FROM operational_service_endpoints WHERE service_id = ?",
@@ -413,8 +421,7 @@ class DynamicHealthScoringEngine:
             missing_dimensions=[] if score is not None else ["telemetry"],
             calculated_at=now_iso,
         )
-        self._persist_score(record)
-        return record
+        return self._handle_record_persistence(record, persist, collector)
 
     # -----------------------------------------------------------------------
     # 4. Site Health Scoring
@@ -424,6 +431,8 @@ class DynamicHealthScoringEngine:
         tenant_id: str,
         site_id: str,
         now: Optional[float] = None,
+        persist: bool = True,
+        collector: Optional[List[OperationalHealthScoreRecord]] = None,
     ) -> OperationalHealthScoreRecord:
         """Aggregates device, interface, and gateway health for a single customer site."""
         now_ts = float(now) if now is not None else time.time()
@@ -437,7 +446,7 @@ class DynamicHealthScoringEngine:
             ).fetchone()
 
             if not site_row:
-                return OperationalHealthScoreRecord(
+                record = OperationalHealthScoreRecord(
                     score_id=score_id,
                     tenant_id=tenant_id,
                     site_id=site_id,
@@ -450,6 +459,7 @@ class DynamicHealthScoringEngine:
                     missing_dimensions=["inventory"],
                     calculated_at=now_iso,
                 )
+                return self._handle_record_persistence(record, persist, collector)
 
             dev_rows = conn.execute(
                 "SELECT device_id FROM operational_devices WHERE tenant_id = ? AND site_id = ?",
@@ -462,7 +472,7 @@ class DynamicHealthScoringEngine:
             ).fetchall()
 
         if not dev_rows and not gw_rows:
-            return OperationalHealthScoreRecord(
+            record = OperationalHealthScoreRecord(
                 score_id=score_id,
                 tenant_id=tenant_id,
                 site_id=site_id,
@@ -475,6 +485,7 @@ class DynamicHealthScoringEngine:
                 missing_dimensions=["devices", "gateways"],
                 calculated_at=now_iso,
             )
+            return self._handle_record_persistence(record, persist, collector)
 
         child_scores: List[float] = []
         critical_count = 0
@@ -483,7 +494,7 @@ class DynamicHealthScoringEngine:
 
         # Evaluate gateways
         for gw in gw_rows:
-            g_rec = self.score_gateway(tenant_id, gw["gateway_id"], now=now_ts)
+            g_rec = self.score_gateway(tenant_id, gw["gateway_id"], now=now_ts, persist=persist, collector=collector)
             if g_rec.score is not None:
                 child_scores.append(g_rec.score)
             if g_rec.state == HealthScoreState.CRITICAL.value:
@@ -492,7 +503,7 @@ class DynamicHealthScoringEngine:
 
         # Evaluate devices
         for dev in dev_rows:
-            d_rec = self.score_device(tenant_id, dev["device_id"], site_id=site_id, now=now_ts)
+            d_rec = self.score_device(tenant_id, dev["device_id"], site_id=site_id, now=now_ts, persist=persist, collector=collector)
             if d_rec.score is not None:
                 child_scores.append(d_rec.score)
             if d_rec.state == HealthScoreState.CRITICAL.value:
@@ -502,7 +513,7 @@ class DynamicHealthScoringEngine:
                 warning_count += 1
 
         if not child_scores:
-            return OperationalHealthScoreRecord(
+            record = OperationalHealthScoreRecord(
                 score_id=score_id,
                 tenant_id=tenant_id,
                 site_id=site_id,
@@ -515,6 +526,7 @@ class DynamicHealthScoringEngine:
                 missing_dimensions=["telemetry"],
                 calculated_at=now_iso,
             )
+            return self._handle_record_persistence(record, persist, collector)
 
         avg_score = sum(child_scores) / len(child_scores)
 
@@ -546,8 +558,7 @@ class DynamicHealthScoringEngine:
             missing_dimensions=[],
             calculated_at=now_iso,
         )
-        self._persist_score(record)
-        return record
+        return self._handle_record_persistence(record, persist, collector)
 
     # -----------------------------------------------------------------------
     # 5. Tenant Operational Health Scoring
@@ -556,6 +567,7 @@ class DynamicHealthScoringEngine:
         self,
         tenant_id: str,
         now: Optional[float] = None,
+        persist: bool = True,
     ) -> OperationalHealthScoreRecord:
         """
         Computes overall tenant operational health.
@@ -573,7 +585,7 @@ class DynamicHealthScoringEngine:
             ).fetchone()
 
             if not t_row:
-                return OperationalHealthScoreRecord(
+                record = OperationalHealthScoreRecord(
                     score_id=score_id,
                     tenant_id=tenant_id,
                     site_id=None,
@@ -586,9 +598,10 @@ class DynamicHealthScoringEngine:
                     missing_dimensions=["tenant"],
                     calculated_at=now_iso,
                 )
+                return self._handle_record_persistence(record, persist, None)
 
             if t_row["status"] == "SUSPENDED":
-                return OperationalHealthScoreRecord(
+                record = OperationalHealthScoreRecord(
                     score_id=score_id,
                     tenant_id=tenant_id,
                     site_id=None,
@@ -601,6 +614,7 @@ class DynamicHealthScoringEngine:
                     missing_dimensions=[],
                     calculated_at=now_iso,
                 )
+                return self._handle_record_persistence(record, persist, None)
 
             site_rows = conn.execute(
                 "SELECT site_id FROM operational_sites WHERE tenant_id = ?",
@@ -615,10 +629,11 @@ class DynamicHealthScoringEngine:
         tier1_critical = False
         contributing = []
         service_scores: List[float] = []
+        collector: List[OperationalHealthScoreRecord] = []
 
         # 1. Evaluate services
         for s in svc_rows:
-            s_rec = self.score_service(tenant_id, s["service_id"], now=now_ts)
+            s_rec = self.score_service(tenant_id, s["service_id"], now=now_ts, persist=False, collector=collector)
             if s_rec.score is not None:
                 service_scores.append(s_rec.score)
             if s["criticality"] == ServiceCriticality.TIER_1_MISSION_CRITICAL.value and s_rec.state == HealthScoreState.CRITICAL.value:
@@ -628,7 +643,7 @@ class DynamicHealthScoringEngine:
         # 2. Evaluate sites
         site_scores: List[float] = []
         for site in site_rows:
-            st_rec = self.score_site(tenant_id, site["site_id"], now=now_ts)
+            st_rec = self.score_site(tenant_id, site["site_id"], now=now_ts, persist=False, collector=collector)
             if st_rec.score is not None:
                 site_scores.append(st_rec.score)
             if st_rec.state == HealthScoreState.CRITICAL.value:
@@ -636,7 +651,7 @@ class DynamicHealthScoringEngine:
 
         all_scores = service_scores + site_scores
         if not all_scores:
-            return OperationalHealthScoreRecord(
+            record = OperationalHealthScoreRecord(
                 score_id=score_id,
                 tenant_id=tenant_id,
                 site_id=None,
@@ -649,6 +664,10 @@ class DynamicHealthScoringEngine:
                 missing_dimensions=["sites", "services"],
                 calculated_at=now_iso,
             )
+            collector.append(record)
+            if persist:
+                self._persist_scores(collector)
+            return record
 
         avg_score = sum(all_scores) / len(all_scores)
 
@@ -680,13 +699,45 @@ class DynamicHealthScoringEngine:
             missing_dimensions=[],
             calculated_at=now_iso,
         )
-        self._persist_score(record)
+        collector.append(record)
+        if persist:
+            self._persist_scores(collector)
         return record
 
-    def _persist_score(self, record: OperationalHealthScoreRecord) -> None:
-        """Persists health score into operational_health_scores."""
+    def _handle_record_persistence(
+        self,
+        record: OperationalHealthScoreRecord,
+        persist: bool,
+        collector: Optional[List[OperationalHealthScoreRecord]],
+    ) -> OperationalHealthScoreRecord:
+        if collector is not None:
+            collector.append(record)
+        if persist and collector is None:
+            self._persist_score(record)
+        return record
+
+    def _persist_scores(self, records: List[OperationalHealthScoreRecord]) -> None:
+        """Persists multiple health scores into operational_health_scores in a single atomic transaction."""
+        if not records:
+            return
+        params = [
+            (
+                r.score_id,
+                r.tenant_id,
+                r.site_id,
+                r.dimension,
+                r.entity_id,
+                r.state,
+                r.score,
+                r.confidence,
+                json.dumps(r.contributing_factors),
+                json.dumps(r.missing_dimensions),
+                r.calculated_at,
+            )
+            for r in records
+        ]
         with topology_transaction(self.db_path, write=True) as conn:
-            conn.execute(
+            conn.executemany(
                 """
                 INSERT OR REPLACE INTO operational_health_scores (
                     score_id, tenant_id, site_id, dimension, entity_id,
@@ -694,17 +745,9 @@ class DynamicHealthScoringEngine:
                     missing_dimensions_json, calculated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    record.score_id,
-                    record.tenant_id,
-                    record.site_id,
-                    record.dimension,
-                    record.entity_id,
-                    record.state,
-                    record.score,
-                    record.confidence,
-                    json.dumps(record.contributing_factors),
-                    json.dumps(record.missing_dimensions),
-                    record.calculated_at,
-                ),
+                params,
             )
+
+    def _persist_score(self, record: OperationalHealthScoreRecord) -> None:
+        """Persists single health score into operational_health_scores."""
+        self._persist_scores([record])

@@ -504,7 +504,7 @@ def create_network_mcp_server() -> MCPServer:
         res_text = collected.get("resources", "")
         if "cpu-load: 100%" in res_text or "cpu-load: 9" in res_text:
             issues.append("High CPU load detected on router.")
-        if "free-memory: 0" in res_text or "free-memory: [1-9]MiB" in res_text:
+        if "free-memory: 0" in res_text or re.search(r"free-memory:\s*[1-9](\.\d+)?\s*MiB", res_text):
             issues.append("Low free memory detected.")
 
         log_text = collected.get("recent_logs", "")

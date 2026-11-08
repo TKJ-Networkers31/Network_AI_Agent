@@ -124,6 +124,11 @@ def _get_fernet():
 def encrypt_secret(plain: Optional[str]) -> Optional[str]:
     if plain is None:
         return None
+    try:
+        from core.security.encryption import encrypt_secret as _enc
+        return _enc(plain)
+    except Exception:
+        pass
 
     fernet = _get_fernet()
     data = str(plain).encode("utf-8")
@@ -137,6 +142,11 @@ def encrypt_secret(plain: Optional[str]) -> Optional[str]:
 def decrypt_secret(stored: Optional[str]) -> Optional[str]:
     if stored is None:
         return None
+    try:
+        from core.security.encryption import decrypt_secret as _dec
+        return _dec(stored)
+    except Exception:
+        pass
 
     if stored.startswith("b64:"):
         return base64.b64decode(stored[4:]).decode("utf-8")
@@ -252,6 +262,70 @@ def _publish(kind: str, name: str) -> None:
         logger.debug("INVENTORY | gagal publish inventory.changed (diabaikan).", exc_info=True)
 
 
+def _sync_device_to_topology(
+    device_name: str,
+    host: str = "",
+    port: int = 22,
+    device_type: str = "mikrotik",
+    note: str = "",
+    enabled: bool = True,
+    action: str = "upsert",
+) -> None:
+    """Synchronizes device state into topology.db:operational_devices for SSOT unification (REC-11)."""
+    try:
+        from core.topology_db import DEFAULT_TOPOLOGY_DB_PATH, topology_transaction
+        topo_path = Path(DEFAULT_TOPOLOGY_DB_PATH).resolve()
+        if not topo_path.exists():
+            return
+
+        device_id = f"dev_{re.sub(r'[^a-zA-Z0-9_]', '_', device_name.lower())}"
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with topology_transaction(topo_path, write=True) as conn:
+            # Ensure operational_sites exists and has default site
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO operational_sites (site_id, tenant_id, name, slug, created_at)
+                VALUES ('site_default', 'tenant_default', 'Default Site', 'default-site', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                """
+            )
+            if action == "delete":
+                conn.execute(
+                    "DELETE FROM operational_devices WHERE name = ? OR device_id = ?",
+                    (device_name, device_id),
+                )
+            else:
+                dtype = "ROUTER"
+                raw_type = (device_type or "").upper()
+                if raw_type in ("ROUTER", "SWITCH", "FIREWALL", "ACCESS_POINT", "SERVER", "OTHER"):
+                    dtype = raw_type
+                elif "SWITCH" in raw_type:
+                    dtype = "SWITCH"
+                elif "FIREWALL" in raw_type:
+                    dtype = "FIREWALL"
+
+                status = "ACTIVE" if enabled else "INACTIVE"
+                conn.execute(
+                    """
+                    INSERT INTO operational_devices (
+                        device_id, tenant_id, site_id, name, management_ip, management_port,
+                        device_type, vendor, model, os_version, gateway_id, status, credential_ref,
+                        notes, created_at, updated_at
+                    ) VALUES (?, 'tenant_default', 'site_default', ?, ?, ?, ?, 'MikroTik', '', '', NULL, ?, NULL, ?, ?, ?)
+                    ON CONFLICT(device_id) DO UPDATE SET
+                        name=excluded.name,
+                        management_ip=excluded.management_ip,
+                        management_port=excluded.management_port,
+                        device_type=excluded.device_type,
+                        status=excluded.status,
+                        notes=excluded.notes,
+                        updated_at=excluded.updated_at
+                    """,
+                    (device_id, device_name, host, port, dtype, status, note or "", now_iso, now_iso),
+                )
+    except Exception as exc:
+        logger.debug("INVENTORY | Sync device to operational_devices skipped/failed: %s", exc)
+
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS credentials (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -297,6 +371,7 @@ class InventoryStore:
 
         if seed:
             self._seed_from_yaml()
+            self.sync_all_to_topology()
 
     # ------------------------------------------------------------ infra
 
@@ -357,6 +432,27 @@ class InventoryStore:
                 logger.warning("INVENTORY | impor '%s' gagal: %s", name, result.get("error"))
 
         logger.info("INVENTORY | %d device diimpor dari router.yaml.", imported)
+
+    def sync_all_to_topology(self) -> int:
+        """Synchronizes all devices from this inventory into topology.db:operational_devices (SSOT)."""
+        count = 0
+        try:
+            with closing(self._connect()) as conn:
+                rows = conn.execute("SELECT * FROM devices").fetchall()
+                for r in rows:
+                    _sync_device_to_topology(
+                        device_name=r["name"],
+                        host=r["host"],
+                        port=r["port"],
+                        device_type=r["device_type"],
+                        note=r["note"],
+                        enabled=bool(r["enabled"]),
+                        action="upsert",
+                    )
+                    count += 1
+        except Exception as exc:
+            logger.debug("INVENTORY | sync_all_to_topology failed (diabaikan): %s", exc)
+        return count
 
     # ------------------------------------------------------------ helper baca
 
@@ -576,6 +672,15 @@ class InventoryStore:
 
         logger.info("INVENTORY | device dibuat: %s (%s)", clean_name, device["host"])
         _publish("device.created", clean_name)
+        _sync_device_to_topology(
+            clean_name,
+            device["host"],
+            device["port"],
+            device["device_type"],
+            device["note"],
+            device["enabled"],
+            action="upsert",
+        )
 
         return {"success": True, "device": device}
 
@@ -658,6 +763,15 @@ class InventoryStore:
 
         logger.info("INVENTORY | device diubah: %s", device["name"])
         _publish("device.updated", device["name"])
+        _sync_device_to_topology(
+            device["name"],
+            device["host"],
+            device["port"],
+            device["device_type"],
+            device["note"],
+            device["enabled"],
+            action="upsert",
+        )
 
         return {"success": True, "device": device}
 
@@ -670,6 +784,7 @@ class InventoryStore:
 
         logger.info("INVENTORY | device dihapus: %s", row["name"])
         _publish("device.deleted", row["name"])
+        _sync_device_to_topology(row["name"], action="delete")
 
         return {"success": True, "name": row["name"]}
 
@@ -819,10 +934,6 @@ class InventoryStore:
             material = self._ssh_material(self._linked(conn, row["id"]))
 
         password = material["password"]
-
-        # Kompatibilitas lama: device tanpa credential SSH sama sekali -> SSH_PASSWORD dari .env.
-        if not material["has_ssh_credential"] and os.getenv("SSH_PASSWORD") is not None:
-            password = os.getenv("SSH_PASSWORD")
 
         return {
             "success": True, "name": row["name"], "host": row["host"], "port": row["port"],

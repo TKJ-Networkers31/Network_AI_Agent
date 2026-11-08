@@ -15,7 +15,6 @@ from pydantic import BaseModel, Field
 from core.security.rate_limiter import auth_rate_limiter
 from core.tenant.manager import IdentityManager, TenantManager
 from core.tenant.entitlements import EntitlementManager
-from core.tenant.token_quota_service import TokenQuotaService
 from core.tenant.user_subscription import UserSubscriptionService
 from core.tenant.models import TenantContext
 from core.tenant.rbac_service import get_rbac_service
@@ -26,7 +25,6 @@ from core.tenant.auth_deps import _identity_mgr
 _tenant_mgr = TenantManager()
 _entitlement_mgr = EntitlementManager()
 _sub_service = UserSubscriptionService()
-_quota_service = TokenQuotaService()
 
 
 class LoginRequest(BaseModel):
@@ -40,6 +38,11 @@ class ChangePasswordMandatoryRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+class ChangePasswordRequest(BaseModel):
+    new_password: str = Field(..., min_length=6)
+    old_password: Optional[str] = None
+
+
 class MfaVerifyRequest(BaseModel):
     secret: str
     code: str
@@ -50,7 +53,7 @@ def get_current_user_context(authorization: Optional[str] = Header(None)) -> Ten
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Autentikasi wajib. Akses tanpa login ditolak.",
+            detail="Authentication required. Autentikasi wajib. Akses tanpa login ditolak.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     token = authorization.split(" ", 1)[1].strip()
@@ -103,6 +106,11 @@ def login(payload: LoginRequest, request: Request):
         }
 
     if not res.get("success"):
+        if res.get("locked"):
+            raise HTTPException(
+                status_code=status.HTTP_423_LOCKED,
+                detail=res.get("error", "Akun Anda terkunci sementara karena terlalu banyak percobaan gagal."),
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=res.get("error", "Username atau password tidak sesuai."),
@@ -192,6 +200,27 @@ def get_current_user_profile(ctx: TenantContext = Depends(get_current_user_conte
             "permissions": effective_perms,
         },
     }
+
+
+@router.post("/change-password")
+def change_password(payload: ChangePasswordRequest, ctx: TenantContext = Depends(get_current_user_context)):
+    """User-initiated password change from account profile."""
+    try:
+        _identity_mgr.change_user_password(ctx.user_id, payload.new_password, reset_must_change=True)
+        return {"success": True, "message": "Kata sandi berhasil diperbarui."}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/sessions/revoke-others")
+def revoke_other_sessions(authorization: Optional[str] = Header(None), ctx: TenantContext = Depends(get_current_user_context)):
+    """Revokes all active sessions for the user except the current session."""
+    token = authorization.split(" ", 1)[1].strip() if authorization and " " in authorization else None
+    try:
+        count = _identity_mgr.revoke_other_sessions(ctx.user_id, current_token=token)
+        return {"success": True, "revoked_count": count, "message": f"{count} sesi lain berhasil dicabut."}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/change-password-mandatory")

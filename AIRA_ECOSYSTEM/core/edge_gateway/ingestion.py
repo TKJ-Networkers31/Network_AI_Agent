@@ -10,6 +10,8 @@ Provides:
 
 from __future__ import annotations
 
+import calendar
+from datetime import datetime, timezone
 import hashlib
 import json
 import logging
@@ -196,10 +198,17 @@ class GatewayIngestionHub:
         elapsed_sec = None
         if last_seen:
             try:
-                seen_epoch = time.mktime(time.strptime(last_seen, "%Y-%m-%dT%H:%M:%SZ"))
+                seen_epoch = calendar.timegm(time.strptime(last_seen, "%Y-%m-%dT%H:%M:%SZ"))
                 elapsed_sec = max(0.0, now_epoch - seen_epoch)
             except Exception:
-                pass
+                try:
+                    clean_seen = last_seen.replace("+00:00", "Z")
+                    if clean_seen.endswith("Z"):
+                        clean_seen = clean_seen[:-1]
+                    seen_dt = datetime.fromisoformat(clean_seen).replace(tzinfo=timezone.utc)
+                    elapsed_sec = max(0.0, datetime.now(timezone.utc).timestamp() - seen_dt.timestamp())
+                except Exception:
+                    pass
 
         status = GatewayHealthStatus.OFFLINE.value
         if elapsed_sec is not None and elapsed_sec <= HEARTBEAT_TIMEOUT_SEC:
@@ -295,19 +304,95 @@ class GatewayIngestionHub:
                 # 5. Process Telemetry Payload into NMS Raw Metrics
                 if tel_type == TelemetryType.INTERFACE_METRICS.value:
                     if target_dev_id and "interface_name" in payload:
+                        if "rx_utilization" in payload:
+                            conn.execute(
+                                """
+                                INSERT INTO nms_raw_metrics
+                                (device_id, interface_name, metric_name, metric_value, unit, semantic_type, source_protocol, quality, measured_at, collected_at)
+                                VALUES (?, ?, 'rx_utilization', ?, '%', 'COUNTER_RATE', 'EDGE_GATEWAY', 'RELIABLE', ?, ?)
+                                """,
+                                (
+                                    target_dev_id,
+                                    str(payload["interface_name"]),
+                                    float(payload.get("rx_utilization", 0.0)),
+                                    now_epoch,
+                                    now_epoch,
+                                ),
+                            )
+                        if "tx_utilization" in payload:
+                            conn.execute(
+                                """
+                                INSERT INTO nms_raw_metrics
+                                (device_id, interface_name, metric_name, metric_value, unit, semantic_type, source_protocol, quality, measured_at, collected_at)
+                                VALUES (?, ?, 'tx_utilization', ?, '%', 'COUNTER_RATE', 'EDGE_GATEWAY', 'RELIABLE', ?, ?)
+                                """,
+                                (
+                                    target_dev_id,
+                                    str(payload["interface_name"]),
+                                    float(payload.get("tx_utilization", 0.0)),
+                                    now_epoch,
+                                    now_epoch,
+                                ),
+                            )
+                elif tel_type == TelemetryType.DEVICE_HEALTH.value:
+                    if target_dev_id:
+                        for m_key, m_unit in [("cpu_utilization", "%"), ("memory_utilization", "%"), ("temperature", "C")]:
+                            if m_key in payload:
+                                conn.execute(
+                                    """
+                                    INSERT INTO nms_raw_metrics
+                                    (device_id, interface_name, metric_name, metric_value, unit, semantic_type, source_protocol, quality, measured_at, collected_at)
+                                    VALUES (?, 'system', ?, ?, ?, 'GAUGE', 'EDGE_GATEWAY', 'RELIABLE', ?, ?)
+                                    """,
+                                    (
+                                        target_dev_id,
+                                        m_key,
+                                        float(payload[m_key]),
+                                        m_unit,
+                                        now_epoch,
+                                        now_epoch,
+                                    ),
+                                )
+                elif tel_type == TelemetryType.DIAGNOSTIC_PING.value:
+                    if target_dev_id:
+                        for p_key, p_unit in [("rtt_ms", "ms"), ("duration_ms", "ms"), ("latency_ms", "ms"), ("packet_loss", "%")]:
+                            if p_key in payload:
+                                conn.execute(
+                                    """
+                                    INSERT INTO nms_raw_metrics
+                                    (device_id, interface_name, metric_name, metric_value, unit, semantic_type, source_protocol, quality, measured_at, collected_at)
+                                    VALUES (?, 'diagnostic', ?, ?, ?, 'GAUGE', 'EDGE_GATEWAY', 'RELIABLE', ?, ?)
+                                    """,
+                                    (
+                                        target_dev_id,
+                                        p_key,
+                                        float(payload[p_key]),
+                                        p_unit,
+                                        now_epoch,
+                                        now_epoch,
+                                    ),
+                                )
+                elif tel_type == TelemetryType.TOPOLOGY_NEIGHBORS.value:
+                    if target_dev_id:
+                        n_count = len(payload.get("neighbors", []))
                         conn.execute(
                             """
                             INSERT INTO nms_raw_metrics
                             (device_id, interface_name, metric_name, metric_value, unit, semantic_type, source_protocol, quality, measured_at, collected_at)
-                            VALUES (?, ?, 'rx_utilization', ?, '%', 'COUNTER_RATE', 'EDGE_GATEWAY', 'RELIABLE', ?, ?)
+                            VALUES (?, 'topology', 'neighbor_count', ?, 'count', 'GAUGE', 'EDGE_GATEWAY', 'RELIABLE', ?, ?)
                             """,
-                            (
-                                target_dev_id,
-                                str(payload["interface_name"]),
-                                float(payload.get("rx_utilization", 0.0)),
-                                now_epoch,
-                                now_epoch,
-                            ),
+                            (target_dev_id, float(n_count), now_epoch, now_epoch),
+                        )
+                elif tel_type == TelemetryType.ROUTE_TABLE_SAMPLE.value:
+                    if target_dev_id:
+                        r_count = len(payload.get("routes", []))
+                        conn.execute(
+                            """
+                            INSERT INTO nms_raw_metrics
+                            (device_id, interface_name, metric_name, metric_value, unit, semantic_type, source_protocol, quality, measured_at, collected_at)
+                            VALUES (?, 'routing', 'route_count', ?, 'count', 'GAUGE', 'EDGE_GATEWAY', 'RELIABLE', ?, ?)
+                            """,
+                            (target_dev_id, float(r_count), now_epoch, now_epoch),
                         )
 
                 # Update sequence cursor

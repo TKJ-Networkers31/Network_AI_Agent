@@ -22,14 +22,24 @@ class VisionResult:
     provider: Optional[str] = None
     reason: Optional[str] = None
     text: Optional[str] = None
+    analysis: Optional[Dict[str, Any]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        if not self.text and isinstance(self.analysis, dict):
+            self.text = self.analysis.get("description")
+        elif self.text and not self.analysis:
+            self.analysis = {"description": self.text}
+
     def to_dict(self) -> Dict[str, Any]:
+        resolved_text = self.text or (self.analysis.get("description") if isinstance(self.analysis, dict) else None)
+        resolved_analysis = self.analysis or ({"description": self.text} if self.text else {})
         return {
             "status": self.status,
             "provider": self.provider,
             "reason": self.reason,
-            "text": self.text,
+            "text": resolved_text,
+            "analysis": resolved_analysis,
             "metadata": self.metadata,
         }
 
@@ -90,5 +100,9 @@ class LLMVisionProvider:
             return VisionResult(status=VisionStatus.ERROR.value, provider=model.display_name, reason=err)
 
         text = ((res.get("message") or {}).get("content") or "").strip()
-        return VisionResult(status=VisionStatus.AVAILABLE.value, provider=model.display_name,
-                            analysis={"description": text})
+        return VisionResult(
+            status=VisionStatus.AVAILABLE.value,
+            provider=model.display_name,
+            text=text,
+            analysis={"description": text},
+        )

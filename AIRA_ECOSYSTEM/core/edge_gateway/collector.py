@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import platform
 import re
 import socket
 import subprocess
@@ -100,9 +101,12 @@ class EdgeDiagnosticCollector:
         safe_count = max(1, min(5, count))
         safe_timeout = max(1.0, min(5.0, timeout_sec))
 
-        # Windows ping command: ping -n <count> -w <timeout_ms> <ip>
-        timeout_ms = int(safe_timeout * 1000)
-        args = ["ping", "-n", str(safe_count), "-w", str(timeout_ms), valid_ip]
+        is_windows = platform.system().lower() == "windows"
+        if is_windows:
+            timeout_ms = int(safe_timeout * 1000)
+            args = ["ping", "-n", str(safe_count), "-w", str(timeout_ms), valid_ip]
+        else:
+            args = ["ping", "-c", str(safe_count), "-W", str(max(1, int(safe_timeout))), valid_ip]
 
         start_t = time.perf_counter()
         try:
@@ -115,7 +119,11 @@ class EdgeDiagnosticCollector:
                 check=False,
             )
             duration_ms = (time.perf_counter() - start_t) * 1000.0
-            is_reachable = res.returncode == 0 and "Reply from" in res.stdout
+            if is_windows:
+                is_reachable = res.returncode == 0 and "Reply from" in res.stdout
+            else:
+                out_lower = res.stdout.lower()
+                is_reachable = res.returncode == 0 and ("bytes from" in out_lower or "0% packet loss" in out_lower or "1 packets received" in out_lower)
 
             return {
                 "target_ip": valid_ip,

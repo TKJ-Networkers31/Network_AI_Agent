@@ -22,8 +22,14 @@ from core.scheduler import (
     TriggerType,
     get_automation_engine,
 )
+from core.tenant.auth_deps import get_current_authenticated_user, require_permission
+from core.tenant.models import TenantContext
 
-router = APIRouter(prefix="/api/v1/automations", tags=["automations"])
+router = APIRouter(
+    prefix="/api/v1/automations",
+    tags=["automations"],
+    dependencies=[Depends(get_current_authenticated_user)],
+)
 
 
 class CreateAutomationInput(BaseModel):
@@ -58,7 +64,10 @@ def list_automations(tenant_id: str = Query(default="default")):
 
 
 @router.post("")
-def create_automation(payload: CreateAutomationInput):
+def create_automation(
+    payload: CreateAutomationInput,
+    ctx: TenantContext = Depends(require_permission("automation.create")),
+):
     """Registers a new automation."""
     engine = get_automation_engine()
     try:
@@ -90,7 +99,11 @@ def get_automation(job_id: str):
 
 
 @router.post("/{job_id}/toggle")
-def toggle_automation(job_id: str, payload: ToggleAutomationInput):
+def toggle_automation(
+    job_id: str,
+    payload: ToggleAutomationInput,
+    ctx: TenantContext = Depends(require_permission("automation.update")),
+):
     """Enables or pauses an automation."""
     engine = get_automation_engine()
     job = engine.toggle_automation(job_id, payload.is_enabled)
@@ -100,7 +113,10 @@ def toggle_automation(job_id: str, payload: ToggleAutomationInput):
 
 
 @router.post("/{job_id}/run")
-def run_automation_now(job_id: str):
+def run_automation_now(
+    job_id: str,
+    ctx: TenantContext = Depends(require_permission("automation.execute")),
+):
     """Triggers immediate execution of an automation."""
     engine = get_automation_engine()
     job = engine.get_automation(job_id)
@@ -111,7 +127,10 @@ def run_automation_now(job_id: str):
 
 
 @router.delete("/{job_id}")
-def delete_automation(job_id: str):
+def delete_automation(
+    job_id: str,
+    ctx: TenantContext = Depends(require_permission("automation.update")),
+):
     """Deletes an automation."""
     engine = get_automation_engine()
     ok = engine.delete_automation(job_id)

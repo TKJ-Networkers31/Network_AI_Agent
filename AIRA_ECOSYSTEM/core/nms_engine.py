@@ -44,6 +44,14 @@ from core.topology_parsers import (
     parse_mikrotik_resource,
     parse_mikrotik_routerboard,
 )
+from core.nms.scheduler import DevicePollCoordinator, DevicePollState, HardenedNmsScheduler
+from core.nms.alerts import AlertEngine, AlertSeverity, AlertState
+from core.nms.models import (
+    MetricTaxonomy,
+    TelemetrySample,
+    SampleQuality,
+    MetricSemanticType,
+)
 
 logger = logging.getLogger("aira.nms.engine")
 
@@ -91,7 +99,58 @@ class NmsEngine:
         self._stop_event = asyncio.Event()
         self.last_poll_timestamp: Optional[float] = None
         self.next_poll_timestamp: Optional[float] = None
+
+        # REC-15: Hardened Scheduler Coordinator & AlertEngine integration
+        self._coordinator = DevicePollCoordinator(max_concurrency=16)
+        self._alert_engine = AlertEngine(db_path=self.db_path)
+        self._hardened_scheduler = HardenedNmsScheduler(
+            coordinator=self._coordinator,
+            poll_executor=self._execute_scheduled_poll,
+        )
         self._init_db()
+
+    async def _execute_scheduled_poll(self, device_id: str, state: DevicePollState) -> None:
+        """Adapter executing single device poll from the HardenedNmsScheduler."""
+        settings = self.get_settings()
+        profile = self.get_device_profile(device_id)
+        if not profile or not profile.get("monitoring_enabled", True) or profile.get("is_paused", False):
+            return
+        host = profile.get("ip") or profile.get("host")
+        if not host:
+            return
+        try:
+            await self.poll_single_device(device_id=device_id, host=host, profile=profile, settings=settings)
+            dev_prof = self.get_device_profile(device_id)
+            if dev_prof and dev_prof.get("status") in ("UP", "DEGRADED"):
+                state.record_success()
+            else:
+                state.record_failure()
+        except Exception as exc:
+            logger.error(f"Error polling scheduled device '{device_id}': {exc}")
+            state.record_failure()
+
+    def _sync_scheduler_devices(self) -> None:
+        """Syncs all active monitored inventory devices with the hardened scheduler."""
+        try:
+            with self._lock, closing(self._get_connection()) as conn:
+                rows = conn.execute(
+                    """
+                    SELECT n.id, n.ip, p.monitoring_enabled, p.is_paused, p.management_mode
+                    FROM topology_nodes n
+                    LEFT JOIN nms_device_profiles p ON n.id = p.device_id
+                    WHERE n.ip IS NOT NULL AND TRIM(n.ip) != ''
+                    """
+                ).fetchall()
+                for r in rows:
+                    dev_id = r["id"]
+                    is_enabled = bool(r["monitoring_enabled"] if r["monitoring_enabled"] is not None else 1)
+                    is_paused = bool(r["is_paused"]) if r["is_paused"] is not None else False
+                    if is_enabled and not is_paused:
+                        self._hardened_scheduler.register_device(dev_id, profile_name="standard")
+                    else:
+                        self._hardened_scheduler.unregister_device(dev_id)
+        except Exception as exc:
+            logger.debug(f"Device sync to scheduler skipped: {exc}")
 
     def _get_connection(self) -> sqlite3.Connection:
         return get_topology_connection(self.db_path, timeout=30.0)
@@ -1463,8 +1522,53 @@ class NmsEngine:
                     except sqlite3.OperationalError:
                         pass
 
-            # 7. Incident Handling (Down & Recovery)
+            # 7. Incident Handling & AlertEngine Integration (Hysteresis & Upstream RCA)
             dev_name = resolved_name or profile.get("name") or host
+            try:
+                avail_sample = TelemetrySample(
+                    device_id=device_id,
+                    metric_name=MetricTaxonomy.DEVICE_AVAILABILITY,
+                    metric_value=1.0 if new_status in ("UP", "DEGRADED") else 0.0,
+                    unit="ratio",
+                    semantic_type=MetricSemanticType.GAUGE,
+                    source_protocol=monitoring_method or "icmp_ping",
+                    quality=SampleQuality.GOOD if is_alive else SampleQuality.DEGRADED,
+                    measured_at=now,
+                )
+                alert_action = self._alert_engine.evaluate_sample(avail_sample)
+                if alert_action:
+                    if alert_action.get("action") == "suppressed":
+                        incidents_to_publish.append({
+                            "device_id": device_id,
+                            "device_name": dev_name,
+                            "type": "device_unreachable_downstream",
+                            "status": "suppressed",
+                            "severity": "info",
+                            "timestamp": now,
+                            "parent_incident_id": alert_action.get("parent_incident_id"),
+                        })
+                    elif alert_action.get("action") == "triggered":
+                        incidents_to_publish.append({
+                            "device_id": device_id,
+                            "device_name": dev_name,
+                            "type": "device_down",
+                            "status": "open",
+                            "severity": alert_action.get("severity", "critical").lower(),
+                            "timestamp": now,
+                            "incident_id": alert_action.get("incident_id"),
+                        })
+                    elif alert_action.get("action") == "resolved":
+                        incidents_to_publish.append({
+                            "device_id": device_id,
+                            "device_name": dev_name,
+                            "type": "device_down",
+                            "status": "resolved",
+                            "timestamp": now,
+                            "incident_id": alert_action.get("incident_id"),
+                        })
+            except Exception as exc:
+                logger.debug(f"AlertEngine sample evaluation error: {exc}")
+
             if new_status == "DOWN" and curr_status != "DOWN":
                 self._open_incident_if_not_exists(
                     conn,
@@ -1531,7 +1635,7 @@ class NmsEngine:
                 pass
 
     async def poll_all_devices_cycle(self) -> None:
-        """Menjalankan 1 siklus polling penuh untuk seluruh perangkat yang aktif."""
+        """Menjalankan 1 siklus polling penuh untuk seluruh perangkat yang aktif (REC-15 Bounded Polling)."""
         async with self._async_lock:
             if self._is_polling:
                 logger.warning("Polling cycle sebelumnya masih berjalan — melewati siklus ini (single-flight lock).")
@@ -1540,7 +1644,7 @@ class NmsEngine:
 
         try:
             settings = self.get_settings()
-            max_concurrency = int(settings.get("max_concurrent_polls", 10))
+            max_concurrency = int(settings.get("max_concurrent_polls", 16))
             sem = asyncio.Semaphore(max_concurrency)
 
             # Auto-sync any discovered nodes with IP into nms_device_profiles
@@ -1565,13 +1669,25 @@ class NmsEngine:
                 devices = [dict(r) for r in rows]
 
             async def _bounded_poll(dev: Dict[str, Any]):
-                async with sem:
-                    try:
-                        await self.poll_single_device(
-                            device_id=dev["id"], host=dev["ip"], profile=dev, settings=settings
-                        )
-                    except Exception as exc:
-                        logger.error(f"Error saat polling {dev.get('name')}: {exc}")
+                dev_id = dev["id"]
+                if not await self._coordinator.can_poll_device(dev_id):
+                    return
+                dev_lock = self._coordinator.get_async_lock(dev_id)
+                state = self._coordinator.get_or_create_state(dev_id)
+                async with dev_lock:
+                    async with sem:
+                        try:
+                            await self.poll_single_device(
+                                device_id=dev_id, host=dev["ip"], profile=dev, settings=settings
+                            )
+                            dev_prof = self.get_device_profile(dev_id)
+                            if dev_prof and dev_prof.get("status") in ("UP", "DEGRADED"):
+                                state.record_success()
+                            else:
+                                state.record_failure()
+                        except Exception as exc:
+                            logger.error(f"Error saat polling {dev.get('name')}: {exc}")
+                            state.record_failure()
 
             if not devices:
                 self.last_poll_timestamp = time.time()
@@ -1631,33 +1747,26 @@ class NmsEngine:
     async def _scheduler_loop(self) -> None:
         with self._state_lock:
             self._scheduler_state = NmsSchedulerState.RUNNING
-        logger.info("NMS background scheduler loop started.")
+        logger.info("NMS background hardened scheduler loop started.")
         try:
+            self._sync_scheduler_devices()
+            await self._hardened_scheduler.start()
             while not self._stop_event.is_set():
                 try:
-                    settings = self.get_settings()
-                    if settings.get("auto_monitoring_enabled", True):
-                        await self.poll_all_devices_cycle()
-                    interval = max(5, int(settings.get("default_interval_sec", 15)))
-                    try:
-                        await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
-                        break
-                    except asyncio.TimeoutError:
-                        pass
-                except asyncio.CancelledError:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=10.0)
                     break
-                except Exception as exc:
-                    logger.error(f"Error in NMS scheduler loop: {exc}")
-                    try:
-                        await asyncio.wait_for(self._stop_event.wait(), timeout=5.0)
-                        break
-                    except asyncio.TimeoutError:
-                        pass
+                except asyncio.TimeoutError:
+                    self._sync_scheduler_devices()
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.error(f"Error in NMS hardened scheduler loop: {exc}")
         finally:
+            await self._hardened_scheduler.stop()
             with self._state_lock:
                 self._scheduler_state = NmsSchedulerState.STOPPED
                 self._scheduler_task = None
-            logger.info("NMS background scheduler loop stopped.")
+            logger.info("NMS background hardened scheduler loop stopped.")
 
     def start_monitoring(self) -> bool:
         """Memulai background scheduler jika belum berjalan (idempotent)."""
@@ -1696,6 +1805,9 @@ class NmsEngine:
 
         if task and not task.done():
             task.cancel()
+        with self._state_lock:
+            self._scheduler_state = NmsSchedulerState.STOPPED
+        return True
         with self._state_lock:
             self._scheduler_state = NmsSchedulerState.STOPPED
         return True

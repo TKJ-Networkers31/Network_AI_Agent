@@ -9,7 +9,7 @@ adapter" pada spesifikasi Sprint 02.
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from core.host import get_host_info
@@ -18,8 +18,9 @@ from core.filesystem.operations import FileOperations
 from core.filesystem.trash import TrashEngine
 from core.filesystem.history import HistoryEngine
 from core.filesystem.permissions import get_permission_engine, PermissionLevel
+from core.tenant.auth_deps import get_current_authenticated_user
 
-router = APIRouter(tags=["files", "host"])
+router = APIRouter(tags=["files", "host"], dependencies=[Depends(get_current_authenticated_user)])
 
 
 def _operations() -> FileOperations:

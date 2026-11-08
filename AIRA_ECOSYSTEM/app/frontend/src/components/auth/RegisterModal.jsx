@@ -7,7 +7,7 @@ import { useAuth } from "../../context/AuthContext.jsx";
 import { useToast } from "../Toast.jsx";
 
 export default function RegisterModal() {
-  const { isRegisterModalOpen, setIsRegisterModalOpen, register, openLogin, continueAsGuest } = useAuth();
+  const { isRegisterModalOpen, setIsRegisterModalOpen, register, openLogin } = useAuth();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -176,15 +176,7 @@ export default function RegisterModal() {
           </button>
         </form>
 
-        <div className="mt-4 pt-3 border-t border-neutral-800 flex items-center justify-between text-xs text-neutral-400">
-          <button
-            type="button"
-            onClick={continueAsGuest}
-            className="hover:text-cyan-400 transition"
-          >
-            Lanjut sebagai Guest
-          </button>
-
+        <div className="mt-4 pt-3 border-t border-neutral-800 flex items-center justify-end text-xs text-neutral-400">
           <button
             type="button"
             onClick={openLogin}

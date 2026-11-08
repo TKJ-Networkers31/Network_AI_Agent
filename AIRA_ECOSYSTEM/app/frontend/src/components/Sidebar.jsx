@@ -151,11 +151,12 @@ export default function Sidebar({
     useSessionsContext();
   const { unreadSessionIds, runningSessionIds } = useChatRuntime();
   const { notify } = useToast();
-  const { user, isGuest, subscription, openLogin, isAdmin, hasNetworkingPlus, hasPermission } = useAuth();
+  const { user, isGuest, subscription, openLogin, isAdmin, isSuperAdmin, hasNetworkingPlus, hasPermission } = useAuth();
 
   const visibleNavGroups = NAV_GROUPS.map((group) => {
     if (group.id === "admin" && !isAdmin) return null;
     const filteredItems = group.items.filter((item) => {
+      if (item.superAdminOnly && !isSuperAdmin) return false;
       if (item.adminOnly && !isAdmin) return false;
       if (item.id === "admin" && !isAdmin) return false;
       if (item.requiredPermission && !isAdmin && hasPermission && !hasPermission(item.requiredPermission)) {
@@ -495,24 +496,14 @@ export default function Sidebar({
         <div className={`shrink-0 border-t border-border ${compact ? "p-2" : "p-3"}`}>
           <button
             type="button"
-            onClick={() => {
-              if (isGuest) {
-                openLogin();
-              } else {
-                setIsProfileOpen(true);
-              }
-            }}
+            onClick={() => setIsProfileOpen(true)}
             className={`w-full flex items-center gap-2.5 rounded-control bg-white/[0.04] hover:bg-white/[0.08] text-left transition ${
               compact ? "justify-center p-1.5" : "px-3 py-2"
             }`}
             title="Kelola Profil & Keamanan Akun"
           >
-            <div
-              className={`w-8 h-8 rounded-pill flex items-center justify-center text-xs font-semibold shrink-0 text-white shadow-sm ${
-                isGuest ? "bg-neutral-800 border border-neutral-700 text-neutral-300" : "bg-accent-gradient"
-              }`}
-            >
-              {isGuest ? "G" : (user?.username ? user.username.charAt(0).toUpperCase() : "U")}
+            <div className="w-8 h-8 rounded-pill flex items-center justify-center text-xs font-semibold shrink-0 text-white shadow-sm bg-accent-gradient">
+              {user?.username ? user.username.charAt(0).toUpperCase() : "U"}
             </div>
             {!compact && (
               <div className="min-w-0 flex-1">

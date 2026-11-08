@@ -39,7 +39,6 @@ from core.tenant.db import ensure_tenant_schema
 from core.tenant.manager import IdentityManager, TenantManager
 from core.tenant.entitlements import EntitlementManager
 from core.tenant.models import UserRoleType, SubscriptionTier
-from core.tenant.token_quota_service import TokenQuotaService
 from core.tenant.user_subscription import UserSubscriptionService
 from core.tenant.entitlement_service import EntitlementService, get_entitlement_service
 from core.tenant.workspace_service import WorkspaceService
@@ -61,7 +60,6 @@ def env():
         id_mgr = IdentityManager(db_path)
         tenant_mgr = TenantManager(db_path)
         ent_mgr = EntitlementManager(db_path)
-        quota_svc = TokenQuotaService(db_path)
         sub_svc = UserSubscriptionService(db_path)
         ent_svc = EntitlementService(db_path)
         ws_svc = WorkspaceService(db_path)
@@ -86,7 +84,6 @@ def env():
         )
         # Assign PRO plan + NETWORK_PLUS
         sub_svc.assign_subscription(user_bob.user_id, "PRO", duration_days=30, networking_addon=True)
-        quota_svc.get_or_create_user_quota(user_bob.user_id, tenant_acme.tenant_id, tier="PRO")
         ws_svc.get_or_create_default_workspace(user_bob.user_id, tenant_acme.tenant_id)
 
         # 4. USER Standard (carol_standard - FREE, no Network++)
@@ -99,26 +96,37 @@ def env():
             tenant_id=tenant_beta.tenant_id,
         )
         sub_svc.assign_subscription(user_carol.user_id, "FREE", duration_days=365, networking_addon=False)
-        quota_svc.get_or_create_user_quota(user_carol.user_id, tenant_beta.tenant_id, tier="FREE")
-        quota_svc.get_or_create_user_quota(user_carol.user_id, tenant_beta.tenant_id, tier="FREE")
         ws_svc.get_or_create_default_workspace(user_carol.user_id, tenant_beta.tenant_id)
+
+        # Save original singletons
+        orig_state = {
+            "auth_id": auth_mod._identity_mgr.db_path,
+            "auth_tenant": auth_mod._tenant_mgr.db_path,
+            "auth_entitlement": auth_mod._entitlement_mgr.db_path,
+            "auth_sub": auth_mod._sub_service.db_path,
+            "chat_id": chat_mod._identity_mgr.db_path,
+            "admin_id": admin_mod._identity_mgr.db_path,
+            "admin_tenant": admin_mod._tenant_mgr.db_path,
+            "admin_entitlement": admin_mod._entitlement_mgr.db_path,
+            "admin_sub": admin_mod._sub_service.db_path,
+            "pers_persona": pers_mod._persona_svc.db_path,
+            "pers_memory": pers_mod._memory_svc.db_path,
+            "pers_id": pers_mod._id_mgr.db_path,
+            "sess_id": sess_mod._identity_mgr.db_path,
+        }
 
         # Patch singletons and routers to test DB
         auth_mod._identity_mgr.db_path = db_path
         auth_mod._tenant_mgr.db_path = db_path
         auth_mod._entitlement_mgr.db_path = db_path
         auth_mod._sub_service.db_path = db_path
-        auth_mod._quota_service.db_path = db_path
 
         chat_mod._identity_mgr.db_path = db_path
-        chat_mod._quota_service.db_path = db_path
 
         admin_mod._identity_mgr.db_path = db_path
         admin_mod._tenant_mgr.db_path = db_path
         admin_mod._entitlement_mgr.db_path = db_path
         admin_mod._sub_service.db_path = db_path
-        admin_mod._billing_service.db_path = db_path
-        admin_mod._quota_service.db_path = db_path
 
         pers_mod._persona_svc.db_path = db_path
         pers_mod._memory_svc.db_path = db_path
@@ -127,12 +135,15 @@ def env():
         sess_mod._identity_mgr.db_path = db_path
 
         import core.tenant.entitlement_service as ent_service_mod
+        orig_ent_svc_db = ent_service_mod._entitlement_service.db_path
         ent_service_mod._entitlement_service.db_path = db_path
 
         import core.tenant.memory_service as mem_service_mod
+        orig_mem_svc = mem_service_mod._memory_service
         mem_service_mod._memory_service = mem_svc
 
         import core.tenant.persona_service as persona_service_mod
+        orig_persona_svc = persona_service_mod._persona_service
         persona_service_mod._persona_service = persona_svc
 
         client = TestClient(app)
@@ -147,24 +158,41 @@ def env():
         res_carol = client.post("/api/v1/auth/login", json={"username_or_email": "carol_standard", "password": "CarolPassword123!"})
         carol_token = res_carol.json()["token"]
 
-        yield {
-            "db_path": db_path,
-            "id_mgr": id_mgr,
-            "tenant_mgr": tenant_mgr,
-            "ent_mgr": ent_mgr,
-            "quota_svc": quota_svc,
-            "sub_svc": sub_svc,
-            "ent_svc": ent_svc,
-            "ws_svc": ws_svc,
-            "mem_svc": mem_svc,
-            "persona_svc": persona_svc,
-            "client": client,
-            "owner_token": owner_token,
-            "bob_token": bob_token,
-            "carol_token": carol_token,
-            "bob_user": user_bob,
-            "carol_user": user_carol,
-        }
+        try:
+            yield {
+                "db_path": db_path,
+                "id_mgr": id_mgr,
+                "tenant_mgr": tenant_mgr,
+                "ent_mgr": ent_mgr,
+                "sub_svc": sub_svc,
+                "ent_svc": ent_svc,
+                "ws_svc": ws_svc,
+                "mem_svc": mem_svc,
+                "persona_svc": persona_svc,
+                "client": client,
+                "owner_token": owner_token,
+                "bob_token": bob_token,
+                "carol_token": carol_token,
+                "bob_user": user_bob,
+                "carol_user": user_carol,
+            }
+        finally:
+            auth_mod._identity_mgr.db_path = orig_state["auth_id"]
+            auth_mod._tenant_mgr.db_path = orig_state["auth_tenant"]
+            auth_mod._entitlement_mgr.db_path = orig_state["auth_entitlement"]
+            auth_mod._sub_service.db_path = orig_state["auth_sub"]
+            chat_mod._identity_mgr.db_path = orig_state["chat_id"]
+            admin_mod._identity_mgr.db_path = orig_state["admin_id"]
+            admin_mod._tenant_mgr.db_path = orig_state["admin_tenant"]
+            admin_mod._entitlement_mgr.db_path = orig_state["admin_entitlement"]
+            admin_mod._sub_service.db_path = orig_state["admin_sub"]
+            pers_mod._persona_svc.db_path = orig_state["pers_persona"]
+            pers_mod._memory_svc.db_path = orig_state["pers_memory"]
+            pers_mod._id_mgr.db_path = orig_state["pers_id"]
+            sess_mod._identity_mgr.db_path = orig_state["sess_id"]
+            ent_service_mod._entitlement_service.db_path = orig_ent_svc_db
+            mem_service_mod._memory_service = orig_mem_svc
+            persona_service_mod._persona_service = orig_persona_svc
 
 
 # ===========================================================================
@@ -270,24 +298,13 @@ def test_05_cross_user_session_access_forbidden(env):
 
 
 def test_06_guest_chat_session_isolation(env):
-    """Guests with different X-Guest-ID maintain strictly isolated sessions."""
+    """Decision 2: Unauthenticated / guest access to chat sessions returns 401 Unauthorized."""
     client = env["client"]
     guest1_headers = {"X-Guest-ID": "gst_user_1111"}
-    guest2_headers = {"X-Guest-ID": "gst_user_2222"}
 
     res_g1 = client.post("/api/sessions", headers=guest1_headers)
-    assert res_g1.status_code == 200
-    g1_sid = res_g1.json()["id"]
-
-    res_g2 = client.post("/api/sessions", headers=guest2_headers)
-    assert res_g2.status_code == 200
-    g2_sid = res_g2.json()["id"]
-
-    # Guest 2 listing does not see Guest 1
-    g2_list = client.get("/api/sessions", headers=guest2_headers).json()["sessions"]
-    g2_ids = [s["id"] for s in g2_list]
-    assert g2_sid in g2_ids
-    assert g1_sid not in g2_ids
+    assert res_g1.status_code == 401
+    assert "Autentikasi wajib" in res_g1.json().get("detail", "") or "Authentication required" in res_g1.json().get("detail", "")
 
 
 # ===========================================================================

@@ -26,7 +26,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from core.events import Event, EventBus, EventNames, event_bus
+from core.events import Event, EventBus, EventNames, event_bus, get_event_bus
 from core.nms_models import is_check_stale
 from core.topology_discovery import TopologyDiscoveryMixin
 from core.topology_models import (

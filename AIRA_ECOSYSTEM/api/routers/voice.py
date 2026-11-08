@@ -8,14 +8,19 @@ status perangkat audio host dan STT engine.
 import logging
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from agents.yuki.service import get_voice_service
+from core.tenant.auth_deps import get_current_authenticated_user
 
 logger = logging.getLogger("aira.api.voice")
 
-router = APIRouter(prefix="/api/voice", tags=["voice"])
+router = APIRouter(
+    prefix="/api/voice",
+    tags=["voice"],
+    dependencies=[Depends(get_current_authenticated_user)],
+)
 
 
 class PauseRequest(BaseModel):

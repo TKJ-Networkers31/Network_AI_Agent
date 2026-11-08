@@ -420,6 +420,31 @@ def portal_get_device(
     return d_dict
 
 
+@router.get("/devices/{device_id}/traffic", summary="Get interface traffic metrics for device")
+def portal_get_device_traffic(
+    device_id: str,
+    ctx: TenantContext = Depends(require_permission(Permission.DEVICE_READ)),
+    range: str = Query("1h", description="Time range for metrics (e.g. 1h, 6h, 24h)"),
+):
+    """Retrieves interface traffic/metrics for a tenant device."""
+    dev = _inv_mgr.get_device(tenant_id=ctx.tenant_id, device_id=device_id)
+    if not dev:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device '{device_id}' not found.",
+        )
+    from core.nms_engine import get_nms_engine
+    engine = get_nms_engine()
+    history = engine.get_interface_history(device_id=device_id, time_range=range)
+    return {
+        "success": True,
+        "device_id": device_id,
+        "tenant_id": ctx.tenant_id,
+        "range": range,
+        "interfaces": history,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 4. Incident Self-Service (WP 8.9.6)
 # ---------------------------------------------------------------------------

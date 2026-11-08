@@ -107,13 +107,16 @@ class ChangeImpactEngine:
         # Scenario Execution on Cloned Graph
         # -------------------------------------------------------------------
         if ctype == "INTERFACE_DOWN":
-            iface_node_id = f"interface:{target_dev}:{target_ent}"
+            iface_candidates = {
+                f"iface:{target_dev}:{target_ent}",
+                f"interface:{target_dev}:{target_ent}",
+            }
             assumptions.append(f"Interface '{target_ent}' on '{target_dev}' simulated administratively disabled.")
 
             # Identify connected neighbors and subnets before severing
             for edge in list(cloned_graph.edges.values()):
-                if edge.source_id == iface_node_id or edge.target_id == iface_node_id:
-                    other_id = edge.target_id if edge.source_id == iface_node_id else edge.source_id
+                if edge.source_id in iface_candidates or edge.target_id in iface_candidates:
+                    other_id = edge.target_id if edge.source_id in iface_candidates else edge.source_id
                     if other_id.startswith("device:"):
                         directly_impacted_devices.add(other_id.replace("device:", ""))
                     elif other_id.startswith("subnet:"):
@@ -122,10 +125,11 @@ class ChangeImpactEngine:
                     _remove_edge_from_graph(cloned_graph, edge.edge_id)
 
             # Update interface node status in clone
-            iface_node = cloned_graph.get_node(iface_node_id)
-            if iface_node:
-                iface_node.attributes["oper_status"] = "down"
-                iface_node.attributes["admin_status"] = "disabled"
+            for cand in iface_candidates:
+                iface_node = cloned_graph.get_node(cand)
+                if iface_node:
+                    iface_node.attributes["oper_status"] = "down"
+                    iface_node.attributes["admin_status"] = "disabled"
 
             # Rollback commands
             rollback_plan.append(f"/interface enable [find name=\"{target_ent}\"]")
@@ -170,13 +174,18 @@ class ChangeImpactEngine:
                 indirectly_impacted_devices.add(did)
 
         # Check alternate paths for affected devices in cloned graph
+        gateways = [g for g in qengine.find_gateway_nodes() if g != target_dev]
+        target_gw = gateways[0] if gateways else "ISP-Edge"
+
         for did in (directly_impacted_devices | indirectly_impacted_devices):
-            alt = qengine.find_alternate_paths(did, "ISP-Edge", excluded_ids={target_dev})
+            alt = qengine.find_alternate_paths(did, target_gw, excluded_ids={target_dev})
             if alt.get("paths"):
+                p0 = alt["paths"][0]
+                devs = p0.get("devices", []) if isinstance(p0, dict) else [n.get("entity_id") if isinstance(n, dict) else str(n) for n in p0]
                 alternate_paths_available.append({
                     "device_id": did,
-                    "backup_path": [n.get("entity_id") for n in alt["paths"][0]],
-                    "hop_count": len(alt["paths"][0]),
+                    "backup_path": devs,
+                    "hop_count": p0.get("hop_count", max(0, len(devs) - 1)) if isinstance(p0, dict) else len(p0),
                 })
             else:
                 severed_transit_paths.append({

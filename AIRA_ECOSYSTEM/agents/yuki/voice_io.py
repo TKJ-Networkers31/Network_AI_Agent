@@ -15,7 +15,12 @@ import time
 from typing import Any, Callable, Dict, Optional
 
 import numpy as np
-import sounddevice as sd
+
+try:
+    import sounddevice as sd
+except (OSError, ImportError):
+    sd = None
+
 
 from agents.yuki.stt import transcribe
 
@@ -147,6 +152,8 @@ class VoiceIO:
 
             # Verifikasi ketersediaan perangkat audio input
             try:
+                if sd is None:
+                    raise RuntimeError("PortAudio library not installed on host.")
                 devices = sd.query_devices()
                 default_in = sd.default.device[0] if isinstance(sd.default.device, (list, tuple)) else None
                 input_dev = None

@@ -92,7 +92,7 @@ def list_users(
 ) -> Dict[str, Any]:
     """Lists all registered users along with their groups, status, and activity timestamps."""
     users = _identity_mgr.list_users(tenant_id=tenant_id)
-    return {"users": users, "total": len(users)}
+    return {"success": True, "users": users, "total": len(users)}
 
 
 @router.post("/users", status_code=status.HTTP_201_CREATED)

@@ -46,12 +46,6 @@ export function getAuthHeaders() {
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
-      let guestId = localStorage.getItem("aira_guest_id");
-      if (!guestId) {
-        guestId = "gst_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-        localStorage.setItem("aira_guest_id", guestId);
-      }
-      headers["X-Guest-ID"] = guestId;
     } catch {}
   }
   return headers;
@@ -158,6 +152,10 @@ async function rawRequest(path, options = {}) {
 
   throw lastError || new Error("Backend tidak terjangkau.");
 }
+
+let _cachedConnections = null;
+let _cachedConnectionsTime = 0;
+let _inFlightConnections = null;
 
 export const api = {
   // FIX (Optimalisasi DIO): parameter ke-3 opsional 'dioSubmission' -
@@ -339,15 +337,43 @@ export const api = {
   },
 
   connections: {
-    list: () => request("/connections"),
+    list: (forceRefresh = false) => {
+      const now = Date.now();
+      if (!forceRefresh && _cachedConnections && now - _cachedConnectionsTime < 3000) {
+        return Promise.resolve(_cachedConnections);
+      }
+      if (!forceRefresh && _inFlightConnections) {
+        return _inFlightConnections;
+      }
+      _inFlightConnections = request("/connections")
+        .then((res) => {
+          _cachedConnections = res;
+          _cachedConnectionsTime = Date.now();
+          return res;
+        })
+        .finally(() => {
+          _inFlightConnections = null;
+        });
+      return _inFlightConnections;
+    },
+    invalidateCache: () => {
+      _cachedConnections = null;
+      _cachedConnectionsTime = 0;
+    },
     get: (sessionId) => request(`/connections/${encodeURIComponent(sessionId)}`),
-    open: (payload) =>
-      request("/connections/open", { method: "POST", body: JSON.stringify(payload) }),
-    close: (sessionId) =>
-      request("/connections/close", {
+    open: async (payload) => {
+      _cachedConnections = null;
+      _cachedConnectionsTime = 0;
+      return request("/connections/open", { method: "POST", body: JSON.stringify(payload) });
+    },
+    close: async (sessionId) => {
+      _cachedConnections = null;
+      _cachedConnectionsTime = 0;
+      return request("/connections/close", {
         method: "POST",
         body: JSON.stringify({ session_id: sessionId }),
-      }),
+      });
+    },
     execute: (sessionId, command) =>
       request("/connections/execute", {
         method: "POST",

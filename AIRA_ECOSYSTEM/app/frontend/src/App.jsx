@@ -202,16 +202,25 @@ const PAGE_PERMISSIONS = {
   topology: "topology.view",
   nms: "nms.view",
   devices: "inventory.view",
+  intelligence: "nms.read",
+  operations: "nms.read",
+  gateways: "inventory.view",
+  decisions: "automations.view",
+  portal: "workspace.view",
+  akane: "inventory.view",
+  persona: "settings.persona.view",
+  memory: "settings.memory.view",
 };
 
 function AppShell() {
-  const { isAdmin, hasPermission } = useAuth();
+  const { isAdmin, isSuperAdmin, hasPermission } = useAuth();
   const [active, setActive] = useState("workspace");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
   const reqPerm = PAGE_PERMISSIONS[active];
-  const isDenied = reqPerm && !isAdmin && hasPermission && !hasPermission(reqPerm);
+  const isBlockedModels = active === "models" && !isSuperAdmin;
+  const isDenied = !isSuperAdmin && ((reqPerm && !isAdmin && hasPermission && !hasPermission(reqPerm)) || isBlockedModels);
   const isBlockedAdmin = active === "admin" && !isAdmin;
   const Page = isBlockedAdmin ? AdminLoginPage : (PAGES[active] || ChatPage);
   const isFixedHeight = FIXED_HEIGHT_PAGES.has(active);

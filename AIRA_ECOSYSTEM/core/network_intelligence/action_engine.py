@@ -102,6 +102,14 @@ class ActionManagementEngine:
 
     def _ensure_schema(self) -> None:
         """Ensures action execution records and policy tables exist in topology.db."""
+        try:
+            from core.operations.db import ensure_operational_schema
+            ensure_operational_schema(self.db_path)
+            from core.tenant.db import ensure_tenant_schema
+            ensure_tenant_schema(self.db_path)
+        except Exception as exc:
+            logger.debug("Operational/tenant schema init notice: %s", exc)
+
         with topology_transaction(self.db_path, write=True) as conn:
             conn.execute(
                 """
@@ -436,17 +444,56 @@ class ActionManagementEngine:
                 (ActionExecutionStatus.EXECUTING.value, action_id),
             )
 
-        # Deterministic simulation of safe execution & verification
-        # Checks actual device state vs expected_after_state
-        time.sleep(0.1)  # Execution boundary
-        verification_passed = True
-        verification_details = {
-            "verified_at": now_iso,
-            "postconditions_checked": ["interface_link_up", "route_active_in_fib", "zero_packet_loss"],
-            "checks_passed": True,
-            "actual_state": act["expected_after_state"],
-            "discrepancies": [],
-        }
+        # Check if actual executable configuration commands are present (REC-19)
+        commands = act.get("commands") or []
+        if isinstance(commands, str):
+            commands = [commands]
+        target_device = act.get("target_device") or act.get("device_id")
+
+        if commands and target_device:
+            try:
+                from agents.akane.config_engine import get_config_engine
+                engine = get_config_engine()
+                exec_res = engine.apply_change(
+                    device_name=target_device,
+                    commands=commands,
+                    approved=True,
+                    operation_id=action_id,
+                )
+                verification_passed = exec_res.get("success", False)
+                verification_details = {
+                    "verified_at": now_iso,
+                    "execution_mode": "safe_config_engine",
+                    "is_simulated": False,
+                    "checks_passed": verification_passed,
+                    "actual_state": exec_res.get("post_verification", {}),
+                    "discrepancies": exec_res.get("discrepancies", []),
+                    "execution_details": exec_res,
+                }
+            except Exception as exc:
+                logger.warning("Live configuration apply failed: %s", exc)
+                verification_passed = False
+                verification_details = {
+                    "verified_at": now_iso,
+                    "execution_mode": "safe_config_engine",
+                    "is_simulated": False,
+                    "checks_passed": False,
+                    "error": str(exc),
+                    "discrepancies": [str(exc)],
+                }
+        else:
+            # Deterministic analytical simulation (clearly labeled, never claiming real hardware execution)
+            time.sleep(0.05)  # Analytical evaluation boundary
+            verification_passed = True
+            verification_details = {
+                "verified_at": now_iso,
+                "execution_mode": "analytical_simulation",
+                "is_simulated": True,
+                "postconditions_checked": ["interface_link_up", "route_active_in_fib", "zero_packet_loss"],
+                "checks_passed": True,
+                "actual_state": act.get("expected_after_state"),
+                "discrepancies": [],
+            }
 
         final_status = (
             ActionExecutionStatus.SUCCESS.value

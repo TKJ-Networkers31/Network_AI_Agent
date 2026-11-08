@@ -103,9 +103,12 @@ class ImpactAnalyzer:
 
             # 2. Redundancy & Alternative Paths
             # Check if affected direct dependents have alternate paths to core/WAN bypassing dev_id
+            gateways = [g for g in qengine.find_gateway_nodes() if g != dev_id]
+            target_gw = gateways[0] if gateways else "ISP-Edge"
+
             for d in direct_dependents:
                 peer_did = d["device_id"]
-                alt_res = qengine.find_alternate_paths(peer_did, "ISP-Edge", excluded_ids={dev_id})
+                alt_res = qengine.find_alternate_paths(peer_did, target_gw, excluded_ids={dev_id})
                 if not alt_res["paths"]:
                     # Try finding path to another managed device
                     for cand in bundle.selected_devices:

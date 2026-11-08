@@ -117,7 +117,12 @@ class EntitlementService:
 _entitlement_service = EntitlementService()
 
 
-def get_entitlement_service() -> EntitlementService:
+def get_entitlement_service(db_path: Optional[Path] = None) -> EntitlementService:
+    global _entitlement_service
+    if db_path:
+        resolved = Path(db_path).resolve()
+        if _entitlement_service.db_path != resolved:
+            return EntitlementService(resolved)
     return _entitlement_service
 
 

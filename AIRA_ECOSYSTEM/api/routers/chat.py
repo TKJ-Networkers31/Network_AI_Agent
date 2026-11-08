@@ -19,13 +19,11 @@ from core import chat_sessions as store
 from core.orchestrator import AGENT_TOOL_MAP
 from core.slash_commands import apply_slash_command
 from core.tenant.manager import IdentityManager
-from core.tenant.token_quota_service import TokenQuotaService
 from agents.rei.dio_tools import resolve_submission
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
 _identity_mgr = IdentityManager()
-_quota_service = TokenQuotaService()
 
 
 @router.post("/chat", response_model=ChatResponse)

@@ -53,9 +53,12 @@ logs/
 **/logs/
 
 *.db
+*.db.old
 *.sqlite
 *.sqlite3
 *.db-journal
+*.db-wal
+*.db-shm
 *.bak*
 *.backup*
 AIRA_ECOSYSTEM/database/backups/
@@ -64,8 +67,8 @@ AIRA_ECOSYSTEM/database/backups/
 # =========================
 # AI Models
 # =========================
-models/
-**/models/
+/models/
+!AIRA_ECOSYSTEM/app/frontend/src/components/models/
 
 *.pt
 *.pth

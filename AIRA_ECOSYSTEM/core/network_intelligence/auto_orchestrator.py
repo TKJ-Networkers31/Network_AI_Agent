@@ -382,9 +382,9 @@ class AutomaticNetworkOrchestrator:
                         from core.network_intelligence.evidence_service import get_unified_evidence_service
                         unified_svc = get_unified_evidence_service()
                         u_bundle = unified_svc.assemble_evidence_bundle(
-                            device_ids=targets,
+                            target_devices=targets,
                             required_types=req_types,
-                            allow_cli_fallback=False,
+                            allow_live_collection=False,
                         )
                         target_coverage = set(u_bundle.device_records.keys())
                         if set(targets).issubset(target_coverage) and len(u_bundle.records) >= len(targets):

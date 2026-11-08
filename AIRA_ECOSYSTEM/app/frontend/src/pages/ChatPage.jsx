@@ -70,9 +70,8 @@ import TopBar from "../components/TopBar.jsx";
 import MessageBubble from "../components/MessageBubble.jsx";
 import ChatInput from "../components/ChatInput.jsx";
 import VoiceControls from "../components/VoiceControls.jsx";
-import VoiceOverlay from "../components/VoiceOverlay.jsx";
 import LiveSteps from "../components/LiveSteps.jsx";
-import BootScreen from "../components/BootScreen.jsx";
+import SuspenseLoader from "../components/SuspenseLoader.jsx";
 import ComposerCockpit from "../components/cockpit/ComposerCockpit.jsx";
 import DynamicHero from "../components/cockpit/DynamicHero.jsx";
 import CapabilityDock from "../components/capabilities/CapabilityDock.jsx";
@@ -82,7 +81,6 @@ import { useSessionsContext } from "../context/SessionsContext.jsx";
 import { useChatRuntime } from "../context/ChatRuntimeContext.jsx";
 import { CapabilityProvider, useCapabilityContext } from "../context/CapabilityContext.jsx";
 import { useToast } from "../components/Toast.jsx";
-import { useVoiceCall } from "../hooks/useVoiceCall.js";
 import { useVoice } from "../hooks/useVoice.js";
 import { useGlobalSettings } from "../hooks/useGlobalSettings.js";
 import { useCockpitData } from "../hooks/useCockpitData.js";
@@ -120,7 +118,6 @@ function ChatPageInner({ onOpenMenu }) {
     sendDioSubmission,
     sendRaw,
     waitForConnection,
-    registerVoiceCallHandlers,
     persona,
     personaReady,
     stopRun,
@@ -131,7 +128,6 @@ function ChatPageInner({ onOpenMenu }) {
   } = useChatRuntime();
 
   const [tools, setTools] = useState([]);
-  const [voiceConnecting, setVoiceConnecting] = useState(false);
   // Multi-file attachments dan status upload
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -244,39 +240,6 @@ function ChatPageInner({ onOpenMenu }) {
     setHasArtifact(hasArtifact);
   }, [messages, setHasArtifact]);
 
-  const voiceCall = useVoiceCall({
-    onSendAudio: (payload) => {
-      const sent = sendRaw(payload);
-      if (!sent) {
-        notify({
-          type: "error",
-          message: "Koneksi terputus saat mengirim audio - menunggu tersambung ulang...",
-        });
-        voiceCall.cancelWaiting();
-      }
-    },
-    notify,
-  });
-
-  useEffect(() => {
-    registerVoiceCallHandlers({
-      playResponseAudio: voiceCall.playResponseAudio,
-      cancelWaiting: voiceCall.cancelWaiting,
-    });
-
-    return () => {
-      registerVoiceCallHandlers(null);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voiceCall.playResponseAudio, voiceCall.cancelWaiting]);
-
-  useEffect(() => {
-    return () => {
-      voiceCall.endCall();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   useEffect(() => {
     api
       .tools()
@@ -326,7 +289,7 @@ function ChatPageInner({ onOpenMenu }) {
   }, [activeId, setHasAttachment]);
 
   if (!sessionsReady || !personaReady) {
-    return <BootScreen />;
+    return <SuspenseLoader />;
   }
 
   async function handleSend(text) {
@@ -533,24 +496,6 @@ function ChatPageInner({ onOpenMenu }) {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      {(voiceCall.callActive || voiceConnecting) && (
-        <VoiceOverlay
-          connecting={voiceConnecting && !voiceCall.callActive}
-          interimText={voiceCall.listening ? "Mendengarkan..." : ""}
-          subtitle={voiceCall.subtitle}
-          speaking={voiceCall.speaking}
-          waitingReply={voiceCall.waitingReply}
-          diagnosticState={voiceCall.diagnosticState}
-          audioLevel={voiceCall.audioLevel}
-          deviceLabel={voiceCall.deviceLabel}
-          errorMessage={voiceCall.errorMessage}
-          onCancel={() => {
-            voiceCall.endCall();
-            setVoiceConnecting(false);
-          }}
-        />
-      )}
-
       <TopBar
         title={activeTitle}
         subtitle="Ngobrol atau ketik '/' untuk pakai tool langsung"
@@ -569,6 +514,7 @@ function ChatPageInner({ onOpenMenu }) {
           )}
 
           {/* Sapaan Claude-Style Terpusat dengan Dynamic Tool Trends */}
+          {heroVisible && <DynamicHero heroModel={heroModel} />}
           {heroVisible && <Hero heroModel={heroModel} onQuickPrompt={(text) => handleSend(text)} />}
           {heroVisible && <CapabilityHeroRow onInvoke={handleCapabilityInvoke} />}
 

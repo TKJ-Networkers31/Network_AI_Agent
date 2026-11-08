@@ -108,4 +108,9 @@ def ensure_gateway_schema(db_path: Optional[Path] = None) -> None:
 
     with topology_transaction(target_path, write=True) as conn:
         conn.executescript(GATEWAY_SCHEMA_SQL)
+    try:
+        from core.nms.metrics_store import init_metrics_tables
+        init_metrics_tables(target_path)
+    except Exception as exc:
+        logger.warning("Could not initialize NMS metric rollup tables: %s", exc)
     logger.info("Edge Gateway schema initialized successfully in %s", target_path)

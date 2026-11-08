@@ -180,20 +180,7 @@ def bootstrap_superadmin(
             (f"ent_{uuid.uuid4().hex[:12]}", now_iso),
         )
 
-        # 5. Initialize Unlimited Enterprise Token Balance
-        conn.execute(
-            """
-            INSERT INTO operational_token_balances (
-                balance_id, tenant_id, user_id, tier, allocated_tokens, used_tokens, period_start_utc, period_reset_utc, updated_at
-            ) VALUES (?, 'tenant_internal', ?, 'ENTERPRISE', 10000000, 0, ?, '2099-12-31T23:59:59Z', ?)
-            ON CONFLICT(tenant_id, user_id) DO UPDATE SET
-                allocated_tokens = 10000000,
-                tier = 'ENTERPRISE'
-            """,
-            (f"bal_{uuid.uuid4().hex[:12]}", user_id, now_iso, now_iso),
-        )
-
-        # 6. Record Audit Log Entry
+        # 5. Record Audit Log Entry
         conn.execute(
             """
             INSERT INTO operational_audit_log (

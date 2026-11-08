@@ -197,9 +197,6 @@ class ConnectionManager:
                 port = port if port != 22 else target.get("port", 22)
 
         if password is None and not key_data:
-            password = os.getenv("SSH_PASSWORD")
-
-        if password is None and not key_data:
             return {
                 "success": False,
                 "error": (
@@ -382,9 +379,6 @@ class ConnectionManager:
             key_data = sec.get("key_data")
         elif isinstance(sec, str):
             password = sec
-
-        if password is None and not key_data:
-            password = os.getenv("SSH_PASSWORD")
 
         if password is None and not key_data:
             return {"success": False, "error": "Credential sesi manual tidak tersedia untuk reconnect."}

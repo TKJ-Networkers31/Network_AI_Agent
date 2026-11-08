@@ -45,14 +45,11 @@ def stats(since_minutes: Optional[int] = None):
 def get_log_detail(log_id: int):
     from fastapi import HTTPException
 
-    logs = log_store.query_logs(limit=1, offset=0)
-    # query_logs tidak filter by id langsung - pakai helper ringan di sini
-    match = [l for l in log_store.query_logs(limit=500) if l["id"] == log_id]
-
-    if not match:
+    log_entry = log_store.get_log_by_id(log_id)
+    if not log_entry:
         raise HTTPException(status_code=404, detail="Log tidak ditemukan.")
 
-    return match[0]
+    return log_entry
 
 
 @router.delete("")

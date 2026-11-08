@@ -727,8 +727,14 @@ class NetworkInvestigator:
             if not target_devices:
                 try:
                     from core.inventory_store import get_inventory_store
-                    inv_devs = get_inventory_store().list_devices()
-                    target_devices = [d.name or d.ip for d in inv_devs if d.name or d.ip]
+                    inv_data = get_inventory_store().list_devices()
+                    inv_devs = inv_data.get("devices", []) if isinstance(inv_data, dict) else (inv_data or [])
+                    target_devices = [
+                        (d.get("name") or d.get("host") or d.get("ip"))
+                        if isinstance(d, dict) else (getattr(d, "name", None) or getattr(d, "host", None) or getattr(d, "ip", None))
+                        for d in inv_devs
+                    ]
+                    target_devices = [t for t in target_devices if t]
                 except Exception:
                     target_devices = []
 
@@ -773,8 +779,8 @@ class NetworkInvestigator:
             if intent == InvestigationIntent.PROTOCOL_ANALYSIS:
                 from core.network_intelligence.protocols import ALL_PROTOCOL_ANALYZERS
                 proto_findings = []
-                for analyzer_cls in ALL_PROTOCOL_ANALYZERS:
-                    analyzer = analyzer_cls()
+                for analyzer_obj in ALL_PROTOCOL_ANALYZERS:
+                    analyzer = analyzer_obj() if callable(analyzer_obj) else analyzer_obj
                     for dev_id in (target_devices or ["unknown"]):
                         dev_findings = analyzer.analyze(bundle, dev_id)
                         proto_findings.extend([f.to_dict() for f in dev_findings])
@@ -898,3 +904,16 @@ class NetworkInvestigator:
         finally:
             with self._cancel_lock:
                 self._cancellation_events.pop(inv_id, None)
+
+
+_investigator_singleton: Optional[NetworkInvestigator] = None
+_investigator_lock = threading.Lock()
+
+
+def get_network_investigator() -> NetworkInvestigator:
+    global _investigator_singleton
+    if _investigator_singleton is None:
+        with _investigator_lock:
+            if _investigator_singleton is None:
+                _investigator_singleton = NetworkInvestigator()
+    return _investigator_singleton

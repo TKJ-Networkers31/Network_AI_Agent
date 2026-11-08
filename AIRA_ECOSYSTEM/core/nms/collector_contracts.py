@@ -36,7 +36,7 @@ from core.nms.models import (
     TelemetrySample,
     TelemetrySource,
 )
-from mcp_servers.network.security import mask_sensitive_data
+from core.security.masking import mask_sensitive_data
 
 logger = logging.getLogger("aira.nms.collector")
 

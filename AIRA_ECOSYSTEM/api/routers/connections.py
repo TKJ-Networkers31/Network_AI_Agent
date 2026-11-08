@@ -9,10 +9,12 @@ tools/* sama sekali).
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from agents.akane.connection_manager import get_connection_manager
+from core.tenant.auth_deps import require_permission
+from core.tenant.models import TenantContext
 
 router = APIRouter(prefix="/api/connections", tags=["connections"])
 
@@ -36,13 +38,16 @@ class ExecuteCommandRequest(BaseModel):
 
 @router.get("")
 @router.get("/")
-def list_connections():
+def list_connections(ctx: TenantContext = Depends(require_permission("devices.read"))):
     manager = get_connection_manager()
     return {"connections": manager.list_sessions()}
 
 
 @router.get("/{session_id}")
-def get_connection(session_id: str):
+def get_connection(
+    session_id: str,
+    ctx: TenantContext = Depends(require_permission("devices.read")),
+):
     manager = get_connection_manager()
     session = manager.get_session(session_id)
 
@@ -53,7 +58,10 @@ def get_connection(session_id: str):
 
 
 @router.post("/open")
-def open_connection(payload: OpenConnectionRequest):
+def open_connection(
+    payload: OpenConnectionRequest,
+    ctx: TenantContext = Depends(require_permission("devices.execute")),
+):
     manager = get_connection_manager()
 
     if payload.device_name and not payload.host:
@@ -77,7 +85,10 @@ def open_connection(payload: OpenConnectionRequest):
 
 
 @router.post("/close")
-def close_connection(payload: CloseConnectionRequest):
+def close_connection(
+    payload: CloseConnectionRequest,
+    ctx: TenantContext = Depends(require_permission("devices.execute")),
+):
     manager = get_connection_manager()
     result = manager.close_connection(payload.session_id, reason="manual")
 
@@ -88,7 +99,10 @@ def close_connection(payload: CloseConnectionRequest):
 
 
 @router.post("/execute")
-def execute_command(payload: ExecuteCommandRequest):
+def execute_command(
+    payload: ExecuteCommandRequest,
+    ctx: TenantContext = Depends(require_permission("devices.execute")),
+):
     manager = get_connection_manager()
     result = manager.execute(payload.session_id, payload.command)
 

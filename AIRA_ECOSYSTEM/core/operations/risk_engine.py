@@ -226,24 +226,35 @@ class RiskAssessmentEngine:
         Performs a virtual breadth-first search on NetworkKnowledgeGraph
         skipping excluded nodes and edges dynamically.
         """
-        if start_node in excluded_nodes:
+        s_node = start_node if start_node in graph.nodes else f"device:{start_node}"
+        if s_node not in graph.nodes:
             return False
 
-        visited: Set[str] = {start_node}
-        queue: List[str] = [start_node]
+        excl_norm = set(excluded_nodes)
+        for n in list(excluded_nodes):
+            excl_norm.add(f"device:{n}")
+
+        if s_node in excl_norm or start_node in excl_norm:
+            return False
+
+        visited: Set[str] = {s_node}
+        queue: List[str] = [s_node]
+        reached_other_device = False
 
         while queue:
             curr = queue.pop(0)
 
-            # Check neighbors
-            out_edge_ids = graph.out_edges.get(curr, [])
-            for eid in out_edge_ids:
+            # Check neighbors bidirectionally
+            out_edge_ids = list(graph.out_edges.get(curr, [])) + [
+                eid for eid, edge in graph.edges.items() if edge.target_id == curr
+            ]
+            for eid in set(out_edge_ids):
                 edge = graph.edges.get(eid)
                 if not edge:
                     continue
 
-                tgt = edge.target_id
-                if tgt in excluded_nodes or tgt in visited:
+                tgt = edge.target_id if edge.source_id == curr else edge.source_id
+                if tgt in excl_norm or tgt in visited:
                     continue
 
                 # Check edge interface attribute
@@ -253,8 +264,11 @@ class RiskAssessmentEngine:
                 visited.add(tgt)
                 queue.append(tgt)
 
-        # If more than 1 node reached without traversing exclusions, alternate path exists
-        return len(visited) > 1
+                node_obj = graph.get_node(tgt)
+                if node_obj and node_obj.entity_type == GraphEntityType.DEVICE.value:
+                    reached_other_device = True
+
+        return reached_other_device and len(visited) > 1
 
     # -----------------------------------------------------------------------
     # Multi-Scenario Comparison

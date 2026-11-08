@@ -15,9 +15,8 @@ import unittest
 from core.topology_db import topology_transaction
 from core.tenant.db import ensure_tenant_schema
 from core.tenant.manager import IdentityManager, TenantManager
-from core.tenant.models import UserRoleType
+from core.tenant.models import UserRoleType, Permission
 from core.tenant.user_subscription import UserSubscriptionService
-from core.billing.service import BillingService
 from core.playbooks.runner import PlaybookRunner, redact_sensitive_output
 from core.security.mfa import generate_totp_secret, compute_totp_code, verify_totp_code
 from core.bootstrap_superadmin import bootstrap_superadmin
@@ -32,7 +31,6 @@ class TestPhaseEComprehensive(unittest.TestCase):
         self.identity_mgr = IdentityManager(self.db_path)
         self.tenant_mgr = TenantManager(self.db_path)
         self.sub_service = UserSubscriptionService(self.db_path)
-        self.billing_service = BillingService(self.db_path, webhook_secret="test_phase_e_secret_key_123")
         self.playbook_runner = PlaybookRunner(self.db_path)
 
     def tearDown(self):
@@ -237,74 +235,27 @@ class TestPhaseEComprehensive(unittest.TestCase):
             self.assertTrue(det["data_preserved"])
 
     # =========================================================================
-    # 3. BILLING FOUNDATION & WEBHOOK VERIFICATION TESTS
+    # 3. DECISION-BD-01: BILLING SUBSYSTEM COMPLETE REMOVAL VERIFICATION
     # =========================================================================
 
-    def test_billing_invoice_checkout_and_webhook_fulfillment(self):
-        """Validates invoice generation, HMAC-SHA256 signature verification, and idempotent fulfillment."""
-        user = self.identity_mgr.create_user(
-            username="buyer_jane",
-            email="jane@example.com",
-            password="BuyerPassword123!",
-            role_type=UserRoleType.CUSTOMER_OWNER.value,
-            tenant_id="tenant_default",
-        )
+    def test_billing_subsystem_eliminated(self):
+        """Validates that all operational_billing_* tables, endpoints, and permissions are eliminated."""
+        with topology_transaction(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'operational_billing_%'"
+            ).fetchall()
+            self.assertEqual(len(rows), 0, f"Billing tables unexpectedly found: {[r[0] for r in rows]}")
 
-        # 1. Create Invoice for PRO plan
-        inv = self.billing_service.create_invoice(user_id=user.user_id, plan_id="plan_pro")
-        self.assertEqual(inv["status"], "PENDING")
-        self.assertEqual(inv["tier"], "PRO")
-        invoice_id = inv["invoice_id"]
+        # Verify billing permissions are purged
+        perm_values = [p.value for p in Permission]
+        self.assertNotIn("billing.read", perm_values)
+        self.assertNotIn("billing.manage", perm_values)
 
-        # 2. Checkout Session
-        checkout = self.billing_service.create_checkout_session(invoice_id, provider_name="MOCK_GATEWAY")
-        self.assertEqual(checkout["status"], "PENDING")
-        txn_id = checkout["transaction_id"]
-
-        # 3. HMAC-SHA256 signature verification test
-        payload = {
-            "event_id": f"evt_webhook_test_001",
-            "invoice_id": invoice_id,
-            "transaction_id": txn_id,
-            "plan_tier": "PRO",
-            "has_networking_plus": True,
-            "duration_days": 30,
-            "amount_cents": 25000000,
-        }
-        raw_bytes = json.dumps(payload, separators=(',', ':')).encode("utf-8")
-
-        # Valid HMAC signature
-        valid_sig = self.billing_service.compute_signature(raw_bytes)
-        self.assertTrue(self.billing_service.verify_webhook_signature(raw_bytes, valid_sig))
-
-        # Tampered HMAC signature must fail
-        self.assertFalse(self.billing_service.verify_webhook_signature(raw_bytes, "forged_invalid_signature_hex"))
-
-        # 4. Fulfill payment via webhook
-        res1 = self.billing_service.process_webhook_event(
-            provider_name="MOCK_GATEWAY",
-            event_type="payment.success",
-            payload=payload,
-            signature=valid_sig,
-        )
-        self.assertEqual(res1["status"], "PROCESSED")
-        self.assertFalse(res1["duplicate"])
-
-        # Verify user upgraded
-        user_sub = self.sub_service.get_subscription(user.user_id)
-        self.assertEqual(user_sub.plan_id, "PRO")
-        self.assertTrue(user_sub.has_networking_plus)
-        self.assertEqual(user_sub.subscription_status, "ACTIVE")
-
-        # 5. Idempotent re-delivery test: same event must not double-process
-        res2 = self.billing_service.process_webhook_event(
-            provider_name="MOCK_GATEWAY",
-            event_type="payment.success",
-            payload=payload,
-            signature=valid_sig,
-        )
-        self.assertEqual(res2["status"], "ALREADY_PROCESSED")
-        self.assertTrue(res2["duplicate"])
+        # Verify billing module is removed or unmounted
+        from api.main import app
+        route_paths = [getattr(r, "path", str(r)) for r in app.routes]
+        billing_routes = [p for p in route_paths if "/billing" in p]
+        self.assertEqual(len(billing_routes), 0, f"Billing routes still exposed: {billing_routes}")
 
     # =========================================================================
     # 4. ANSIBLE-COMPATIBLE PLAYBOOK ENGINE TESTS

@@ -63,12 +63,39 @@ CREATE TABLE IF NOT EXISTS model_policy (
 """
 
 _BUILTIN_SEED = [
-    {"display_name": "Qwen3 1.7B (Ollama)", "provider": "ollama", "model_id": "qwen3:1.7b"},
-    {"display_name": "Qwen3 4B (Ollama)", "provider": "ollama", "model_id": "qwen3:4b"},
-    {"display_name": "Nemotron 3.5 Lightning", "provider": "openrouter",
-     "model_id": "nvidia/nemotron-3.5-lightning:free"},
-    {"display_name": "Nemotron 3 Super", "provider": "openrouter",
-     "model_id": "nvidia/nemotron-3-super-120b-a12b:free"},
+    # GENERAL
+    {"provider": "nvidia", "model_id": "mistralai/mistral-large-4-1t-a52b", "display_name": "Mistral Large 4 (1T/52B MoE)", "label": "general", "context_window": 131072},
+    {"provider": "nvidia", "model_id": "nvidia/nemotron-3.5-bolt-e4b", "display_name": "Nemotron 3.5 Bolt (Fast Agent)", "label": "general", "context_window": 32768},
+    {"provider": "nvidia", "model_id": "google/gemma-4-31b-it", "display_name": "Gemma 4 31B Instruct", "label": "general", "context_window": 131072},
+
+    # REASONING
+    {"provider": "nvidia", "model_id": "nvidia/nemotron-3.5-super-vl-120b-a12b", "display_name": "Nemotron 3.5 Super (120B/12B MoE)", "label": "reasoning", "context_window": 131072},
+    {"provider": "nvidia", "model_id": "openai/gpt-oss-20b", "display_name": "GPT OSS 20B (Math & Logic)", "label": "reasoning", "context_window": 32768},
+    {"provider": "nvidia", "model_id": "z-ai/glm-5-3-flash", "display_name": "GLM 5.3 Flash (320B/18B MoE)", "label": "reasoning", "context_window": 131072},
+
+    # CODING
+    {"provider": "nvidia", "model_id": "moonshotai/kimi-k3.1-pro", "display_name": "Kimi K3.1 Pro (1M Context Coding)", "label": "coding", "context_window": 1048576},
+    {"provider": "nvidia", "model_id": "minimaxai/minimax-m3.1-flash", "display_name": "MiniMax M3.1 Flash (Cyber & Code)", "label": "coding", "context_window": 131072},
+    {"provider": "nvidia", "model_id": "poolside/laguna-xs-2.1", "display_name": "Laguna XS 2.1 (Terminal & Agentic)", "label": "coding", "context_window": 65536},
+
+    # NETWORKING
+    {"provider": "nvidia", "model_id": "nvidia/nemotron-3-ultra-550b-a55b", "display_name": "Nemotron 3 Ultra (550B Network & Plan)", "label": "networking", "context_window": 1048576},
+    {"provider": "nvidia", "model_id": "nvidia/nemotron-3.5-lightning-30b-a3b", "display_name": "Nemotron 3.5 Lightning (30B Domain)", "label": "networking", "context_window": 65536},
+
+    # VISION
+    {"provider": "nvidia", "model_id": "meta/llama-3.2-90b-vision-instruct", "display_name": "Llama 3.2 90B Vision", "label": "vision", "context_window": 131072},
+    {"provider": "nvidia", "model_id": "deepseek-ai/deepseek-v4.1-flash", "display_name": "DeepSeek V4.1 Flash (Multimodal)", "label": "vision", "context_window": 131072},
+    {"provider": "nvidia", "model_id": "meta/muse-glimmer-30b", "display_name": "Muse Glimmer 30B (Vision Reasoning)", "label": "vision", "context_window": 65536},
+
+    # VOICE
+    {"provider": "nvidia", "model_id": "nvidia/nemotron-3.5-bolt-e4b", "display_name": "Nemotron 3.5 Bolt (Voice Dialogue)", "label": "voice", "context_window": 32768},
+
+    # RETRIEVAL
+    {"provider": "nvidia", "model_id": "stepfun-ai/step-5-preview", "display_name": "Step 5 Preview (1M Long-Context RAG)", "label": "retrieval", "context_window": 1048576},
+    {"provider": "nvidia", "model_id": "nvidia/nemotron-3.5-lightning-30b-a3b", "display_name": "Nemotron 3.5 Lightning (Fast RAG)", "label": "retrieval", "context_window": 65536},
+
+    # AUTOMATION
+    {"provider": "nvidia", "model_id": "moonshotai/kimi-k3.1-pro", "display_name": "Kimi K3.1 Pro (Ansible Playbooks)", "label": "automation", "context_window": 1048576},
 ]
 
 
@@ -216,14 +243,21 @@ class ModelStore:
                 )
                 ids.append(new_id)
 
+            label_to_id = {}
+            for new_id, spec in zip(ids, specs):
+                lbl = spec.get("label", DEFAULT_LABEL)
+                if lbl not in label_to_id:
+                    label_to_id[lbl] = new_id
+
             for label in VALID_LABELS:
+                default_model = label_to_id.get(label) or ids[default_idx]
                 conn.execute(
                     "INSERT OR REPLACE INTO model_router_settings (task_label, default_model_id) "
-                    "VALUES (?, ?)", (label, ids[default_idx]),
+                    "VALUES (?, ?)", (label, default_model),
                 )
             conn.execute(
                 "INSERT OR REPLACE INTO model_policy (id, fallback_model_id, retry_provider) "
-                "VALUES (1, ?, 1)", (ids[fallback_idx],),
+                "VALUES (1, ?, 2)", (ids[fallback_idx],),
             )
             conn.commit()
 

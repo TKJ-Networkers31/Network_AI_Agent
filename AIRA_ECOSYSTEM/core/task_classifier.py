@@ -127,7 +127,7 @@ class TaskClassifier:
             result = self._classify_with_llm(prompt) if prompt else TaskClassification.fallback()
         except Exception:
             logger.exception("Classifier gagal tak terduga - pakai fallback.")
-            result = TaskClassification.fallback()
+            result = self._heuristic_classify(prompt) if prompt else TaskClassification.fallback()
 
         logger.info("CLASSIFIER | label=%s confidence=%.2f", result.primary_label, result.confidence)
 
@@ -160,8 +160,8 @@ class TaskClassifier:
     def _classify_with_llm(self, prompt: str) -> TaskClassification:
         model = self._pick_model()
         if model is None:
-            logger.warning("Classifier: tidak ada model general - pakai fallback.")
-            return TaskClassification.fallback()
+            logger.warning("Classifier: tidak ada model general - pakai fallback heuristik.")
+            return self._heuristic_classify(prompt)
 
         response = self._client.chat(
             provider=model.provider,
@@ -178,10 +178,122 @@ class TaskClassifier:
         )
 
         if "error" in response:
-            logger.warning("Classifier: provider error - %s", response["error"])
-            return TaskClassification.fallback()
+            logger.warning("Classifier: provider error - %s - pakai fallback heuristik.", response["error"])
+            return self._heuristic_classify(prompt)
 
-        return parse_classification((response.get("message") or {}).get("content"))
+        parsed = parse_classification((response.get("message") or {}).get("content"))
+        if parsed.primary_label == DEFAULT_LABEL and parsed.confidence <= 0.5:
+            # If LLM returned generic fallback or failed to parse, attempt heuristic boost
+            heuristic = self._heuristic_classify(prompt)
+            if heuristic.primary_label != DEFAULT_LABEL:
+                return heuristic
+        return parsed
+
+    @staticmethod
+    def _heuristic_classify(prompt: str) -> TaskClassification:
+        """Deterministic heuristic fallback classifier when LLM provider is unavailable."""
+        p = prompt.lower()
+
+        # 1. Automation / Scheduled tasks
+        automation_patterns = [
+            r"\b(jadwal|jadwalkan|cron|otomatisasi|schedule|recurring|periodic|backup berkala)\b",
+        ]
+        if any(re.search(pat, p) for pat in automation_patterns):
+            return TaskClassification(
+                primary_label="automation",
+                confidence=0.80,
+                requires_tools=True,
+                requires_vision=False,
+                requires_voice=False,
+            )
+
+        # 2. Vision / Images
+        vision_patterns = [
+            r"\b(gambar|foto|image|screenshot|diagram|kamera|ocr|lihat gambar)\b",
+        ]
+        if any(re.search(pat, p) for pat in vision_patterns):
+            return TaskClassification(
+                primary_label="vision",
+                confidence=0.80,
+                requires_tools=False,
+                requires_vision=True,
+                requires_voice=False,
+            )
+
+        # 3. Voice / Speech
+        voice_patterns = [
+            r"\b(suara|bicara|dengar|audio|voice|speech|stt|tts|rekam)\b",
+        ]
+        if any(re.search(pat, p) for pat in voice_patterns):
+            return TaskClassification(
+                primary_label="voice",
+                confidence=0.80,
+                requires_tools=False,
+                requires_vision=False,
+                requires_voice=True,
+            )
+
+        # 4. Networking / RouterOS / Network Operations
+        networking_patterns = [
+            r"\b(mikrotik|routeros|router|switch|vlan|bgp|ospf|vrrp|rip|mpls)\b",
+            r"\b(firewall|nat|mangle|ip route|routing|gateway|subnet|dhcp)\b",
+            r"\b(ping|traceroute|snmp|bandwidth|latency|packet loss|interface)\b",
+            r"\b(winbox|the dude|bridge|ether\d+|wlan\d+|wireguard|ipsec|vpn)\b",
+        ]
+        if any(re.search(pat, p) for pat in networking_patterns):
+            return TaskClassification(
+                primary_label="networking",
+                confidence=0.80,
+                requires_tools=True,
+                requires_vision=False,
+                requires_voice=False,
+            )
+
+        # 5. Coding / Software Engineering
+        coding_patterns = [
+            r"\b(def\s+\w+|class\s+\w+|import\s+\w+|function\s+\w+)\b",
+            r"\b(python|javascript|typescript|golang|bash|sql|react|html|css)\b",
+            r"\b(code|coding|refactor|debugging|unit test|pytest|syntax|compile)\b",
+            r"\b(git commit|git push|pull request|dockerfile|api endpoint)\b",
+        ]
+        if any(re.search(pat, p) for pat in coding_patterns):
+            return TaskClassification(
+                primary_label="coding",
+                confidence=0.80,
+                requires_tools=False,
+                requires_vision=False,
+                requires_voice=False,
+            )
+
+        # 6. Reasoning / Math / Complex analysis
+        reasoning_patterns = [
+            r"\b(hitung|analisis mendalam|buktikan|logika|mengapa|kenapa|matematika)\b",
+            r"\b(step by step|langkah demi langkah|derive|evaluasi perbandingan)\b",
+        ]
+        if any(re.search(pat, p) for pat in reasoning_patterns):
+            return TaskClassification(
+                primary_label="reasoning",
+                confidence=0.75,
+                requires_tools=False,
+                requires_vision=False,
+                requires_voice=False,
+            )
+
+        # 7. Retrieval / Search
+        retrieval_patterns = [
+            r"\b(cari|search|berita terbaru|informasi terkini|fakta tentang|siapa itu)\b",
+        ]
+        if any(re.search(pat, p) for pat in retrieval_patterns):
+            return TaskClassification(
+                primary_label="retrieval",
+                confidence=0.75,
+                requires_tools=True,
+                requires_vision=False,
+                requires_voice=False,
+            )
+
+        # Default fallback: general / 0.50
+        return TaskClassification.fallback()
 
 
 _classifier_singleton: Optional[TaskClassifier] = None

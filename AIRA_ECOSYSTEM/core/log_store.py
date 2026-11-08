@@ -257,6 +257,22 @@ def query_logs(
     return results
 
 
+def get_log_by_id(log_id: int) -> Optional[dict]:
+    """Retrieve a single log entry directly by its ID."""
+    with closing(_connect()) as conn:
+        row = conn.execute("SELECT * FROM logs WHERE id = ?", (log_id,)).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    if item.get("context"):
+        try:
+            item["context"] = json.loads(item["context"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    item["success"] = None if item.get("success") is None else bool(item["success"])
+    return item
+
+
 def count_logs(
     category: Optional[str] = None,
     level: Optional[str] = None,

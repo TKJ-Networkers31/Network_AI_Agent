@@ -86,6 +86,12 @@ def get_nms_overview():
     return {"success": True, "overview": engine.get_overview()}
 
 
+@router.get("/status")
+def get_nms_status():
+    """Alias for /api/nms/overview."""
+    return get_nms_overview()
+
+
 @router.get("/settings")
 def get_nms_settings():
     engine = get_nms_engine()

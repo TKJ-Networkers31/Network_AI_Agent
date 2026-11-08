@@ -7,6 +7,8 @@ ini membuat snapshot (SHA256 + salinan isi + timestamp) di
 .aira_history/ di dalam workspace, supaya perubahan bisa di-restore.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
@@ -14,6 +16,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from core.filesystem.models import HistorySnapshot
 
@@ -171,6 +174,3 @@ class HistoryEngine:
         logger.warning("RESTORE GAGAL | snapshot_id=%s tidak ditemukan.", snapshot_id)
 
         return False
-
-
-from typing import Optional  # noqa: E402  (dipakai di list_history di atas)

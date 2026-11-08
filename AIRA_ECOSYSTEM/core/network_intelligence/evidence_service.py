@@ -1163,8 +1163,14 @@ class UnifiedEvidenceService:
                             out["topology_edges"].append(d)
 
                 if "nms_incidents" in tables:
-                    for r in conn.execute("SELECT * FROM nms_incidents ORDER BY started_at DESC LIMIT 100").fetchall():
+                    cols = [c[1] for c in conn.execute("PRAGMA table_info(nms_incidents)").fetchall()]
+                    sort_col = "started_at" if "started_at" in cols else ("opened_at" if "opened_at" in cols else "rowid")
+                    for r in conn.execute(f"SELECT * FROM nms_incidents ORDER BY {sort_col} DESC LIMIT 100").fetchall():
                         d = dict(r)
+                        if "opened_at" in d and "started_at" not in d:
+                            d["started_at"] = d["opened_at"]
+                        elif "started_at" in d and "opened_at" not in d:
+                            d["opened_at"] = d["started_at"]
                         if not dev_set or d.get("device_id") in dev_set:
                             out["incidents"].append(d)
 
@@ -1238,7 +1244,12 @@ class UnifiedEvidenceService:
         )
         # Ingest any collected routes into MultiDeviceRouteCollector
         try:
-            ingested = self.route_collector.ingest_multi_device_evidence_bundle(mbundle)
+            if hasattr(self.route_collector, "ingest_bundle_routes"):
+                ingested = self.route_collector.ingest_bundle_routes(mbundle)
+            elif hasattr(self.route_collector, "ingest_multi_device_evidence_bundle"):
+                ingested = self.route_collector.ingest_multi_device_evidence_bundle(mbundle)
+            else:
+                ingested = {}
             for did, rres in ingested.items():
                 bundle.routing_evidence[did] = list(rres.routes)
         except Exception as exc:

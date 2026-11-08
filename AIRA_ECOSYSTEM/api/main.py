@@ -122,15 +122,21 @@ from api.routers import portal
 app.include_router(portal.router)                # Customer Self-Service Portal (Networking VIII / Phase D)
 app.include_router(ws.router)
 
-from api.routers import auth, admin_platform, automations, billing, playbooks, personalization
+from api.routers import auth, admin_platform, automations, playbooks, personalization
 app.include_router(auth.router)
 app.include_router(admin_platform.router)
 from api.routers import user_management
 app.include_router(user_management.router)
 app.include_router(automations.router)
-app.include_router(billing.router)
 app.include_router(playbooks.router)
 app.include_router(personalization.router)
+
+
+@app.get("/api/v1/nms/status", tags=["nms"])
+def get_nms_status_v1_alias():
+    """Alias for /api/nms/overview."""
+    from core.nms_engine import get_nms_engine
+    return {"success": True, "overview": get_nms_engine().get_overview()}
 
 
 def _warm_host_location() -> None:

@@ -104,6 +104,8 @@ class OperationalDecisionEngine:
             conf_val = getattr(rca_report, "confidence", None)
             if isinstance(conf_val, (int, float)):
                 confidence = float(conf_val)
+            elif conf_val and hasattr(conf_val, "score"):
+                confidence = float(conf_val.score)
             elif conf_val and hasattr(conf_val, "composite_score"):
                 confidence = float(conf_val.composite_score)
             else:
@@ -117,7 +119,14 @@ class OperationalDecisionEngine:
             for hyp in hyps:
                 prob = getattr(hyp, "probability", None)
                 if prob is None and hasattr(hyp, "confidence") and hyp.confidence:
-                    prob = getattr(hyp.confidence, "composite_score", 0.5)
+                    if hasattr(hyp.confidence, "score"):
+                        prob = hyp.confidence.score
+                    elif hasattr(hyp.confidence, "composite_score"):
+                        prob = hyp.confidence.composite_score
+                    elif isinstance(hyp.confidence, (int, float)):
+                        prob = float(hyp.confidence)
+                    else:
+                        prob = 0.5
                 rca_hypotheses.append({
                     "hypothesis_id": getattr(hyp, "hypothesis_id", "hyp_1"),
                     "title": getattr(hyp, "title", "Hypothesis"),

@@ -232,16 +232,26 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
         case "ack":
         case "thinking":
         case "tool_start":
-        case "tool_finish":
+        case "tool_finish": {
+          batcherRef.current?.flush(sid);
+          commitRunEvent(sid, event);
+          break;
+        }
+
         case "stream_start":
         case "stream_delta":
         case EVENT_RESPONSE_CHUNK: {
-          commitRunEvent(sid, event);
+          if (isStreamEvent(type) && batcherRef.current) {
+            batcherRef.current.push(sid, event);
+          } else {
+            commitRunEvent(sid, event);
+          }
           break;
         }
 
         case "transcript": {
           if (isStale) break;
+          batcherRef.current?.flush(sid);
           // hasil STT dari voice call mode - tampilkan sebagai bubble user
           setMessagesForSession(sid, (prev) => [
             ...prev,
@@ -251,12 +261,14 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
         }
 
         case "transcript_empty": {
+          batcherRef.current?.flush(sid);
           voiceHandlersRef.current?.cancelWaiting?.();
           if (current && !isOtherRun) setRun(sid, null);
           break;
         }
 
         case "response": {
+          batcherRef.current?.flush(sid);
           // Selalu ditampilkan (termasuk bila run_id-nya basi): kalau server
           // sempat menyelesaikan giliran sebelum pesan Stop terbaca, hasilnya
           // SUDAH tersimpan di database, jadi UI harus ikut menampilkannya.

@@ -501,15 +501,24 @@ class CanonicalNetworkRegistry:
         try:
             from core.nms_engine import get_nms_engine
             engine = get_nms_engine()
-            res = engine.get_overview()
+            devices = engine.list_devices()
             status_map = {}
-            for dev in res.get("devices", []):
-                name = str(dev.get("name") or "").lower()
-                ip = str(dev.get("host") or "").strip()
+            for dev in devices:
+                status = dev.get("nms_status") or dev.get("status") or "UNKNOWN"
+                dev_data = dict(dev)
+                dev_data["status"] = status
+                name = str(dev.get("name") or "").lower().strip()
+                identity = str(dev.get("identity") or dev.get("device_identity") or "").lower().strip()
+                ip = str(dev.get("ip") or dev.get("host") or "").strip()
+                dev_id = str(dev.get("id") or "").strip()
                 if name:
-                    status_map[name] = dev
+                    status_map[name] = dev_data
+                if identity:
+                    status_map[identity] = dev_data
                 if ip:
-                    status_map[ip] = dev
+                    status_map[ip] = dev_data
+                if dev_id:
+                    status_map[dev_id] = dev_data
             return status_map
         except Exception as exc:
             logger.debug("Failed to read NMS statuses: %s", exc)

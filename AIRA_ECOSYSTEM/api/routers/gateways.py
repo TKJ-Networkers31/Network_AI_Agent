@@ -17,12 +17,12 @@ from pydantic import BaseModel, Field
 
 from core.edge_gateway.manager import EdgeGatewayManager
 from core.tenant.manager import IdentityManager
+from core.tenant.auth_deps import get_current_authenticated_user, require_permission
 from core.tenant.models import Permission, TenantContext
 
 logger = logging.getLogger("aira.api.gateways")
 
-from core.tenant.auth_deps import require_permission
-router = APIRouter(prefix="/api/v1/gateways", tags=["edge-gateways"], dependencies=[Depends(require_permission("devices.read"))])
+router = APIRouter(prefix="/api/v1/gateways", tags=["edge-gateways"])
 
 _gateway_mgr = EdgeGatewayManager()
 _identity_mgr = IdentityManager()
@@ -67,31 +67,8 @@ class RevokeGatewayRequest(BaseModel):
 # Security Dependencies
 # ---------------------------------------------------------------------------
 
-def get_current_user_context(authorization: Optional[str] = Header(None)) -> TenantContext:
-    """Authenticates human operator / customer user session token."""
-    if not authorization or not authorization.startswith("Bearer "):
-        # For development / unauthenticated fallback, create a default NOC operator context
-        # when running in local lab mode, but if a token is present, validate it strictly.
-        if authorization and authorization.startswith("Bearer aira_tok_"):
-            token = authorization.split(" ", 1)[1]
-            ctx = _identity_mgr.validate_session_token(token)
-            if ctx:
-                return ctx
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session token.")
-        # Default internal admin context for backward compatibility
-        return TenantContext(
-            user_id="usr_internal_admin",
-            username="noc_admin",
-            is_internal=True,
-            tenant_id=None,
-            roles=["NOC_ADMIN"],
-            permissions={p.value for p in Permission},
-        )
-
-    token = authorization.split(" ", 1)[1]
-    ctx = _identity_mgr.validate_session_token(token)
-    if not ctx:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session token.")
+def get_current_user_context(ctx: TenantContext = Depends(require_permission("gateways.read"))) -> TenantContext:
+    """Authenticates human operator / customer user session token via central auth."""
     return ctx
 
 
@@ -109,7 +86,7 @@ def extract_bearer_token(authorization: Optional[str] = Header(None)) -> str:
 @router.post("/tokens", summary="Generate a single-use gateway enrollment token")
 def create_enrollment_token(
     payload: CreateTokenRequest,
-    user: TenantContext = Depends(get_current_user_context),
+    user: TenantContext = Depends(require_permission("gateways.read")),
 ):
     """Generates an onboarding token bound to a specific tenant and site."""
     if not user.has_permission(Permission.GATEWAY_MANAGE):
@@ -175,7 +152,7 @@ def list_gateways(
     tenant_id: Optional[str] = Query(None),
     site_id: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="status"),
-    user: TenantContext = Depends(get_current_user_context),
+    user: TenantContext = Depends(require_permission("gateways.read")),
 ):
     """Lists edge gateways adhering strictly to tenant isolation."""
     target_tenant = tenant_id
@@ -199,7 +176,7 @@ def list_gateways(
 @router.get("/{gateway_id}", summary="Get edge gateway details")
 def get_gateway(
     gateway_id: str,
-    user: TenantContext = Depends(get_current_user_context),
+    user: TenantContext = Depends(require_permission("gateways.read")),
 ):
     """Retrieves gateway enforcing tenant isolation."""
     # Find gateway
@@ -217,7 +194,7 @@ def get_gateway(
 @router.get("/{gateway_id}/health", summary="Get edge gateway liveness and health")
 def get_gateway_health(
     gateway_id: str,
-    user: TenantContext = Depends(get_current_user_context),
+    user: TenantContext = Depends(require_permission("gateways.read")),
 ):
     """Returns gateway liveness and buffer depth."""
     health = _gateway_mgr.get_gateway_health(gateway_id)
@@ -234,7 +211,7 @@ def get_gateway_health(
 def revoke_gateway(
     gateway_id: str,
     payload: RevokeGatewayRequest,
-    user: TenantContext = Depends(get_current_user_context),
+    user: TenantContext = Depends(require_permission("gateways.read")),
 ):
     """Revokes gateway access."""
     if not user.has_permission(Permission.GATEWAY_MANAGE):

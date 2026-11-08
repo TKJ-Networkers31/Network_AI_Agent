@@ -1,19 +1,21 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
-import GraphBlock from "./GraphBlock.jsx";
-import MapBlock from "./MapBlock.jsx";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import ActionCardBlock from "./ActionCardBlock.jsx";
-import MermaidBlock from "./MermaidBlock.jsx";
 import DOMPurify from "dompurify";
 import CopyButton from "./CopyButton.jsx";
 import { copyText } from "../utils/clipboard.js";
 import { useToast } from "./Toast.jsx";
 import { api } from "../api.js";
+
+// Lazy-load heavy visual diagram blocks to optimize initial bundle size (REC-25)
+const GraphBlock = lazy(() => import("./GraphBlock.jsx"));
+const MapBlock = lazy(() => import("./MapBlock.jsx"));
+const MermaidBlock = lazy(() => import("./MermaidBlock.jsx"));
 
 // PERUBAHAN (Chat Session: salin bagian penting output):
 // - Blok kode (```...```) sekarang punya header dengan tombol "Salin".
@@ -397,7 +399,11 @@ function CodeBlock({ className, children }) {
 
     // Peta Leaflet: blok ```map berisi JSON dari tool maps_*.
   if (lang === "map") {
-    return <MapBlock code={raw} />;
+    return (
+      <Suspense fallback={<div className="p-4 rounded-xl bg-white/[0.02] border border-white/10 text-xs text-text-secondary animate-pulse">Memuat modul peta Leaflet...</div>}>
+        <MapBlock code={raw} />
+      </Suspense>
+    );
   }
 
   // Interactive Form & Action Plan card (Workstream H)
@@ -407,13 +413,21 @@ function CodeBlock({ className, children }) {
 
   // Mermaid diagrams (Workstream H)
   if (lang === "mermaid") {
-    return <MermaidBlock code={raw} />;
+    return (
+      <Suspense fallback={<div className="p-4 rounded-xl bg-white/[0.02] border border-white/10 text-xs text-text-secondary animate-pulse">Memuat diagram Mermaid...</div>}>
+        <MermaidBlock code={raw} />
+      </Suspense>
+    );
   }
 
  // Diprioritaskan sebelum deteksi SVG: kalau payload sudah berbentuk
  // node/edge terstruktur, pakai layout engine, jangan render sebagai teks.
   if ((lang === "graph" || lang === "json" || !lang) && looksLikeGraphJson(raw)) {
-    return <GraphBlock code={raw} />;
+    return (
+      <Suspense fallback={<div className="p-4 rounded-xl bg-white/[0.02] border border-white/10 text-xs text-text-secondary animate-pulse">Memuat graf interaktif...</div>}>
+        <GraphBlock code={raw} />
+      </Suspense>
+    );
   }
 
   // SVG: ```svg, atau ```xml/```html/tanpa bahasa yang isinya <svg>...</svg> utuh.

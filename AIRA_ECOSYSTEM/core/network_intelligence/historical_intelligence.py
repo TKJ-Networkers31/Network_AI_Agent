@@ -89,18 +89,25 @@ class HistoricalIntelligenceEngine:
                 tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
                 if "nms_incidents" not in tables:
                     return []
-                query = "SELECT * FROM nms_incidents WHERE started_at >= ?"
+                cols = [c[1] for c in conn.execute("PRAGMA table_info(nms_incidents)").fetchall()]
+                time_col = "started_at" if "started_at" in cols else ("opened_at" if "opened_at" in cols else "rowid")
+                query = f"SELECT * FROM nms_incidents WHERE {time_col} >= ?"
                 params: List[Any] = [cutoff]
                 if device_id:
                     query += " AND device_id = ?"
                     params.append(device_id)
-                query += " ORDER BY started_at ASC"
+                query += f" ORDER BY {time_col} ASC"
 
                 rows = conn.execute(query, params).fetchall()
                 by_type_device: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
                 for r in rows:
-                    k = (str(r["device_id"]), str(r["incident_type"]))
-                    by_type_device.setdefault(k, []).append(dict(r))
+                    d_row = dict(r)
+                    if "opened_at" in d_row and "started_at" not in d_row:
+                        d_row["started_at"] = d_row["opened_at"]
+                    elif "started_at" in d_row and "opened_at" not in d_row:
+                        d_row["opened_at"] = d_row["started_at"]
+                    k = (str(d_row.get("device_id")), str(d_row.get("incident_type")))
+                    by_type_device.setdefault(k, []).append(d_row)
 
                 for (did, itype), incs in by_type_device.items():
                     if len(incs) >= 2:
@@ -109,8 +116,8 @@ class HistoricalIntelligenceEngine:
                                 "device_id": did,
                                 "incident_type": itype,
                                 "recurrence_count": len(incs),
-                                "first_seen_at": float(incs[0]["started_at"]),
-                                "last_seen_at": float(incs[-1]["started_at"]),
+                                "first_seen_at": float(incs[0].get("started_at") or incs[0].get("opened_at") or 0.0),
+                                "last_seen_at": float(incs[-1].get("started_at") or incs[-1].get("opened_at") or 0.0),
                                 "is_flapping": len(incs) >= 3,
                                 "incident_ids": [str(i.get("id") or i.get("incident_id")) for i in incs],
                             }

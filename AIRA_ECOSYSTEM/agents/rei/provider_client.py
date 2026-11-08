@@ -69,7 +69,9 @@ EMPTY_RESPONSE_MARKER = (
 )
 
 # Hanya error sementara yang di-retry di model yang sama (jumlah = retry_provider).
-TRANSIENT_ERROR_TYPES = {"rate_limit", "connection"}
+TRANSIENT_ERROR_TYPES = {"rate_limit", "connection", "timeout"}
+
+DEFAULT_LLM_TIMEOUT = float(os.getenv("AIRA_LLM_TIMEOUT", "45"))
 
 PROVIDER_ENV_KEYS: dict[str, str] = {
     "openrouter": "OPENROUTER_API",
@@ -102,7 +104,12 @@ def _classify_request_exception(exc: Exception) -> str:
     if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError)):
         return "connection"  # ChunkedEncodingError = stream terputus di tengah jalan
     if isinstance(exc, requests.exceptions.HTTPError):
-        return "rate_limit" if getattr(exc.response, "status_code", None) == 429 else "other"
+        code = getattr(exc.response, "status_code", None)
+        if code == 429:
+            return "rate_limit"
+        if code == 404:
+            return "not_found"
+        return "other"
     return "other"
 
 
@@ -632,7 +639,7 @@ class ProviderClient:
 
         if provider in PROVIDER_ENV_KEYS:
             return _chat_openai_compatible(
-                provider, model, messages, tools, temperature, max_tokens, timeout or 120, think,
+                provider, model, messages, tools, temperature, max_tokens, timeout or DEFAULT_LLM_TIMEOUT, think,
             )
 
         return {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
@@ -668,7 +675,7 @@ class ProviderClient:
             if provider in PROVIDER_ENV_KEYS:
                 return _chat_openai_stream(
                     provider, model, messages, tools, temperature, max_tokens,
-                    timeout or 120, on_delta, cancel_event, think,
+                    timeout or DEFAULT_LLM_TIMEOUT, on_delta, cancel_event, think,
                 )
 
             return {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
@@ -826,17 +833,40 @@ def call_model(
     if fallback is None:
         return {"error": result["error"]}
 
-    result = _attempt(fallback, messages, tools, retries=0, stream=stream, cancel_event=cancel_event)
+    fb_result = _attempt(fallback, messages, tools, retries=0, stream=stream, cancel_event=cancel_event)
 
-    if result.get("cancelled"):
-        return {"error": result["error"], "error_type": "cancelled", "cancelled": True}
+    if fb_result.get("cancelled"):
+        return {"error": fb_result["error"], "error_type": "cancelled", "cancelled": True}
 
-    if "error" in result:
-        _publish_model_failed(fallback, result)
-        return {"error": result["error"]}
+    if "error" not in fb_result:
+        fb_result["model"] = fallback.to_dict()
+        return fb_result
 
-    result["model"] = fallback.to_dict()
-    return result
+    _publish_model_failed(fallback, fb_result)
+
+    # Multi-provider fallback chain (NEW-01): If fallback model returns 404 / missing,
+    # recover by attempting subsequent candidates in the enabled models chain.
+    if fb_result.get("error_type") in ("not_found", "model_missing") and hasattr(policy, "fallback_candidates"):
+        attempted = {selected.id, fallback.id}
+        for cand_row in policy.fallback_candidates(exclude_ids=attempted):
+            cand_model = SelectedModel.from_row(cand_row, fallback_from=selected.id) if isinstance(cand_row, dict) else cand_row
+            logger.warning("FALLBACK CHAIN 404 RECOVERY | %s -> %s", fallback.display_name, cand_model.display_name)
+            try:
+                event_bus.publish(
+                    "model.fallback", agent="POLICY",
+                    data={"from": selected.id, "to": cand_model.id, "reason": "fallback_404_recovery"},
+                )
+            except Exception:
+                pass
+            cand_res = _attempt(cand_model, messages, tools, retries=0, stream=stream, cancel_event=cancel_event)
+            if cand_res.get("cancelled"):
+                return {"error": cand_res["error"], "error_type": "cancelled", "cancelled": True}
+            if "error" not in cand_res:
+                cand_res["model"] = cand_model.to_dict()
+                return cand_res
+            _publish_model_failed(cand_model, cand_res)
+
+    return {"error": fb_result["error"]}
 
 
 # ============================================================ kompatibilitas

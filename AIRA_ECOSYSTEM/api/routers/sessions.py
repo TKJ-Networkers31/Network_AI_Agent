@@ -43,6 +43,18 @@ def get_active_session(ctx: TenantContext = Depends(get_current_authenticated_us
     return store.create_session(user_id=ctx.user_id)
 
 
+@router.get("/{session_id}")
+def get_session(
+    session_id: str,
+    ctx: TenantContext = Depends(get_current_authenticated_user),
+):
+    """Retrieves a single session validating authenticated user ownership."""
+    row = store.get_session_row(session_id, user_id=ctx.user_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesi tidak ditemukan atau akses ditolak.")
+    return row
+
+
 @router.get("/{session_id}/messages")
 def get_messages(
     session_id: str,

@@ -465,9 +465,14 @@ def query_metrics(
     # Ensure tables exist
     try:
         conn = get_topology_connection(resolved_path, read_only=True)
-        # Check if table exists
-        check = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='nms_raw_metrics'").fetchone()
-        if not check:
+        # Check if all required metric tables exist (raw + rollups)
+        required_tables = {"nms_raw_metrics", "nms_5m_rollups", "nms_1h_rollups"}
+        existing_tables = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('nms_raw_metrics', 'nms_5m_rollups', 'nms_1h_rollups')"
+            ).fetchall()
+        }
+        if not required_tables.issubset(existing_tables):
             conn.close()
             init_metrics_tables(resolved_path)
             conn = get_topology_connection(resolved_path, read_only=True)

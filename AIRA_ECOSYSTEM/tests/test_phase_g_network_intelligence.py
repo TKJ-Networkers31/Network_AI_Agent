@@ -302,7 +302,10 @@ def test_api_network_intelligence_overview():
         permissions={"*"},
         account_enabled=True,
     )
+    from core.tenant.auth_deps import require_permission
+    dep = require_permission("nms.read")
     app.dependency_overrides[get_current_authenticated_user] = lambda: mock_admin_context
+    app.dependency_overrides[dep] = lambda: mock_admin_context
 
     try:
         res = client.get("/api/intelligence/overview", headers={"Authorization": "Bearer mock_token"})

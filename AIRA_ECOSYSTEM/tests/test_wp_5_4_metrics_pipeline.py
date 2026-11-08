@@ -266,20 +266,33 @@ def test_08_api_query_endpoint():
     """Verify FastAPI /api/nms/metrics/query endpoint execution."""
     from fastapi.testclient import TestClient
     from api.main import app
+    from core.tenant.auth_deps import get_current_authenticated_user
+    from core.tenant.models import TenantContext
 
-    client = TestClient(app)
-    resp = client.get(
-        "/api/nms/metrics/query",
-        params={
-            "device_id": "dev_test",
-            "metric_name": "aira.nms.device.cpu.utilization",
-            "step": "raw",
-        },
+    app.dependency_overrides[get_current_authenticated_user] = lambda: TenantContext(
+        user_id="test_admin",
+        tenant_id="tenant_default",
+        username="admin",
+        is_internal=True,
+        roles=["PLATFORM_OWNER"],
+        permissions={"nms.read", "nms.write"},
     )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["success"] is True
-    assert data["device_id"] == "dev_test"
-    assert data["metric_name"] == "aira.nms.device.cpu.utilization"
-    assert "resolution" in data
-    assert "points" in data
+    try:
+        client = TestClient(app)
+        resp = client.get(
+            "/api/nms/metrics/query",
+            params={
+                "device_id": "dev_test",
+                "metric_name": "aira.nms.device.cpu.utilization",
+                "step": "raw",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["device_id"] == "dev_test"
+        assert data["metric_name"] == "aira.nms.device.cpu.utilization"
+        assert "resolution" in data
+        assert "points" in data
+    finally:
+        app.dependency_overrides.pop(get_current_authenticated_user, None)

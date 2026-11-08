@@ -31,9 +31,15 @@ tmp
 *.log
 AIRA_ECOSYSTEM/logs/*
 !AIRA_ECOSYSTEM/logs/.gitkeep
+AIRA_ECOSYSTEM/database/*.db
+AIRA_ECOSYSTEM/database/*.db.old
 AIRA_ECOSYSTEM/database/*.db-journal
 AIRA_ECOSYSTEM/database/*.db-wal
 AIRA_ECOSYSTEM/database/*.db-shm
+AIRA_ECOSYSTEM/database/backups/
+AIRA_ECOSYSTEM/database/.master.key
+AIRA_ECOSYSTEM/database/.inventory.key
+*.key
 
 # OS artifacts
 .DS_Store

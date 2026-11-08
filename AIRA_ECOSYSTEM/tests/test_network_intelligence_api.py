@@ -8,8 +8,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
+from core.tenant.auth_deps import require_permission
+from core.tenant.models import TenantContext
 
 client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    mock_tenant = TenantContext(
+        user_id="test_admin",
+        username="admin",
+        is_internal=True,
+        tenant_id="tenant_default",
+        roles=["PLATFORM_OWNER"],
+        permissions={"nms.read", "nms.write", "topology.read", "topology.write", "admin.view", "workspace.view"}
+    )
+    dep = require_permission("nms.read")
+    app.dependency_overrides[dep] = lambda: mock_tenant
+    yield
+    app.dependency_overrides.pop(dep, None)
 
 
 def test_api_list_playbooks():

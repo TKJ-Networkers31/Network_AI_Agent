@@ -22,7 +22,7 @@ export const NAV_GROUPS = [
       { id: "infrastructure", label: "Infrastructure", icon: Network, requiredPermission: "inventory.view" },
       { id: "automations", label: "Automations", icon: Zap, requiredPermission: "automations.view" },
       { id: "files", label: "Files", icon: FolderOpen, requiredPermission: "files.view" },
-      { id: "models", label: "Models", icon: Cpu, requiredPermission: "models.view" },
+      { id: "models", label: "Models", icon: Cpu, superAdminOnly: true },
       { id: "logs", label: "Logs", icon: FileText, requiredPermission: "logs.view" },
     ],
   },

@@ -827,4 +827,9 @@ async def publish_event_async(
     )
 
 
+def get_event_bus() -> EventBus:
+    """Get the global EventBus singleton."""
+    return event_bus
+
+
 current_event_scope = current_event_context

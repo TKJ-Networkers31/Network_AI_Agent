@@ -194,7 +194,9 @@ class OperationalSchedulerEngine:
             hour_set = _parse_cron_field(fields[1], 0, 23)
             day_set = _parse_cron_field(fields[2], 1, 31)
             month_set = _parse_cron_field(fields[3], 1, 12)
-            dow_set = _parse_cron_field(fields[4], 0, 6)
+            raw_dow_set = _parse_cron_field(fields[4], 0, 7)
+            # Standard cron: 0 and 7 both represent Sunday
+            dow_set = {0 if v == 7 else v for v in raw_dow_set}
 
             # Fast-forward cursor in local time
             cursor = local_time.replace(second=0, microsecond=0) + timedelta(minutes=1)
@@ -202,8 +204,8 @@ class OperationalSchedulerEngine:
                 if cursor.month not in month_set:
                     cursor = (cursor + timedelta(days=1)).replace(hour=0, minute=0)
                     continue
-                matches_dow = (cursor.weekday() in dow_set or ((cursor.weekday() + 1) % 7) in dow_set)
-                if cursor.day not in day_set or not matches_dow:
+                cron_dow = (cursor.weekday() + 1) % 7
+                if cursor.day not in day_set or cron_dow not in dow_set:
                     cursor = (cursor + timedelta(days=1)).replace(hour=0, minute=0)
                     continue
                 if cursor.hour not in hour_set:

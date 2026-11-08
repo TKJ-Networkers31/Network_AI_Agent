@@ -167,21 +167,17 @@ def get_interface_traffic(device_name):
         if not results["out"]["error"] else []
     )
 
+    status_by_idx = {oid.rsplit(".", 1)[-1]: val for oid, val in status_walk if "." in str(oid)}
+    in_by_idx = {oid.rsplit(".", 1)[-1]: val for oid, val in in_walk if "." in str(oid)}
+    out_by_idx = {oid.rsplit(".", 1)[-1]: val for oid, val in out_walk if "." in str(oid)}
+
     interfaces = []
 
-    for i, (_, descr_val) in enumerate(descr_walk):
-
-        status_val = (
-            status_walk[i][1] if i < len(status_walk) else None
-        )
-
-        in_val = (
-            in_walk[i][1] if i < len(in_walk) else None
-        )
-
-        out_val = (
-            out_walk[i][1] if i < len(out_walk) else None
-        )
+    for oid, descr_val in descr_walk:
+        idx = oid.rsplit(".", 1)[-1] if "." in str(oid) else ""
+        status_val = status_by_idx.get(idx)
+        in_val = in_by_idx.get(idx)
+        out_val = out_by_idx.get(idx)
 
         interfaces.append({
             "name": descr_val,

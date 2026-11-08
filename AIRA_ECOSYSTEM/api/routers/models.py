@@ -11,7 +11,7 @@ dideklarasikan SEBELUM /{model_id}.
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from core.tenant.auth_deps import require_permission
+from core.tenant.auth_deps import require_superadmin
 from pydantic import BaseModel
 
 from agents.rei.provider_client import test_connection as _test_connection
@@ -20,7 +20,7 @@ from core.model_store import get_model_store
 from core.model_types import VALID_LABELS
 from core.task_classifier import get_task_classifier
 
-router = APIRouter(prefix="/api/models", tags=["models"], dependencies=[Depends(require_permission("settings.read"))])
+router = APIRouter(prefix="/api/models", tags=["models"], dependencies=[Depends(require_superadmin)])
 
 
 def _dump(payload: BaseModel, exclude_unset: bool = False) -> dict:

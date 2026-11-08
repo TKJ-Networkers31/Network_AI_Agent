@@ -25,8 +25,15 @@ terminal (audio diputar langsung di speaker laptop server).
 import io
 from pathlib import Path
 
-import sounddevice as sd
-import soundfile as sf
+try:
+    import sounddevice as sd
+except ImportError:
+    sd = None
+
+try:
+    import soundfile as sf
+except ImportError:
+    sf = None
 
 import logging
 
@@ -110,6 +117,10 @@ def speak(text, voice=DEFAULT_VOICE, speed=1.0, on_start=None, on_end=None):
     kokoro = _get_kokoro()
 
     if kokoro is None:
+        return False
+
+    if sd is None:
+        logger.warning("sounddevice is not available on this server; skipping local speaker playback.")
         return False
 
     try:

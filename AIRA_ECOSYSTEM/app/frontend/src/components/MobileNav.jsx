@@ -8,6 +8,7 @@
 
 import { Menu } from "lucide-react";
 import { ALL_NAV_ITEMS } from "./navConfig.js";
+import { useAuth } from "../context/AuthContext.jsx";
 
 const PRIMARY_IDS = ["workspace", "infrastructure", "automations", "files"];
 
@@ -31,12 +32,24 @@ function TabButton({ icon: Icon, label, isActive, onClick }) {
 }
 
 export default function MobileNav({ active, onChange, onOpenMenu }) {
-  const moreActive = !PRIMARY_IDS.includes(active);
+  const { hasPermission, isAdmin, isSuperAdmin } = useAuth();
+
+  const allowedPrimaryItems = PRIMARY_ITEMS.filter((item) => {
+    if (item.superAdminOnly) return isSuperAdmin;
+    if (item.adminOnly) return isAdmin;
+    if (item.requiredPermission) return hasPermission(item.requiredPermission);
+    return true;
+  });
+
+  const moreActive = !allowedPrimaryItems.some((item) => item.id === active);
 
   return (
     <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface/95 backdrop-blur-xl border-t border-border pb-[env(safe-area-inset-bottom)]">
-      <div className="grid grid-cols-5 h-14">
-        {PRIMARY_ITEMS.map((item) => (
+      <div
+        className="grid h-14"
+        style={{ gridTemplateColumns: `repeat(${allowedPrimaryItems.length + 1}, minmax(0, 1fr))` }}
+      >
+        {allowedPrimaryItems.map((item) => (
           <TabButton
             key={item.id}
             icon={item.icon}

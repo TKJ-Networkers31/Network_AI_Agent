@@ -28,6 +28,7 @@ from core.network_intelligence import (
     StaticSimulator,
     StaticValidator,
     get_network_intelligence_store,
+    get_network_investigator,
 )
 from core.network_intelligence.models import (
     DesiredStateIn,
@@ -90,7 +91,7 @@ def create_investigation(
     body: IncidentCreateIn,
     _auth=Depends(require_topology_admin),
 ):
-    investigator = NetworkInvestigator()
+    investigator = get_network_investigator()
     try:
         record = investigator.create_and_run_investigation(
             device_identity=body.device_identity,
@@ -350,7 +351,7 @@ def run_multi_device_investigation(
     _auth=Depends(require_topology_admin),
 ):
     try:
-        investigator = NetworkInvestigator()
+        investigator = get_network_investigator()
         record = investigator.run_multi_device_investigation(
             primary_device=body.primary_device,
             related_devices=body.related_devices,
@@ -1035,8 +1036,8 @@ def get_network_intelligence_overview():
     return {
         "success": True,
         "overview": {
-            "network_condition": health.get("status", "HEALTHY"),
-            "health_score": health.get("score", 100.0),
+            "network_condition": health.get("overall_status") or health.get("status", "HEALTHY"),
+            "health_score": health.get("overall_score") if health.get("overall_score") is not None else health.get("score", 100.0),
             "dimension_scores": health.get("dimensions", {}),
             "device_health": health.get("device_health", {}),
             "total_registered_devices": total_devices_count,
@@ -1116,7 +1117,7 @@ def investigate_natural_language_endpoint(
     body: NLInvestigateIn,
     _auth=Depends(require_topology_admin),
 ):
-    investigator = NetworkInvestigator()
+    investigator = get_network_investigator()
     try:
         report = investigator.investigate_natural_language(
             query=body.question,
@@ -1169,7 +1170,7 @@ def cancel_investigation_endpoint(
     investigation_id: str,
     _auth=Depends(require_topology_admin),
 ):
-    investigator = NetworkInvestigator()
+    investigator = get_network_investigator()
     ok = investigator.cancel_investigation(investigation_id)
     if not ok:
         raise HTTPException(
@@ -1553,6 +1554,22 @@ def propose_action_endpoint(body: ActionProposeIn):
     return {"success": True, "action": action.to_dict()}
 
 
+@router.get("/actions/policy", summary="Get AI operations and approval policy")
+def get_operations_policy_endpoint(tenant_id: str = "tenant_internal"):
+    from core.network_intelligence.action_engine import get_action_engine
+    engine = get_action_engine()
+    policy = engine.get_operations_policy(tenant_id=tenant_id)
+    return {"success": True, "policy": policy.to_dict()}
+
+
+@router.put("/actions/policy", summary="Update AI operations policy (Strict: High/Critical approval can never be bypassed)")
+def update_operations_policy_endpoint(body: OperationsPolicyUpdateIn, tenant_id: str = "tenant_internal"):
+    from core.network_intelligence.action_engine import get_action_engine
+    engine = get_action_engine()
+    policy = engine.update_operations_policy(tenant_id=tenant_id, policy_data=body.dict(exclude_none=True))
+    return {"success": True, "policy": policy.to_dict()}
+
+
 @router.get("/actions/{action_id}", summary="Get detailed action record with diff, verification, and approval info")
 def get_action_endpoint(action_id: str):
     from core.network_intelligence.action_engine import get_action_engine
@@ -1581,19 +1598,3 @@ def execute_action_endpoint(action_id: str):
     if not res.get("success"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=res.get("error", "Execution failed"))
     return res
-
-
-@router.get("/actions/policy", summary="Get AI operations and approval policy")
-def get_operations_policy_endpoint(tenant_id: str = "tenant_internal"):
-    from core.network_intelligence.action_engine import get_action_engine
-    engine = get_action_engine()
-    policy = engine.get_operations_policy(tenant_id=tenant_id)
-    return {"success": True, "policy": policy.to_dict()}
-
-
-@router.put("/actions/policy", summary="Update AI operations policy (Strict: High/Critical approval can never be bypassed)")
-def update_operations_policy_endpoint(body: OperationsPolicyUpdateIn, tenant_id: str = "tenant_internal"):
-    from core.network_intelligence.action_engine import get_action_engine
-    engine = get_action_engine()
-    policy = engine.update_operations_policy(tenant_id=tenant_id, policy_data=body.dict(exclude_none=True))
-    return {"success": True, "policy": policy.to_dict()}

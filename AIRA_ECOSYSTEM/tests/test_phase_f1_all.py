@@ -33,8 +33,9 @@ rbac_svc = get_rbac_service()
 def ensure_clean_start():
     """Ensure operational data is purged to a clean state before testing."""
     purge_operational_data()
+    from core.bootstrap_superadmin import bootstrap_superadmin
+    bootstrap_superadmin(password="AdminPassword123!", force_reset=True, db_path=identity_mgr.db_path)
     yield
-    # Purge any test artifacts created during tests
     purge_operational_data()
 
 
@@ -47,6 +48,10 @@ def admin_token():
     )
     if login_res.status_code != 200:
         u = identity_mgr.get_user_by_username("lingga_admin")
+        if not u:
+            from core.bootstrap_superadmin import bootstrap_superadmin
+            bootstrap_superadmin(password="AdminPassword123!", force_reset=True, db_path=identity_mgr.db_path)
+            u = identity_mgr.get_user_by_username("lingga_admin")
         identity_mgr.change_user_password(u.user_id, "AdminPassword123!", reset_must_change=True)
         login_res = client.post(
             "/api/v1/auth/login",

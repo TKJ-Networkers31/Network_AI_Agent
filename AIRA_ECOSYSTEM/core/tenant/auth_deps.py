@@ -5,6 +5,7 @@ Guarantees mandatory authentication across all internal endpoints and group-base
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Callable, Optional
 
 from fastapi import Depends, Header, HTTPException, status
@@ -17,27 +18,15 @@ _identity_mgr = IdentityManager()
 
 def get_current_authenticated_user(
     authorization: Optional[str] = Header(None),
-    x_guest_id: Optional[str] = Header(None, alias="X-Guest-ID"),
 ) -> TenantContext:
     """
-    Enforces mandatory authentication or valid guest identification.
-    Anonymous access without login or guest token is rejected with HTTP 401 Unauthorized.
+    Enforces mandatory authentication.
+    Anonymous access without a valid Bearer session token is rejected with HTTP 401 Unauthorized.
     """
     if not authorization or not authorization.startswith("Bearer "):
-        if x_guest_id and str(x_guest_id).strip().startswith("gst_"):
-            return TenantContext(
-                user_id=str(x_guest_id).strip(),
-                username=f"guest_{str(x_guest_id).strip()[:8]}",
-                tenant_id="tenant_guest",
-                roles=["GUEST"],
-                groups=["READ_ONLY"],
-                is_internal=False,
-                account_enabled=True,
-                permissions={"workspace.view", "ai_assistant.view", "personalization.manage"},
-            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Autentikasi wajib. Akses tanpa login ditolak.",
+            detail="Authentication required. Autentikasi wajib. Akses tanpa login ditolak.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -64,12 +53,38 @@ def get_current_authenticated_user(
     return ctx
 
 
+@lru_cache(maxsize=128)
 def require_permission(permission_id: str) -> Callable[[TenantContext], TenantContext]:
     """
     Factory dependency checking that the authenticated user's effective permissions
-    include the specified permission (with explicit DENY taking precedence).
+    include the specified permission (with explicit DENY taking precedence) and
+    verifies NETWORK_PLUS entitlement on networking modules.
     """
     def _dependency(ctx: TenantContext = Depends(get_current_authenticated_user)) -> TenantContext:
+        networking_prefixes = (
+            "inventory.", "devices.", "topology.", "nms.", "playbooks.",
+            "gateways.", "operations.", "intelligence.", "decisions.", "automation.",
+        )
+        if any(permission_id.startswith(p) for p in networking_prefixes):
+            from core.tenant.entitlement_service import get_entitlement_service
+            try:
+                import api.routers.auth as _auth_mod
+                target_db = getattr(getattr(_auth_mod, "_identity_mgr", None), "db_path", None)
+            except Exception:
+                target_db = None
+
+            ent_svc = get_entitlement_service(db_path=target_db)
+            if not ent_svc.has_entitlement(ctx, "NETWORK_PLUS"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "error": "ENTITLEMENT_REQUIRED",
+                        "code": "ENTITLEMENT_REQUIRED",
+                        "required_entitlement": "NETWORK_PLUS",
+                        "message": "Fitur jaringan memerlukan paket langganan dengan entitlement Network++. Silakan upgrade akun Anda.",
+                    },
+                )
+
         if not ctx.has_permission(permission_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -79,6 +94,7 @@ def require_permission(permission_id: str) -> Callable[[TenantContext], TenantCo
                     "required_permission": permission_id,
                 },
             )
+
         return ctx
 
     return _dependency
@@ -99,3 +115,23 @@ def require_platform_admin(ctx: TenantContext = Depends(get_current_authenticate
             detail="Platform administration access required. Akses ditolak: AIRA Control Plane memerlukan kredensial administrator.",
         )
     return ctx
+
+
+def require_superadmin(ctx: TenantContext = Depends(get_current_authenticated_user)) -> TenantContext:
+    """Enforces that the caller is a SUPERADMIN (lingga_admin or SUPER_ADMIN group/role)."""
+    uname = (ctx.username or "").lower()
+    groups = {str(g).upper() for g in (ctx.groups or [])} | {str(g).lower() for g in (ctx.groups or [])}
+    roles = {str(r).upper() for r in (ctx.roles or [])}
+
+    is_super = (
+        uname in {"lingga_admin", "admin"} or
+        bool(groups & {"SUPER_ADMIN", "GRP_SUPER_ADMIN", "grp_super_admin", "super_admin"}) or
+        bool(roles & {"PLATFORM_OWNER", "SUPERADMIN", "PLATFORM_SUPER_ADMIN"})
+    )
+    if not is_super:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akses ditolak: Menu Models hanya dapat diakses oleh Super Admin.",
+        )
+    return ctx
+

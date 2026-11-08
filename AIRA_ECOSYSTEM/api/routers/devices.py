@@ -88,6 +88,19 @@ class CredentialUpdate(BaseModel):
     note: Optional[str] = None
 
 
+class PromoteDiscoveredDeviceIn(BaseModel):
+    node_id: str
+    name: Optional[str] = None
+    host: Optional[str] = None
+    port: int = 22
+    username: str = "admin"
+    password: Optional[str] = None
+    device_type: str = "mikrotik"
+    credential_names: list[str] = Field(default_factory=list)
+    new_credentials: Optional[list[dict]] = None
+    note: str = ""
+
+
 # ------------------------------------------------------------ devices
 
 def sync_inventory_and_topology() -> dict:
@@ -434,15 +447,3 @@ def update_credential(name: str, body: CredentialUpdate):
 @router.delete("/credentials/{name}")
 def delete_credential(name: str):
     return _unwrap(get_inventory_store().delete_credential(name))
-
-class PromoteDiscoveredDeviceIn(BaseModel):
-    node_id: str
-    name: Optional[str] = None
-    host: Optional[str] = None
-    port: int = 22
-    username: str = "admin"
-    password: Optional[str] = None
-    device_type: str = "mikrotik"
-    credential_names: list[str] = Field(default_factory=list)
-    new_credentials: Optional[list[dict]] = None
-    note: str = ""

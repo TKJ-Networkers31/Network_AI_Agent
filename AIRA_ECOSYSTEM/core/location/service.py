@@ -54,7 +54,6 @@ class LocationService:
     def __init__(self, store: Optional[HostLocationStore] = None):
         self._store = store
         self._clients: dict[str, _ClientState] = {}
-        self._last_session_id: Optional[str] = None
         self._lock = threading.RLock()
         self._host_lock = threading.Lock()
 
@@ -156,8 +155,6 @@ class LocationService:
                 state.ip = ip
                 state.resolved = None
 
-            self._last_session_id = session_id
-
     def update_access(self, session_id: str, location: LocationContext, ip: Optional[str] = None) -> LocationContext:
         """Lokasi akses presisi dari browser (GPS)."""
         location.role = ROLE_ACCESS
@@ -176,7 +173,6 @@ class LocationService:
             state.gps = location
             if ip:
                 state.ip = ip
-            self._last_session_id = session_id
 
         self._publish(
             EventNames.LOCATION_UPDATED, role=ROLE_ACCESS, session_id=session_id,
@@ -198,8 +194,7 @@ class LocationService:
             return self._terminal_access()
 
         with self._lock:
-            # Sesi yang baru dibuat belum sempat melapor -> pakai klien yang terakhir terlihat.
-            state = self._clients.get(session_id) or self._clients.get(self._last_session_id or "")
+            state = self._clients.get(session_id)
 
             if state is None:
                 return None

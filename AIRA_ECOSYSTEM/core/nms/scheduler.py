@@ -27,7 +27,7 @@ import time
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
 
 from core.nms_models import NmsSchedulerState
-from mcp_servers.network.security import mask_sensitive_data
+from core.security.masking import mask_sensitive_data
 
 logger = logging.getLogger("aira.nms.scheduler")
 

@@ -40,8 +40,6 @@ MIN_AUDIO_DURATION_SEC ke 0.7-1.0, atau ganti MODEL_SIZE ke "base"
 (lebih akurat, lebih berat).
 """
 
-from faster_whisper import WhisperModel
-
 import logging
 
 logger = logging.getLogger("aira.yuki.stt")
@@ -70,6 +68,7 @@ def _get_model():
         return _model_instance
 
     try:
+        from faster_whisper import WhisperModel
 
         logger.info(
             f"STT | loading model faster-whisper '{MODEL_SIZE}' "

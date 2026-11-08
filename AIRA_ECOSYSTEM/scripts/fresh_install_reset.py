@@ -256,11 +256,6 @@ def execute_fresh_install_reset() -> dict:
                 "operational_user_sessions",
                 "operational_user_activity_events",
                 "operational_audit_log",
-                "operational_token_usage_ledger",
-                "operational_token_quota_adjustments",
-                "operational_billing_invoices",
-                "operational_billing_transactions",
-                "operational_billing_webhook_events",
                 "operational_customer_profiles",
                 "operational_customer_notification_preferences",
             ]
@@ -305,7 +300,6 @@ def execute_fresh_install_reset() -> dict:
                 placeholders = ",".join(["?"] * len(test_user_ids))
                 conn.execute(f"DELETE FROM operational_user_roles WHERE user_id IN ({placeholders})", test_user_ids)
                 conn.execute(f"DELETE FROM operational_user_group_memberships WHERE user_id IN ({placeholders})", test_user_ids)
-                conn.execute(f"DELETE FROM operational_token_balances WHERE user_id IN ({placeholders})", test_user_ids)
                 conn.execute(f"DELETE FROM operational_user_subscriptions WHERE user_id IN ({placeholders})", test_user_ids)
                 conn.execute(f"DELETE FROM operational_users WHERE user_id IN ({placeholders})", test_user_ids)
             top_cleared["operational_users_test_removed"] = len(test_user_ids)

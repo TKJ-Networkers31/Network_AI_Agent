@@ -60,8 +60,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run Vitest Unit Tests
-        run: npm test -- --run
+      - name: Run Frontend Unit Tests
+        run: npm test
 
       - name: Build Frontend Distribution
         run: npm run build

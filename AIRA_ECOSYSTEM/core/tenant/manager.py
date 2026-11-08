@@ -352,16 +352,18 @@ class IdentityManager:
         from core.tenant.rbac_service import get_rbac_service
         rbac_svc = get_rbac_service(self.db_path)
         target_group = group_name or (
-            "SUPER_ADMIN" if role_upper in ("PLATFORM_OWNER", "SUPERADMIN", "PLATFORM_SUPER_ADMIN")
+            None if role_upper.startswith("CUSTOMER_")
+            else ("SUPER_ADMIN" if role_upper in ("PLATFORM_OWNER", "SUPERADMIN", "PLATFORM_SUPER_ADMIN")
             else ("ADMIN" if role_upper == "ADMIN"
             else ("NOC" if role_upper in ("NOC_ADMIN", "NOC_OPERATOR", "NOC_ANALYST")
             else ("NETWORK_ENGINEER" if role_upper == "NETWORK_ENGINEER"
-            else "READ_ONLY")))
+            else "USER"))))
         )
-        try:
-            rbac_svc.assign_user_groups(user_id, [target_group])
-        except Exception:
-            pass
+        if target_group:
+            try:
+                rbac_svc.assign_user_groups(user_id, [target_group])
+            except Exception:
+                pass
 
         logger.info("Created user %s (%s, display=%s, group=%s)", user_id, username, actual_display_name, target_group)
         assigned_groups = [g["name"] for g in rbac_svc.get_user_groups(user_id)]
@@ -415,6 +417,8 @@ class IdentityManager:
 
             d_name = row["display_name"] if "display_name" in row.keys() and row["display_name"] else row["username"]
             acct_en = bool(row["account_enabled"]) if "account_enabled" in row.keys() else bool(row["is_active"])
+            must_ch = bool(row["must_change_password"]) if "must_change_password" in row.keys() else False
+            mfa_en = bool(row["mfa_enabled"]) if "mfa_enabled" in row.keys() else False
 
             return User(
                 user_id=row["user_id"],
@@ -432,6 +436,8 @@ class IdentityManager:
                 last_activity_at=row["last_activity_at"] if "last_activity_at" in row.keys() else None,
                 groups=groups,
                 permissions=perms,
+                must_change_password=must_ch,
+                mfa_enabled=mfa_en,
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -466,6 +472,8 @@ class IdentityManager:
 
             d_name = row["display_name"] if "display_name" in row.keys() and row["display_name"] else row["username"]
             acct_en = bool(row["account_enabled"]) if "account_enabled" in row.keys() else bool(row["is_active"])
+            must_ch = bool(row["must_change_password"]) if "must_change_password" in row.keys() else False
+            mfa_en = bool(row["mfa_enabled"]) if "mfa_enabled" in row.keys() else False
 
             return User(
                 user_id=row["user_id"],
@@ -483,6 +491,8 @@ class IdentityManager:
                 last_activity_at=row["last_activity_at"] if "last_activity_at" in row.keys() else None,
                 groups=groups,
                 permissions=perms,
+                must_change_password=must_ch,
+                mfa_enabled=mfa_en,
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
             )
@@ -513,6 +523,15 @@ class IdentityManager:
             actor_id=actor_id,
         )
         return True
+
+    def unlock_user_account(self, user_id: str) -> bool:
+        """Unlocks a locked user account and resets failed login counters."""
+        with topology_transaction(self.db_path, write=True) as conn:
+            cur = conn.execute(
+                "UPDATE operational_users SET failed_login_attempts = 0, locked_until_utc = NULL WHERE user_id = ?",
+                (user_id,),
+            )
+            return cur.rowcount > 0
 
     def list_users(self, tenant_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """Lists all registered users along with their groups, status, and activity timestamps."""
@@ -747,7 +766,9 @@ class IdentityManager:
 
             # MFA Verification Check
             if mfa_enabled and mfa_secret:
+                from core.security.encryption import decrypt_secret
                 from core.security.mfa import verify_totp_code
+                plain_mfa_secret = decrypt_secret(mfa_secret) or mfa_secret
                 if not totp_code:
                     return {
                         "success": False,
@@ -756,7 +777,7 @@ class IdentityManager:
                         "username": username,
                         "message": "Kode verifikasi 2FA (TOTP) diperlukan.",
                     }
-                if not verify_totp_code(mfa_secret, totp_code):
+                if not verify_totp_code(plain_mfa_secret, totp_code):
                     return {
                         "success": False,
                         "mfa_required": True,
@@ -856,15 +877,17 @@ class IdentityManager:
 
     def verify_and_enable_mfa(self, user_id: str, secret: str, code: str) -> bool:
         """Verifies initial TOTP code and activates MFA for user."""
+        from core.security.encryption import encrypt_secret
         from core.security.mfa import verify_totp_code
         if not verify_totp_code(secret, code):
             raise ValueError("Kode verifikasi 2FA tidak valid. Pastikan waktu perangkat Anda sinkron.")
 
+        enc_secret = encrypt_secret(secret)
         now_iso = datetime.now(timezone.utc).isoformat()
         with topology_transaction(self.db_path, write=True) as conn:
             conn.execute(
                 "UPDATE operational_users SET mfa_enabled = 1, mfa_secret = ?, updated_at = ? WHERE user_id = ?",
-                (secret, now_iso, user_id),
+                (enc_secret, now_iso, user_id),
             )
             aud_id = f"aud_{uuid.uuid4().hex[:16]}"
             conn.execute(
@@ -936,7 +959,7 @@ class IdentityManager:
             )
         return session
 
-    def create_session(self, user_id: str, duration_hours: int = 720) -> UserSession:
+    def create_session(self, user_id: str, duration_hours: int = 720, single_session_only: bool = False) -> UserSession:
         """Issues an active session token for an authenticated user (default: 30 days persistent)."""
         session_id = f"sess_{uuid.uuid4().hex[:16]}"
         raw_token = f"aira_tok_{secrets.token_urlsafe(32)}"
@@ -970,11 +993,11 @@ class IdentityManager:
                 except ValueError:
                     pass
 
-            # Enforce 1 active session per account: displace any previous active session
-            conn.execute(
-                "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE user_id = ? AND status = 'ACTIVE'",
-                (user_id,),
-            )
+            if single_session_only:
+                conn.execute(
+                    "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE user_id = ? AND status = 'ACTIVE'",
+                    (user_id,),
+                )
 
             conn.execute(
                 """
@@ -1051,21 +1074,23 @@ class IdentityManager:
                 (user_id,),
             ).fetchall()
             roles = [r["role_type"] for r in roles_rows]
-            permissions: Set[str] = set()
-            for r in roles:
-                try:
-                    rt = UserRoleType(r)
-                    for p in ROLE_PERMISSIONS.get(rt, set()):
-                        permissions.add(p.value)
-                except ValueError:
-                    pass
-
             from core.tenant.rbac_service import get_rbac_service
             rbac_svc = get_rbac_service(self.db_path)
             groups = [g["name"] for g in rbac_svc.get_user_groups(user_id)]
             effective_permissions = rbac_svc.get_effective_permissions(user_id)
-            for p in effective_permissions:
-                permissions.add(p)
+            if "READ_ONLY" in groups:
+                permissions = set(effective_permissions)
+            else:
+                permissions = set()
+                for r in roles:
+                    try:
+                        rt = UserRoleType(r)
+                        for p in ROLE_PERMISSIONS.get(rt, set()):
+                            permissions.add(p.value)
+                    except ValueError:
+                        pass
+                for p in effective_permissions:
+                    permissions.add(p)
 
             return TenantContext(
                 user_id=user_id,
@@ -1105,6 +1130,22 @@ class IdentityManager:
                 "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE user_id = ? AND status = 'ACTIVE'",
                 (user_id,),
             )
+            return cur.rowcount
+
+    def revoke_other_sessions(self, user_id: str, current_token: Optional[str] = None) -> int:
+        """Revokes all active sessions for a user except the current token session."""
+        token_hash = _hash_token(current_token) if current_token else None
+        with topology_transaction(self.db_path, write=True) as conn:
+            if token_hash:
+                cur = conn.execute(
+                    "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE user_id = ? AND status = 'ACTIVE' AND token_hash != ?",
+                    (user_id, token_hash),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE operational_user_sessions SET status = 'REVOKED' WHERE user_id = ? AND status = 'ACTIVE'",
+                    (user_id,),
+                )
             return cur.rowcount
 
 
@@ -1261,6 +1302,20 @@ class InventoryManager:
             )
 
         logger.info("Created device %s (%s - %s) for tenant %s site %s", device_id, name, management_ip, tenant_id, site_id)
+        try:
+            from core.inventory_store import get_inventory_store
+            inv = get_inventory_store()
+            if not inv.get_device(name.strip()).get("success"):
+                inv.create_device(
+                    name=name.strip(),
+                    host=management_ip.strip(),
+                    port=management_port,
+                    device_type=device_type.lower(),
+                    note=notes or "",
+                )
+        except Exception as exc:
+            logger.debug("Mirror device to InventoryStore skipped: %s", exc)
+
         return TenantDevice(
             device_id=device_id,
             tenant_id=tenant_id,

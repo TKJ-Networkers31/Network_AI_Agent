@@ -133,10 +133,18 @@ def test_sliding_window_rate_limiter():
 
 def test_permission_simulation_hierarchy():
     svc = get_permission_simulation_service()
+    id_mgr = IdentityManager()
+    admin_user = id_mgr.get_user_by_username("lingga_admin")
+    if not admin_user:
+        from core.bootstrap_superadmin import bootstrap_superadmin
+        bootstrap_superadmin()
+        admin_user = id_mgr.get_user_by_username("lingga_admin")
+
+    admin_uid = admin_user.user_id if admin_user else "usr_25b8282cc548"
 
     # Superadmin user
     res_admin = svc.simulate_permission(
-        user_id="usr_25b8282cc548",
+        user_id=admin_uid,
         resource="device:sw-core-01",
         action="EXECUTE",
     )

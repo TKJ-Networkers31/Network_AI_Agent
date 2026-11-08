@@ -61,7 +61,20 @@ def test_canonical_device_multi_device_attributes():
     assert d_dict["discovered_metadata"]["cpu_count"] == 1
 
 
+def _ensure_chr_device():
+    inv = get_inventory_store()
+    if not inv.get_device("CHR").get("success"):
+        inv.create_device(
+            name="CHR",
+            host="192.168.43.30",
+            port=22,
+            username="admin",
+            device_type="mikrotik",
+        )
+
+
 def test_canonical_network_registry_batch_resolution():
+    _ensure_chr_device()
     reg = CanonicalNetworkRegistry()
     devices = reg.list_devices()
     assert len(devices) > 0
@@ -76,6 +89,7 @@ def test_canonical_network_registry_batch_resolution():
 
 
 def test_inventory_store_batch_lookup_and_validation():
+    _ensure_chr_device()
     inv = get_inventory_store()
 
     # 1. Payload validation
@@ -102,6 +116,7 @@ def test_inventory_store_batch_lookup_and_validation():
 
 
 def test_duplicate_device_registration_safety():
+    _ensure_chr_device()
     inv = get_inventory_store()
     # Attempting to register existing device 'CHR' must fail gracefully
     dup_res = inv.create_device(

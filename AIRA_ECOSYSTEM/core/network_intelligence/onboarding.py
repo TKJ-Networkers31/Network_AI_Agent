@@ -175,8 +175,24 @@ class DeviceOnboardingEngine:
             capabilities.append("ssh_terminal")
             capabilities.append("read_only_cli")
 
-            # In production, try read-only discovery using credential
-            # Fallback to simulated/normalized baseline if live SSH credentials require lab environment
+            # Attempt live read-only facts discovery using registered credentials (REC-19)
+            facts_collected = False
+            if cred_name:
+                try:
+                    from core.network_intelligence.security import execute_safe_readonly_command
+                    cmd_res = execute_safe_readonly_command(name, "/system resource print", timeout=3.0)
+                    if cmd_res.get("success"):
+                        output = cmd_res.get("output", "")
+                        collected_info["system_resource"] = output
+                        collected_info["discovery_method"] = "live_ssh"
+                        facts_collected = True
+                except Exception as exc:
+                    logger.debug("Live SSH fact discovery notice on %s: %s", name, exc)
+
+            if not facts_collected:
+                collected_info["discovery_method"] = "tcp_probe"
+                collected_info["discovery_notes"] = "TCP reachability confirmed; full facts pending first authenticated polling cycle."
+
             collected_info["os_family"] = "RouterOS"
             collected_info["detected_capabilities"] = capabilities
             collected_info["interfaces_count"] = "NOT_AVAILABLE (Pending First Polling Cycle)"

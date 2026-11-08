@@ -157,12 +157,19 @@ def _row_to_dict(row: sqlite3.Row, mask_api_key: bool = True) -> dict[str, Any]:
     d["is_fallback"] = bool(d["is_fallback"])
     d["enabled"] = bool(d["enabled"])
 
-    has_key = bool(d.get("api_key"))
+    raw_key = d.get("api_key")
+    has_key = bool(raw_key)
 
     if mask_api_key:
         d.pop("api_key", None)
         d["has_api_key"] = has_key
     else:
+        if raw_key:
+            try:
+                from core.security.encryption import decrypt_secret
+                d["api_key"] = decrypt_secret(raw_key)
+            except Exception:
+                d["api_key"] = raw_key
         d["has_api_key"] = has_key
 
     return d
@@ -250,6 +257,13 @@ def create_model(
         return {"success": False, "error": "model_id wajib diisi."}
 
     now = time.time()
+    stored_api_key = api_key
+    if stored_api_key:
+        try:
+            from core.security.encryption import encrypt_secret
+            stored_api_key = encrypt_secret(stored_api_key.strip())
+        except Exception:
+            pass
 
     try:
         with _write_lock:
@@ -264,7 +278,7 @@ def create_model(
                          created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unknown', ?, ?)
                 """, (
-                    nickname.strip(), provider, model_id.strip(), endpoint, api_key,
+                    nickname.strip(), provider, model_id.strip(), endpoint, stored_api_key,
                     int(is_default), int(is_fallback), int(enabled), now, now,
                 ))
                 conn.commit()
@@ -294,6 +308,13 @@ def update_model(nickname: str, **fields: Any) -> dict:
                 "success": False,
                 "error": f"Provider '{updates['provider']}' tidak dikenal. Provider valid: {sorted(VALID_PROVIDERS)}.",
             }
+
+    if "api_key" in updates and updates["api_key"]:
+        try:
+            from core.security.encryption import encrypt_secret
+            updates["api_key"] = encrypt_secret(str(updates["api_key"]).strip())
+        except Exception:
+            pass
 
     if not updates:
         return {"success": True, "model": get_model(nickname, mask_api_key=True)}

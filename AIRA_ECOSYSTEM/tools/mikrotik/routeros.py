@@ -12,6 +12,15 @@ COMMANDS = {
     "get_routes":
         "/ip route print",
 
+    "get_routes_v7":
+        "/routing route print",
+
+    "get_ospf_routes":
+        "/routing ospf route print",
+
+    "get_bgp_routes":
+        "/routing bgp route print",
+
     "get_firewall":
         "/ip firewall filter print",
 
@@ -87,9 +96,33 @@ def get_ip_addresses(device_name):
     )
 
 
-def get_routes(device_name):
+def get_routes(device_name, routeros_version=None):
+    ver_str = str(routeros_version or "").strip().lower()
+    if ver_str in ("v7", "7", "routeros_v7") or ver_str.startswith("7.") or ver_str.startswith("v7."):
+        return execute_mikrotik_tool("get_routes_v7", device_name)
     return execute_mikrotik_tool(
         "get_routes",
+        device_name
+    )
+
+
+def get_routes_v7(device_name):
+    return execute_mikrotik_tool(
+        "get_routes_v7",
+        device_name
+    )
+
+
+def get_ospf_routes(device_name):
+    return execute_mikrotik_tool(
+        "get_ospf_routes",
+        device_name
+    )
+
+
+def get_bgp_routes(device_name):
+    return execute_mikrotik_tool(
+        "get_bgp_routes",
         device_name
     )
 

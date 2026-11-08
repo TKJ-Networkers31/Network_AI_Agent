@@ -123,6 +123,10 @@ ALL_PERMISSIONS: List[Dict[str, str]] = [
     {"permission_id": "settings.view", "module": "Navigation", "resource": "settings", "action": "view", "description": "Access settings navigation center"},
     {"permission_id": "admin.view", "module": "Navigation", "resource": "admin", "action": "view", "description": "Access AIRA Control Plane admin site"},
 
+    # Models Management Permissions
+    {"permission_id": "models.read", "module": "Models", "resource": "models", "action": "read", "description": "View AI models list and routing assignments"},
+    {"permission_id": "models.manage", "module": "Models", "resource": "models", "action": "manage", "description": "Create, edit, delete models and update routing/fallback policy"},
+
     # Settings & Personalization Permissions (Phase F.2)
     {"permission_id": "settings.memory.view", "module": "Settings", "resource": "memory", "action": "view", "description": "View AI long-term memories in settings"},
     {"permission_id": "settings.memory.update", "module": "Settings", "resource": "memory", "action": "update", "description": "Create, modify or delete AI long-term memories"},
@@ -138,6 +142,7 @@ ALL_PERMISSIONS: List[Dict[str, str]] = [
     {"permission_id": "topology.device.discover", "module": "Topology", "resource": "device", "action": "discover", "description": "Initiate network topology discovery scan"},
     {"permission_id": "nms.monitoring.read", "module": "NMS", "resource": "monitoring", "action": "read", "description": "Poll and view real-time NMS telemetry and statistics"},
     {"permission_id": "nms.monitoring.configure", "module": "NMS", "resource": "monitoring", "action": "configure", "description": "Configure NMS thresholds, alerts, and polling rate"},
+    {"permission_id": "gateways.read", "module": "Edge Gateways", "resource": "gateways", "action": "read", "description": "View edge gateway instances and telemetry"},
 ]
 
 DEFAULT_GROUP_PERMISSIONS: Dict[str, List[str]] = {
@@ -147,10 +152,10 @@ DEFAULT_GROUP_PERMISSIONS: Dict[str, List[str]] = {
         "users.read", "users.create", "users.update", "users.disable",
         "groups.read", "permissions.read", "permissions.assign",
         "user_activity.read", "user_activity.sessions.read", "user_activity.sessions.revoke", "user_activity.audit.read",
-        "audit.read",
+        "audit.read", "gateways.read",
         # Navigation
         "dashboard.view", "workspace.view", "inventory.view", "topology.view", "nms.view",
-        "automations.view", "files.view", "models.view", "logs.view", "settings.view", "admin.view",
+        "automations.view", "files.view", "logs.view", "settings.view", "admin.view",
         # Settings
         "settings.memory.view", "settings.memory.update", "settings.persona.view", "settings.persona.update",
         # Inventory read
@@ -158,7 +163,7 @@ DEFAULT_GROUP_PERMISSIONS: Dict[str, List[str]] = {
     ],
     "NOC": [
         "dashboard.read", "inventory.read", "devices.read", "topology.read",
-        "nms.read", "nms.metrics.read", "nms.alerts.read", "audit.read",
+        "nms.read", "nms.metrics.read", "nms.alerts.read", "audit.read", "gateways.read", "playbooks.read",
         # Navigation
         "dashboard.view", "workspace.view", "inventory.view", "topology.view", "nms.view", "logs.view", "settings.view",
         # Settings
@@ -182,10 +187,10 @@ DEFAULT_GROUP_PERMISSIONS: Dict[str, List[str]] = {
         "config.read", "config.backup", "config.apply", "config.rollback",
         "automation.read", "automation.create", "automation.update", "automation.execute",
         "playbooks.read", "playbooks.create", "playbooks.update", "playbooks.execute",
-        "audit.read",
+        "audit.read", "gateways.read",
         # Navigation
         "dashboard.view", "workspace.view", "inventory.view", "topology.view", "nms.view",
-        "automations.view", "files.view", "models.view", "logs.view", "settings.view",
+        "automations.view", "files.view", "logs.view", "settings.view",
         # Settings
         "settings.memory.view", "settings.memory.update", "settings.persona.view", "settings.persona.update",
         # Actions
@@ -195,13 +200,21 @@ DEFAULT_GROUP_PERMISSIONS: Dict[str, List[str]] = {
     ],
     "READ_ONLY": [
         "dashboard.read", "inventory.read", "devices.read", "topology.read",
-        "nms.read", "nms.metrics.read", "soc.dashboard.read", "soc.events.read", "audit.read",
+        "nms.read", "nms.metrics.read", "nms.alerts.read", "soc.dashboard.read", "soc.events.read", "audit.read",
+        "playbooks.read", "automation.read", "gateways.read",
         # Navigation
-        "dashboard.view", "workspace.view", "inventory.view", "topology.view", "nms.view", "logs.view", "settings.view",
+        "dashboard.view", "workspace.view", "inventory.view", "topology.view", "nms.view", "automations.view", "logs.view", "settings.view",
         # Settings
         "settings.memory.view", "settings.persona.view",
         # Action reads
         "inventory.device.read", "nms.monitoring.read",
+    ],
+    "USER": [
+        "dashboard.read", "dashboard.view", "workspace.view", "settings.view",
+        "settings.memory.view", "settings.memory.update",
+        "settings.persona.view", "settings.persona.update",
+        "inventory.read", "devices.read", "topology.read", "nms.read", "nms.metrics.read", "nms.alerts.read",
+        "playbooks.read", "automation.read", "gateways.read", "audit.read",
     ],
 }
 
@@ -253,6 +266,13 @@ class RBACService:
         2. Otherwise, union of all ALLOW permissions across user groups.
         3. Any explicit DENY in ANY assigned group strips that permission.
         """
+        # Superadmin check by username
+        with topology_transaction(self.db_path, write=False) as conn:
+            conn.row_factory = sqlite3.Row
+            u = conn.execute("SELECT username FROM operational_users WHERE user_id = ?", (user_id,)).fetchone()
+            if u and (u["username"] or "").lower() in {"lingga_admin", "admin"}:
+                return {p["permission_id"] for p in ALL_PERMISSIONS}
+
         groups = self.get_user_groups(user_id)
         if not groups:
             # Check legacy role fallback (PLATFORM_OWNER has SUPER_ADMIN permissions)
@@ -270,7 +290,7 @@ class RBACService:
         group_ids = [g["group_id"] for g in groups]
 
         # SUPER_ADMIN gets all permissions
-        if "SUPER_ADMIN" in group_names:
+        if "SUPER_ADMIN" in group_names or "grp_super_admin" in group_ids:
             return {p["permission_id"] for p in ALL_PERMISSIONS}
 
         placeholders = ",".join(["?"] * len(group_ids))

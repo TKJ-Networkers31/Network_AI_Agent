@@ -354,6 +354,19 @@ def _cleanup_run(session_id: str, task: "asyncio.Task") -> None:
 
 @router.websocket("/nms")
 async def nms_ws(websocket: WebSocket):
+    token = websocket.query_params.get("token") or websocket.headers.get("authorization")
+    if token and token.startswith("Bearer "):
+        token = token.split(" ", 1)[1].strip()
+    if token:
+        try:
+            from core.tenant.manager import IdentityManager
+            ctx = IdentityManager().validate_session_token(token)
+            if not ctx:
+                await websocket.close(code=1008, reason="Sesi tidak valid.")
+                return
+        except Exception:
+            pass
+
     await manager.connect("nms", websocket)
     get_ws_bridge().ensure_started(asyncio.get_running_loop())
 
@@ -384,6 +397,21 @@ async def nms_ws(websocket: WebSocket):
 
 @router.websocket("/chat/{session_id}")
 async def chat_ws(websocket: WebSocket, session_id: str):
+    token = websocket.query_params.get("token") or websocket.headers.get("authorization")
+    if token and token.startswith("Bearer "):
+        token = token.split(" ", 1)[1].strip()
+    user_id_scope = None
+    if token:
+        try:
+            from core.tenant.manager import IdentityManager
+            ctx = IdentityManager().validate_session_token(token)
+            if not ctx:
+                await websocket.close(code=1008, reason="Sesi kedaluwarsa atau tidak valid.")
+                return
+            user_id_scope = ctx.user_id
+        except Exception:
+            pass
+
     await manager.connect(session_id, websocket)
 
     # Idempotent: pastikan bridge Event Bus -> WebSocket aktif di loop ini

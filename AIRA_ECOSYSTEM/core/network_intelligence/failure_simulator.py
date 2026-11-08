@@ -68,10 +68,13 @@ class FailureSimulator:
             dep_res = qengine.get_downstream_dependencies(target_dev, max_depth=6)
             evidence_ids.update(dep_res["evidence_basis"])
 
+            gateways = [g for g in qengine.find_gateway_nodes() if g != target_dev]
+            target_gw = gateways[0] if gateways else "ISP-Edge"
+
             for dep in dep_res["all_dependents"]:
                 did = dep["device_id"]
-                # Check if dependent device has alternate path bypassing target_dev
-                alt = qengine.find_alternate_paths(did, "ISP-Edge", excluded_ids={target_dev})
+                # Check if dependent device has alternate path bypassing target_dev to edge/gateway
+                alt = qengine.find_alternate_paths(did, target_gw, excluded_ids={target_dev})
                 if alt["paths"]:
                     alternate_paths.extend(alt["paths"])
                     evidence_ids.update(alt["evidence_basis"])

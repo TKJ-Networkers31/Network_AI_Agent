@@ -51,23 +51,38 @@ class ModelPolicy:
     def fallback_model(self, exclude_id: Optional[str] = None) -> Optional[dict]:
         """Model fallback dari policy; kalau tidak ada/nonaktif, jaring pengaman:
         default label general, lalu model enabled pertama."""
+        candidates = self.fallback_candidates(exclude_ids={exclude_id} if exclude_id else set())
+        return candidates[0] if candidates else None
+
+    def fallback_candidates(self, exclude_ids: Optional[set[str]] = None) -> list[dict]:
+        """Multi-provider fallback chain (NEW-01). Mengembalikan daftar kandidat model fallback
+        secara terurut: policy fallback -> general default -> model enabled lainnya."""
+        seen: set[str] = set(exclude_ids or set())
+        candidates: list[dict] = []
+
+        # 1. Configured policy fallback
         fallback_id = self.store.get_policy().get("fallback_model_id")
-        if fallback_id and fallback_id != exclude_id:
+        if fallback_id and fallback_id not in seen:
             row = self.store.get_model(fallback_id)
             if row and row["enabled"]:
-                return row
+                candidates.append(row)
+                seen.add(fallback_id)
 
+        # 2. General label default
         general_id = self.store.get_routing().get(DEFAULT_LABEL)
-        if general_id and general_id != exclude_id:
+        if general_id and general_id not in seen:
             row = self.store.get_model(general_id)
             if row and row["enabled"]:
-                return row
+                candidates.append(row)
+                seen.add(general_id)
 
+        # 3. Any other enabled models
         for row in self.store.list_models(enabled_only=True):
-            if row["id"] != exclude_id:
-                return row
+            if row["id"] not in seen:
+                candidates.append(row)
+                seen.add(row["id"])
 
-        return None
+        return candidates
 
     # ------------------------------------------------------------ rules
 

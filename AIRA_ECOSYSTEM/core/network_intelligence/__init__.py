@@ -40,11 +40,53 @@ from core.network_intelligence.evidence import (
     determine_freshness,
     sanitize_raw_output,
 )
-from core.network_intelligence.investigator import NetworkInvestigator
+from core.network_intelligence.investigator import NetworkInvestigator, get_network_investigator
 from core.network_intelligence.playbooks import PlaybookEngine
 from core.network_intelligence.planner import ConfigurationPlanner
 from core.network_intelligence.validator import StaticValidator
 from core.network_intelligence.simulator import StaticSimulator
+
+# Generation 3 Canonical Services & Models (REC-20)
+from core.network_intelligence.intelligence_models import (
+    NetworkEvidenceBundle,
+    KnowledgeNode,
+    KnowledgeEdge,
+    IntelligenceFreshness,
+    GraphEntityType,
+    GraphRelationshipType,
+    GraphLayer,
+)
+from core.network_intelligence.evidence_service import (
+    UnifiedEvidenceService,
+    get_unified_evidence_service,
+)
+from core.network_intelligence.correlation_engine import (
+    MultiDeviceCorrelationEngine,
+)
+from core.network_intelligence.security_baseline import (
+    SecurityBaselineEngine,
+    get_security_baseline_engine,
+)
+from core.network_intelligence.knowledge_graph import (
+    NetworkKnowledgeGraph,
+)
+from core.network_intelligence.graph_queries import (
+    GraphQueryEngine,
+)
+from core.network_intelligence.action_engine import (
+    ActionManagementEngine,
+    get_action_engine,
+)
+from core.network_intelligence.health_engine import (
+    NetworkHealthEngine,
+)
+from core.network_intelligence.anomaly_engine import (
+    AnomalyEngine,
+)
+
+# Canonical compatibility aliases for legacy callers
+EvidenceService = UnifiedEvidenceService
+CorrelationEngine = MultiDeviceCorrelationEngine
 
 __all__ = [
     "ConfidenceLevel",
@@ -74,6 +116,7 @@ __all__ = [
     "determine_freshness",
     "sanitize_raw_output",
     "NetworkInvestigator",
+    "get_network_investigator",
     "PlaybookEngine",
     "ConfigurationPlanner",
     "StaticValidator",
@@ -81,4 +124,21 @@ __all__ = [
     "validate_readonly_command",
     "redact_sensitive_values",
     "execute_safe_readonly_command",
+    # Gen 3
+    "NetworkEvidenceBundle",
+    "KnowledgeNode",
+    "KnowledgeEdge",
+    "UnifiedEvidenceService",
+    "get_unified_evidence_service",
+    "MultiDeviceCorrelationEngine",
+    "SecurityBaselineEngine",
+    "get_security_baseline_engine",
+    "NetworkKnowledgeGraph",
+    "GraphQueryEngine",
+    "ActionManagementEngine",
+    "get_action_engine",
+    "NetworkHealthEngine",
+    "AnomalyEngine",
+    "EvidenceService",
+    "CorrelationEngine",
 ]

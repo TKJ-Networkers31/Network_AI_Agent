@@ -46,7 +46,7 @@ from core.nms.models import (
 )
 from core.nms_models import calculate_traffic_rate, determine_device_availability
 from core.topology_models import bounded_icmp_ping
-from mcp_servers.network.security import mask_sensitive_data
+from core.security.masking import mask_sensitive_data
 
 logger = logging.getLogger("aira.nms.monitoring")
 

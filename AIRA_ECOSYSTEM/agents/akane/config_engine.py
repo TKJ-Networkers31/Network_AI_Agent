@@ -70,8 +70,19 @@ def generate_rollback_for_command(cmd: str) -> Optional[str]:
         com_m = re.search(r'comment="?([^"\s]+)"?', c)
         if com_m:
             return f'/ip firewall nat remove [find comment="{com_m.group(1)}"]'
-        if "action=masquerade" in c_lower:
-            return '/ip firewall nat remove [find action=masquerade]'
+        chain_m = re.search(r"chain=([^\s]+)", c)
+        out_int_m = re.search(r"out-interface=([^\s]+)", c)
+        action_m = re.search(r"action=([^\s]+)", c)
+        conditions = []
+        if chain_m:
+            conditions.append(f'chain="{chain_m.group(1)}"')
+        if out_int_m:
+            conditions.append(f'out-interface="{out_int_m.group(1)}"')
+        if action_m:
+            conditions.append(f'action="{action_m.group(1)}"')
+        if len(conditions) >= 2:
+            return f'/ip firewall nat remove [find {" and ".join(conditions)}]'
+        return None
 
     # 5. Interface enable -> disable / disable -> enable
     if c_lower.startswith("/interface enable"):
@@ -139,19 +150,19 @@ class SafeConfigEngine:
         with open(raw_file_path, "w", encoding="utf-8") as f:
             json.dump(protected_record, f, indent=2)
 
-        # Legacy alias for backward compatibility with existing tests
+        # 3. Write redacted presentation copy (MASKED, for UI, diagnostics, and external logs)
+        redacted_record = mask_sensitive_data(protected_record)
+        redacted_file_path = SNAPSHOT_DIR / f"{operation_id}.redacted.json"
+        with open(redacted_file_path, "w", encoding="utf-8") as f:
+            json.dump(redacted_record, f, indent=2)
+
+        # Legacy alias for backward compatibility (stores masked presentation record)
         legacy_path = SNAPSHOT_DIR / f"{operation_id}.json"
         try:
             with open(legacy_path, "w", encoding="utf-8") as f:
-                json.dump(protected_record, f, indent=2)
+                json.dump(redacted_record, f, indent=2)
         except Exception:
             pass
-
-        # 3. Write redacted presentation copy (MASKED, for UI, diagnostics, and external logs)
-        redacted_file_path = SNAPSHOT_DIR / f"{operation_id}.redacted.json"
-        redacted_record = mask_sensitive_data(protected_record)
-        with open(redacted_file_path, "w", encoding="utf-8") as f:
-            json.dump(redacted_record, f, indent=2)
 
         try:
             if os.name != "nt":

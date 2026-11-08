@@ -670,6 +670,21 @@ class TestNmsRestApi(unittest.TestCase):
         self.engine = NmsEngine(self.db_path)
         self.app = FastAPI()
         self.app.include_router(nms_router_module.router)
+        from core.tenant.auth_deps import get_current_authenticated_user
+        from core.tenant.models import TenantContext
+        from api.routers.topology import require_topology_admin
+        self.app.dependency_overrides[get_current_authenticated_user] = lambda: TenantContext(
+            user_id="test_admin",
+            tenant_id="tenant_default",
+            username="admin",
+            is_internal=True,
+            roles=["PLATFORM_OWNER"],
+            permissions={"nms.read", "nms.write", "topology.read", "topology.write", "devices.read"},
+        )
+        self.app.dependency_overrides[require_topology_admin] = lambda: {
+            "user_id": "test_admin",
+            "tenant_id": "tenant_default",
+        }
 
     def tearDown(self):
         self.engine.stop_monitoring()

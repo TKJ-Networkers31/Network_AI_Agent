@@ -32,7 +32,7 @@ from core.nms_models import (
     parse_uptime_to_seconds,
     resolve_device_display_name,
 )
-from mcp_servers.network.security import mask_sensitive_data
+from core.security.masking import mask_sensitive_data
 
 
 _SECRET_RE = re.compile(

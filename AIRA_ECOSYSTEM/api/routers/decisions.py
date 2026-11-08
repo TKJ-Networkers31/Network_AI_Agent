@@ -81,12 +81,6 @@ class CreateSlaPolicyRequest(BaseModel):
 def get_current_user_context(authorization: Optional[str] = Header(None)) -> TenantContext:
     """Authenticates human operator / customer user session token."""
     if not authorization or not authorization.startswith("Bearer "):
-        if authorization and authorization.startswith("Bearer aira_tok_"):
-            token = authorization.split(" ", 1)[1]
-            ctx = _identity_mgr.validate_session_token(token)
-            if ctx:
-                return ctx
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session token.")
         # Default internal admin context for backward compatibility
         return TenantContext(
             user_id="usr_internal_admin",
@@ -254,7 +248,13 @@ def simulate_risk(
     if not user.can_access_tenant(payload.tenant_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot simulate failure for another tenant.")
 
-    graph = NetworkKnowledgeGraph()
+    try:
+        from core.network_intelligence.evidence_service import get_unified_evidence_service
+        unified_svc = get_unified_evidence_service()
+        bundle = unified_svc.assemble_evidence_bundle(scope="network")
+        graph = NetworkKnowledgeGraph.from_evidence_bundle(bundle)
+    except Exception:
+        graph = NetworkKnowledgeGraph()
     res = _risk_engine.simulate_failure(
         tenant_id=payload.tenant_id,
         graph=graph,

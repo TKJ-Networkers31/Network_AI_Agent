@@ -530,3 +530,50 @@ class GraphQueryEngine:
             "paths": found_paths,
             "evidence_basis": sorted(all_ev),
         }
+
+    # 11. Dynamic discovery of gateway, edge, or WAN boundary nodes (REC-19)
+    def find_gateway_nodes(self) -> List[str]:
+        """Dynamically identifies edge/gateway/ISP boundary nodes from knowledge graph or inventory."""
+        gw_nodes: List[str] = []
+        for nid, node in self.graph.nodes.items():
+            if not nid.startswith("device:"):
+                continue
+            dev_name = nid.replace("device:", "")
+            props = getattr(node, "attributes", None) or getattr(node, "properties", {}) or {}
+            role = str(props.get("role") or "").lower()
+            label = str(node.label or "").lower()
+            device_type = str(props.get("device_type") or "").lower()
+            if (
+                role in ("edge", "gateway", "isp", "wan", "border", "uplink")
+                or any(k in label for k in ("isp", "edge", "gateway", "border", "wan"))
+                or device_type in ("gateway", "edge_router")
+            ):
+                gw_nodes.append(dev_name)
+
+        if not gw_nodes:
+            try:
+                import sqlite3
+                from core.topology_db import topology_transaction
+                with topology_transaction(write=False) as conn:
+                    conn.row_factory = sqlite3.Row
+                    rows = conn.execute(
+                        """
+                        SELECT name FROM operational_devices 
+                        WHERE LOWER(role) IN ('edge', 'gateway', 'wan', 'isp', 'border') 
+                           OR LOWER(name) LIKE '%isp%' 
+                           OR LOWER(name) LIKE '%edge%' 
+                           OR LOWER(name) LIKE '%gateway%'
+                        """
+                    ).fetchall()
+                    for r in rows:
+                        gw_nodes.append(r["name"])
+            except Exception:
+                pass
+
+        # If none specifically labeled as gateway, use any other device in graph as target
+        if not gw_nodes:
+            for nid in self.graph.nodes:
+                if nid.startswith("device:"):
+                    gw_nodes.append(nid.replace("device:", ""))
+
+        return gw_nodes or ["ISP-Edge"]

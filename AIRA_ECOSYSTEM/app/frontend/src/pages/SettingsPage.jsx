@@ -14,7 +14,6 @@ import {
   Copy,
   CreditCard,
   Download,
-  Eye,
   Key,
   Layers,
   Loader2,
@@ -96,19 +95,6 @@ export default function SettingsPage({ onOpenMenu }) {
   const [newMemoryImportance, setNewMemoryImportance] = useState(70);
   const [savingMemory, setSavingMemory] = useState(false);
 
-  // Personalization: Personas
-  const [personasData, setPersonasData] = useState(null);
-  const [loadingPersonas, setLoadingPersonas] = useState(false);
-  const [showAddPersonaModal, setShowAddPersonaModal] = useState(false);
-  const [newPersonaName, setNewPersonaName] = useState("");
-  const [newPersonaStyle, setNewPersonaStyle] = useState("concise");
-  const [newPersonaLanguage, setNewPersonaLanguage] = useState("id");
-  const [newPersonaDepth, setNewPersonaDepth] = useState(80);
-  const [newPersonaPreference, setNewPersonaPreference] = useState("technical");
-  const [newPersonaInstructions, setNewPersonaInstructions] = useState("");
-  const [savingPersona, setSavingPersona] = useState(false);
-  const [previewPersonaText, setPreviewPersonaText] = useState(null);
-
   // Privacy & Data: Confirm Modals
   const [confirmModal, setConfirmModal] = useState(null);
   const [actionInProgress, setActionInProgress] = useState(false);
@@ -177,20 +163,6 @@ export default function SettingsPage({ onOpenMenu }) {
     }
   }, [memoryCategory, memorySearch]);
 
-  const fetchPersonas = useCallback(async () => {
-    setLoadingPersonas(true);
-    try {
-      const res = await api.personalization.getPersonas();
-      if (res.success) {
-        setPersonasData(res);
-      }
-    } catch {
-      // silent
-    } finally {
-      setLoadingPersonas(false);
-    }
-  }, []);
-
   useEffect(() => {
     api.tokenUsage().then(setUsage).catch(() => {});
     api.credits().then(setCredits).catch(() => {});
@@ -198,8 +170,7 @@ export default function SettingsPage({ onOpenMenu }) {
     fetchApprovalPreferences();
     fetchPreferences();
     fetchMemories();
-    fetchPersonas();
-  }, [fetchEntitlements, fetchApprovalPreferences, fetchPreferences, fetchMemories, fetchPersonas]);
+  }, [fetchEntitlements, fetchApprovalPreferences, fetchPreferences, fetchMemories]);
 
   // Handle Updates
   const handleToggleMemory = async () => {
@@ -285,99 +256,6 @@ export default function SettingsPage({ onOpenMenu }) {
     }
   };
 
-  const handleSetActivePersona = async (personaId) => {
-    if (!canEditPersona) {
-      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin memperbarui persona." });
-      return;
-    }
-    try {
-      const res = await api.personalization.setActivePersona(personaId);
-      if (res.success) {
-        notify({ type: "success", message: "Persona aktif AIRA berhasil diperbarui." });
-        fetchPersonas();
-      }
-    } catch (err) {
-      notify({ type: "error", message: err.message || "Gagal mengatur persona." });
-    }
-  };
-
-  const handleDuplicatePersona = async (personaId, personaName) => {
-    if (!canEditPersona) {
-      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin memperbarui persona." });
-      return;
-    }
-    const cloneName = await modalPrompt({ message: `Nama untuk kloning persona '${personaName}':`, defaultValue: `${personaName} (Copy)` });
-    if (!cloneName || !cloneName.trim()) return;
-    try {
-      const res = await api.personalization.duplicatePersona(personaId, cloneName.trim());
-      if (res.success) {
-        notify({ type: "success", message: `Persona '${cloneName}' berhasil diduplikasi!` });
-        fetchPersonas();
-      }
-    } catch (err) {
-      notify({ type: "error", message: err.message || "Gagal menduplikasi persona." });
-    }
-  };
-
-  const handleDeleteCustomPersona = async (personaId) => {
-    if (!canEditPersona) {
-      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin menghapus persona." });
-      return;
-    }
-    if (!await modalConfirm({ message: "Hapus custom persona ini?", isDestructive: true })) return;
-    try {
-      const res = await api.personalization.deletePersona(personaId);
-      if (res.success) {
-        notify({ type: "success", message: "Custom persona berhasil dihapus." });
-        fetchPersonas();
-      }
-    } catch (err) {
-      notify({ type: "error", message: err.message || "Gagal menghapus persona." });
-    }
-  };
-
-  const handleCreateCustomPersona = async (e) => {
-    e.preventDefault();
-    if (!canEditPersona) {
-      notify({ type: "error", message: "Akses ditolak: Anda tidak memiliki izin membuat persona." });
-      return;
-    }
-    if (!newPersonaName.trim()) return;
-    setSavingPersona(true);
-    try {
-      const res = await api.personalization.createPersona({
-        name: newPersonaName.trim(),
-        response_style: newPersonaStyle,
-        language: newPersonaLanguage,
-        technical_depth: parseInt(newPersonaDepth, 10) || 80,
-        explanation_preference: newPersonaPreference,
-        custom_instructions: newPersonaInstructions.trim(),
-      });
-      if (res.success) {
-        notify({ type: "success", message: "Custom persona berhasil dibuat!" });
-        setShowAddPersonaModal(false);
-        setNewPersonaName("");
-        setNewPersonaInstructions("");
-        fetchPersonas();
-      }
-    } catch (err) {
-      notify({ type: "error", message: err.message || "Gagal membuat custom persona." });
-    } finally {
-      setSavingPersona(false);
-    }
-  };
-
-  const handlePreviewPersona = async (personaId) => {
-    try {
-      const res = await api.personalization.previewPersona(personaId);
-      if (res.success) {
-        setPreviewPersonaText(res.prompt_preview);
-      }
-    } catch (err) {
-      notify({ type: "error", message: err.message || "Gagal melihat preview persona." });
-    }
-  };
-
   // Privacy Actions
   const handleExportData = async () => {
     try {
@@ -419,7 +297,6 @@ export default function SettingsPage({ onOpenMenu }) {
         const res = await api.personalization.deleteCustomPersonas();
         if (res.success) {
           notify({ type: "success", message: `${res.deleted_personas} custom persona berhasil dihapus.` });
-          fetchPersonas();
         }
       } else if (confirmModal.type === "account_deletion") {
         const res = await api.personalization.requestAccountDeletion("User requested via settings");
@@ -822,12 +699,12 @@ export default function SettingsPage({ onOpenMenu }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
               <div className="p-3.5 rounded-xl bg-neutral-950/60 border border-white/[0.06] space-y-1">
                 <span className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider">Username</span>
-                <p className="text-xs font-mono font-semibold text-white">{user?.username || (isGuest ? "Guest User" : "-")}</p>
+                <p className="text-xs font-mono font-semibold text-white">{user?.username || "-"}</p>
               </div>
 
               <div className="p-3.5 rounded-xl bg-neutral-950/60 border border-white/[0.06] space-y-1">
                 <span className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider">Email Akun</span>
-                <p className="text-xs font-semibold text-white truncate">{user?.email || (isGuest ? "Sesi Tamu Mandiri" : "-")}</p>
+                <p className="text-xs font-semibold text-white truncate">{user?.email || "-"}</p>
               </div>
 
               <div className="p-3.5 rounded-xl bg-neutral-950/60 border border-white/[0.06] space-y-1">
@@ -1252,164 +1129,6 @@ export default function SettingsPage({ onOpenMenu }) {
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* MODAL: CREATE CUSTOM PERSONA                                  */}
-      {/* ============================================================== */}
-      {showAddPersonaModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-lg bg-neutral-900 border border-white/[0.1] rounded-2xl p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                <Sparkles size={16} className="text-cyan-400" />
-                <span>Buat Persona Kustom Baru</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowAddPersonaModal(false)}
-                className="text-neutral-400 hover:text-white"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateCustomPersona} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-medium text-neutral-300 mb-1">Nama Persona</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Misal: Senior Cisco Architect / SRE Tutor"
-                  value={newPersonaName}
-                  onChange={(e) => setNewPersonaName(e.target.value)}
-                  className="w-full p-2.5 bg-neutral-950 border border-white/[0.08] rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1">Gaya Respon</label>
-                  <select
-                    value={newPersonaStyle}
-                    onChange={(e) => setNewPersonaStyle(e.target.value)}
-                    className="w-full p-2 bg-neutral-950 border border-white/[0.08] rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="concise">Concise (Singkat padat)</option>
-                    <option value="detailed">Detailed (Komprehensif)</option>
-                    <option value="technical">Technical (Full CLI/Spesifikasi)</option>
-                    <option value="instructive">Instructive (Pedagogis)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1">Pendekatan Penjelasan</label>
-                  <select
-                    value={newPersonaPreference}
-                    onChange={(e) => setNewPersonaPreference(e.target.value)}
-                    className="w-full p-2 bg-neutral-950 border border-white/[0.08] rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="technical">Technical First</option>
-                    <option value="visual">Visual & Topologi</option>
-                    <option value="step-by-step">Step-by-step Guided</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1">Bahasa</label>
-                  <select
-                    value={newPersonaLanguage}
-                    onChange={(e) => setNewPersonaLanguage(e.target.value)}
-                    className="w-full p-2 bg-neutral-950 border border-white/[0.08] rounded-xl text-xs text-white focus:outline-none focus:border-cyan-500"
-                  >
-                    <option value="id">Bahasa Indonesia</option>
-                    <option value="en">English</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-neutral-300 mb-1">Kedalaman Teknis ({newPersonaDepth}%)</label>
-                  <input
-                    type="range"
-                    min={10}
-                    max={100}
-                    value={newPersonaDepth}
-                    onChange={(e) => setNewPersonaDepth(e.target.value)}
-                    className="w-full accent-cyan-400 mt-2"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-neutral-300 mb-1">Instruksi Khusus Persona</label>
-                <textarea
-                  rows={3}
-                  value={newPersonaInstructions}
-                  onChange={(e) => setNewPersonaInstructions(e.target.value)}
-                  placeholder="Instruksi tambahan yang mendefinisikan kepribadian atau batasan teknis..."
-                  className="w-full p-2.5 bg-neutral-950 border border-white/[0.08] rounded-xl text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddPersonaModal(false)}
-                  className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-xs font-semibold text-neutral-300 rounded-xl transition"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingPersona}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-neutral-950 text-xs font-semibold rounded-xl transition disabled:opacity-50"
-                >
-                  {savingPersona ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                  <span>Buat Persona</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* MODAL: PROMPT PREVIEW                                          */}
-      {/* ============================================================== */}
-      {previewPersonaText && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-lg bg-neutral-900 border border-white/[0.1] rounded-2xl p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-                <Eye size={16} className="text-cyan-400" />
-                <span>Preview Prompt Sistem Persona</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setPreviewPersonaText(null)}
-                className="text-neutral-400 hover:text-white"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <pre className="p-4 bg-neutral-950 rounded-xl text-xs font-mono text-cyan-300 whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto border border-white/[0.06]">
-              {previewPersonaText}
-            </pre>
-
-            <div className="flex justify-end pt-1">
-              <button
-                type="button"
-                onClick={() => setPreviewPersonaText(null)}
-                className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-xs font-semibold text-neutral-200 rounded-xl transition"
-              >
-                Tutup
-              </button>
-            </div>
           </div>
         </div>
       )}

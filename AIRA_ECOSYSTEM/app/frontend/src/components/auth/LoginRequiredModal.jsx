@@ -1,5 +1,5 @@
 // src/components/auth/LoginRequiredModal.jsx
-// AIRA OS — "Sign in to continue" Modal when Guest quota is exceeded or restricted action attempted.
+// AIRA OS — "Sign in to continue" Modal when authentication is required.
 // Preserves draft user prompt in memory/session so after authentication it can be resumed seamlessly.
 
 import { AlertCircle, CheckCircle2, Lock, Sparkles, UserPlus, X } from "lucide-react";
@@ -13,7 +13,6 @@ export default function LoginRequiredModal() {
     draftPrompt,
     openLogin,
     openRegister,
-    continueAsGuest,
   } = useAuth();
 
   if (!isLoginRequiredModalOpen) return null;
@@ -35,7 +34,7 @@ export default function LoginRequiredModal() {
         <h2 className="text-lg font-semibold text-white mb-1.5">Sign in to continue</h2>
         <p className="text-xs text-neutral-300 leading-relaxed mb-4">
           {loginRequiredReason ||
-            "Batas kuota token Guest telah tercapai atau tindakan ini membutuhkan akun resmi AIRA."}
+            "Akses memerlukan login ke akun resmi AIRA OS."}
         </p>
 
         {draftPrompt && (
@@ -66,15 +65,7 @@ export default function LoginRequiredModal() {
             className="w-full py-2.5 px-4 rounded-xl bg-neutral-800 hover:bg-neutral-750 border border-neutral-700 text-xs font-medium text-neutral-200 hover:text-white flex items-center justify-center gap-2 transition"
           >
             <UserPlus size={14} />
-            <span>Buat Akun Gratis (100.000 Token/Bulan)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={continueAsGuest}
-            className="w-full py-2 text-xs text-neutral-400 hover:text-neutral-300 transition"
-          >
-            Lanjutkan jelajahi antarmuka sebagai Guest
+            <span>Daftar Akun Baru</span>
           </button>
         </div>
       </div>

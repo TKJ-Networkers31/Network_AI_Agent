@@ -214,54 +214,6 @@ CREATE TABLE IF NOT EXISTS operational_tenant_entitlements (
     UNIQUE(tenant_id, entitlement_key)
 );
 
--- 15. Token Policies (Configurable token allocation, limits & costs)
-CREATE TABLE IF NOT EXISTS operational_token_policies (
-    policy_id TEXT PRIMARY KEY,
-    scope_type TEXT NOT NULL DEFAULT 'GLOBAL' CHECK(scope_type IN ('GLOBAL', 'TENANT', 'USER')),
-    scope_id TEXT,
-    tier TEXT NOT NULL DEFAULT 'FREE' CHECK(tier IN ('FREE', 'PRO', 'ENTERPRISE', 'CUSTOM')),
-    monthly_token_allocation INTEGER NOT NULL DEFAULT 100000,
-    daily_token_limit INTEGER NOT NULL DEFAULT 10000,
-    networking_plus_enabled INTEGER NOT NULL DEFAULT 0,
-    model_cost_mult_json TEXT NOT NULL DEFAULT '{}',
-    tool_cost_matrix_json TEXT NOT NULL DEFAULT '{}',
-    max_request_size_tokens INTEGER NOT NULL DEFAULT 32768,
-    rate_limit_rpm INTEGER NOT NULL DEFAULT 60,
-    updated_at TEXT NOT NULL,
-    UNIQUE(scope_type, scope_id, tier)
-);
-
--- 16. Token Balances (Atomic user & tenant token metering)
-CREATE TABLE IF NOT EXISTS operational_token_balances (
-    balance_id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL REFERENCES operational_tenants(tenant_id) ON DELETE CASCADE,
-    user_id TEXT,
-    tier TEXT NOT NULL DEFAULT 'FREE',
-    allocated_tokens INTEGER NOT NULL DEFAULT 100000,
-    used_tokens INTEGER NOT NULL DEFAULT 0,
-    period_start_utc TEXT NOT NULL,
-    period_reset_utc TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(tenant_id, user_id)
-);
-
--- 17. Token Usage Ledger (Granular per-request and per-tool accounting)
-CREATE TABLE IF NOT EXISTS operational_token_usage_ledger (
-    usage_id TEXT PRIMARY KEY,
-    tenant_id TEXT NOT NULL,
-    user_id TEXT,
-    session_id TEXT,
-    model_name TEXT,
-    feature_name TEXT NOT NULL DEFAULT 'chat',
-    tool_name TEXT,
-    input_tokens INTEGER NOT NULL DEFAULT 0,
-    output_tokens INTEGER NOT NULL DEFAULT 0,
-    cached_tokens INTEGER NOT NULL DEFAULT 0,
-    total_tokens INTEGER NOT NULL DEFAULT 0,
-    estimated_cost_credits REAL NOT NULL DEFAULT 0.0,
-    timestamp_utc TEXT NOT NULL
-);
-
 -- 18. Centralized Approval Preferences (Always ask, risk levels, auto-approvals)
 CREATE TABLE IF NOT EXISTS operational_approval_preferences (
     pref_id TEXT PRIMARY KEY,
@@ -308,9 +260,6 @@ CREATE INDEX IF NOT EXISTS idx_support_requester ON operational_support_requests
 CREATE INDEX IF NOT EXISTS idx_support_comments ON operational_support_request_comments(request_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_notif_pref ON operational_customer_notification_preferences(tenant_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_entitlements_lookup ON operational_tenant_entitlements(tenant_id, entitlement_key, is_enabled);
-CREATE INDEX IF NOT EXISTS idx_token_policy_scope ON operational_token_policies(scope_type, scope_id);
-CREATE INDEX IF NOT EXISTS idx_token_balance_tenant ON operational_token_balances(tenant_id, user_id);
-CREATE INDEX IF NOT EXISTS idx_token_usage_tenant ON operational_token_usage_ledger(tenant_id, timestamp_utc DESC);
 CREATE INDEX IF NOT EXISTS idx_pending_approvals_tenant ON operational_pending_approvals(tenant_id, status);
 
 -- 20. User-Specific Subscriptions & Entitlements (Directive Section 5)
@@ -331,70 +280,6 @@ CREATE TABLE IF NOT EXISTS operational_user_subscriptions (
     UNIQUE(user_id)
 );
 
--- 21. Billing Foundation — Products & Plans (Directive Section 6)
-CREATE TABLE IF NOT EXISTS operational_billing_products (
-    product_id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT,
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS operational_billing_plans (
-    plan_id TEXT PRIMARY KEY,
-    product_id TEXT NOT NULL REFERENCES operational_billing_products(product_id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    tier TEXT NOT NULL CHECK(tier IN ('FREE', 'PRO', 'ENTERPRISE')),
-    has_networking_plus INTEGER NOT NULL DEFAULT 0,
-    monthly_tokens INTEGER NOT NULL DEFAULT 10000,
-    price_cents INTEGER NOT NULL DEFAULT 0,
-    currency TEXT NOT NULL DEFAULT 'IDR',
-    interval_months INTEGER NOT NULL DEFAULT 1,
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
-);
-
--- 22. Billing Foundation — Invoices & Transactions
-CREATE TABLE IF NOT EXISTS operational_billing_invoices (
-    invoice_id TEXT PRIMARY KEY,
-    subscription_id TEXT REFERENCES operational_user_subscriptions(subscription_id) ON DELETE SET NULL,
-    user_id TEXT NOT NULL REFERENCES operational_users(user_id) ON DELETE CASCADE,
-    tenant_id TEXT NOT NULL REFERENCES operational_tenants(tenant_id) ON DELETE CASCADE,
-    amount_cents INTEGER NOT NULL DEFAULT 0,
-    currency TEXT NOT NULL DEFAULT 'IDR',
-    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('DRAFT', 'PENDING', 'PAID', 'FAILED', 'VOID')),
-    due_date TEXT,
-    paid_at TEXT,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS operational_billing_transactions (
-    transaction_id TEXT PRIMARY KEY,
-    invoice_id TEXT REFERENCES operational_billing_invoices(invoice_id) ON DELETE SET NULL,
-    user_id TEXT NOT NULL REFERENCES operational_users(user_id) ON DELETE CASCADE,
-    provider_name TEXT NOT NULL DEFAULT 'MOCK_GATEWAY',
-    provider_ref TEXT,
-    amount_cents INTEGER NOT NULL DEFAULT 0,
-    currency TEXT NOT NULL DEFAULT 'IDR',
-    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'SUCCESS', 'FAILED', 'REFUNDED')),
-    idempotency_key TEXT UNIQUE,
-    metadata_json TEXT DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS operational_billing_webhook_events (
-    event_id TEXT PRIMARY KEY,
-    provider_name TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    signature TEXT,
-    processed INTEGER NOT NULL DEFAULT 0,
-    error_message TEXT,
-    created_at TEXT NOT NULL,
-    processed_at TEXT
-);
-
 -- 23. Ansible-Compatible Playbooks & Workflows (Directive Section 8)
 CREATE TABLE IF NOT EXISTS operational_playbooks (
     playbook_id TEXT PRIMARY KEY,
@@ -409,18 +294,6 @@ CREATE TABLE IF NOT EXISTS operational_playbooks (
     version TEXT NOT NULL DEFAULT '1.0.0',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
-);
-
--- 24. Token Quota Adjustments & Reset History (Directive Section 8)
-CREATE TABLE IF NOT EXISTS operational_token_quota_adjustments (
-    adjustment_id TEXT PRIMARY KEY,
-    admin_id TEXT NOT NULL,
-    target_user_id TEXT NOT NULL,
-    previous_quota INTEGER NOT NULL,
-    new_quota INTEGER NOT NULL,
-    adjustment_type TEXT NOT NULL DEFAULT 'MANUAL' CHECK(adjustment_type IN ('MANUAL', 'BONUS', 'RESET', 'MANUAL_OVERRIDE', 'BONUS_GRANT')),
-    reason TEXT NOT NULL,
-    timestamp_utc TEXT NOT NULL
 );
 
 -- 25. Phase F: Network Workspaces (Isolated networking environment per user)
@@ -535,11 +408,7 @@ CREATE INDEX IF NOT EXISTS idx_activity_event_type ON operational_user_activity_
 
 -- Additional Indexes for Phase E & E.1 & Phase F
 CREATE INDEX IF NOT EXISTS idx_user_sub_status ON operational_user_subscriptions(user_id, subscription_status);
-CREATE INDEX IF NOT EXISTS idx_billing_invoice_user ON operational_billing_invoices(user_id, status);
-CREATE INDEX IF NOT EXISTS idx_billing_txn_user ON operational_billing_transactions(user_id, status);
-CREATE INDEX IF NOT EXISTS idx_billing_webhook ON operational_billing_webhook_events(provider_name, event_type, processed);
 CREATE INDEX IF NOT EXISTS idx_playbooks_tenant ON operational_playbooks(tenant_id, category);
-CREATE INDEX IF NOT EXISTS idx_quota_adj_user ON operational_token_quota_adjustments(target_user_id, timestamp_utc DESC);
 
 -- 32. Phase H: Automatic Network Security Intelligence & Posture
 CREATE TABLE IF NOT EXISTS operational_security_findings (
@@ -631,16 +500,6 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
             except sqlite3.OperationalError:
                 pass
 
-        # Safely add quota reset columns to operational_token_policies
-        for pol_col in [
-            "reset_period TEXT NOT NULL DEFAULT 'MONTHLY'",
-            "reset_type TEXT NOT NULL DEFAULT 'CALENDAR'",
-            "reset_timezone TEXT NOT NULL DEFAULT 'Asia/Jakarta'",
-        ]:
-            try:
-                conn.execute(f"ALTER TABLE operational_token_policies ADD COLUMN {pol_col}")
-            except sqlite3.OperationalError:
-                pass
         # Safely migrate user_memories category check constraint if needed
         try:
             m_sql = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='user_memories'").fetchone()
@@ -685,19 +544,21 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
                 now_iso,
             ),
         )
+        # Clean up legacy tenant_guest under Owner Decision 2
+        conn.execute("DELETE FROM operational_tenants WHERE tenant_id = 'tenant_guest'")
+
+        # Ensure default site exists for tenant_default
         conn.execute(
             """
-            INSERT OR IGNORE INTO operational_tenants (
-                tenant_id, name, slug, status, config_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO operational_sites (
+                site_id, tenant_id, name, slug, created_at
+            ) VALUES (?, ?, ?, ?, ?)
             """,
             (
-                "tenant_guest",
-                "Guest Sandbox",
-                "guest-sandbox",
-                "ACTIVE",
-                "{}",
-                now_iso,
+                "site_default",
+                "tenant_default",
+                "Default Site",
+                "default-site",
                 now_iso,
             ),
         )
@@ -714,58 +575,15 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
                 now_iso,
             ),
         )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO operational_tenant_entitlements (
+                entitlement_id, tenant_id, entitlement_key, is_enabled, granted_at, metadata_json
+            ) VALUES (?, 'tenant_default', 'networking_plus', 1, ?, '{"tier": "STANDARD", "default": true}')
+            """,
+            ("ent_default_netplus", now_iso),
+        )
     
-        # Seed default products & plans
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO operational_billing_products (product_id, name, description, is_active, created_at)
-            VALUES ('prod_aira_workspace', 'AIRA Workspace', 'Core AI-native Network Engineering Workspace', 1, ?)
-            """,
-            (now_iso,),
-        )
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO operational_billing_products (product_id, name, description, is_active, created_at)
-            VALUES ('prod_netplus_addon', 'Networking++ Add-on', 'Advanced topology, NMS telemetry & Playbook execution', 1, ?)
-            """,
-            (now_iso,),
-        )
-        default_plans = [
-            ('plan_free', 'prod_aira_workspace', 'AIRA Free', 'FREE', 0, 10000, 0, 'IDR', 1),
-            ('plan_pro', 'prod_aira_workspace', 'AIRA Pro', 'PRO', 0, 100000, 25000000, 'IDR', 1),
-            ('plan_pro_netplus', 'prod_aira_workspace', 'AIRA Pro + Networking++', 'PRO', 1, 150000, 50000000, 'IDR', 1),
-            ('plan_enterprise', 'prod_aira_workspace', 'AIRA Enterprise', 'ENTERPRISE', 1, 1000000, 150000000, 'IDR', 1),
-            ('plan_netplus_addon', 'prod_netplus_addon', 'Networking++ Standalone Add-on', 'FREE', 1, 50000, 30000000, 'IDR', 1),
-        ]
-        for p in default_plans:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO operational_billing_plans (
-                    plan_id, product_id, name, tier, has_networking_plus,
-                    monthly_tokens, price_cents, currency, interval_months, is_active, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-                """,
-                (*p, now_iso),
-            )
-
-        # Seed default token policies for GUEST, FREE, PRO, ENTERPRISE
-        default_policies = [
-            ("pol_global_guest", "GLOBAL", None, "GUEST", 15000, 2000, 0, "MONTHLY", "CALENDAR", "Asia/Jakarta", 20),
-            ("pol_global_free", "GLOBAL", None, "FREE", 100000, 10000, 0, "MONTHLY", "CALENDAR", "Asia/Jakarta", 30),
-            ("pol_global_pro", "GLOBAL", None, "PRO", 2000000, 200000, 0, "MONTHLY", "CALENDAR", "Asia/Jakarta", 120),
-            ("pol_global_enterprise", "GLOBAL", None, "ENTERPRISE", 10000000, 1000000, 1, "MONTHLY", "CALENDAR", "Asia/Jakarta", 300),
-        ]
-        for pol in default_policies:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO operational_token_policies (
-                    policy_id, scope_type, scope_id, tier, monthly_token_allocation, daily_token_limit,
-                    networking_plus_enabled, reset_period, reset_type, reset_timezone, rate_limit_rpm, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (*pol, now_iso),
-            )
-
         # -------------------------------------------------------------
         # Phase F: Safe Migrations for Workspace Isolation & Networking
         # -------------------------------------------------------------
@@ -850,6 +668,7 @@ def ensure_tenant_schema(db_path: Optional[Path] = None) -> None:
             ("grp_soc", "SOC", "Security Operations Center", 1),
             ("grp_net_engineer", "NETWORK_ENGINEER", "Network engineering access (Read/Write/Config)", 1),
             ("grp_read_only", "READ_ONLY", "Read-only access across platform", 1),
+            ("grp_user", "USER", "Standard subscriber access", 1),
         ]
         for gid, gname, gdesc, is_sys in default_groups_meta:
             conn.execute(

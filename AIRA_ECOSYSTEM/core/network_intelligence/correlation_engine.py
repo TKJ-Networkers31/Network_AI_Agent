@@ -77,8 +77,9 @@ class MultiDeviceCorrelationEngine:
                         if iid:
                             rel_incs.append(iid)
                             grouped_incident_ids.add(iid)
-                        if inc.get("started_at"):
-                            inc_times.append(float(inc["started_at"]))
+                        t_val = inc.get("started_at") or inc.get("opened_at")
+                        if t_val is not None:
+                            inc_times.append(float(t_val))
 
                 within_window = True
                 if len(inc_times) >= 2:
@@ -422,7 +423,7 @@ class MultiDeviceCorrelationEngine:
             and str(inc.get("id") or inc.get("incident_id") or "") not in grouped_incident_ids
         ]
         if len(ungrouped_incs) >= 2:
-            ts_vals = [float(i["started_at"]) for i in ungrouped_incs if i.get("started_at") is not None]
+            ts_vals = [float(i.get("started_at") or i.get("opened_at")) for i in ungrouped_incs if i.get("started_at") is not None or i.get("opened_at") is not None]
             if len(ts_vals) >= 2 and (max(ts_vals) - min(ts_vals)) <= investigation_window_sec:
                 udevs = sorted({str(i.get("device_id") or "") for i in ungrouped_incs if i.get("device_id")})
                 if len(udevs) >= 2:
