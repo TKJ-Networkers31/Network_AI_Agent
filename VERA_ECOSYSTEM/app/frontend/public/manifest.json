@@ -1,0 +1,17 @@
+{
+  "name": "VERA Enterprise Network Intelligence",
+  "short_name": "VERA",
+  "description": "VERA — Enterprise Network Intelligence Platform. Understand. Monitor. Automate.",
+  "start_url": "/",
+  "scope": "/",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#071426",
+  "theme_color": "#071426",
+  "icons": [
+    { "src": "/assets/brand/vera-app-icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/assets/brand/vera-app-icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable" },
+    { "src": "/assets/brand/vera-favicon.svg", "sizes": "32x32", "type": "image/svg+xml" }
+  ]
+}

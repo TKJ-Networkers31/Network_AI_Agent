@@ -1,24 +1,25 @@
 version: "3.8"
 
 services:
-  aira-os:
+  vera-platform:
     build:
       context: .
       dockerfile: Dockerfile
-    image: aira-os:latest
-    container_name: aira-os
+    image: vera-platform:latest
+    container_name: vera-platform
     restart: unless-stopped
     ports:
       - "${PORT:-8000}:8000"
     environment:
+      - VERA_ENV=production
       - AIRA_ENV=production
-      - AIRA_HOST=0.0.0.0
-      - AIRA_PORT=8000
+      - VERA_HOST=0.0.0.0
+      - VERA_PORT=8000
       - PYTHONUNBUFFERED=1
     volumes:
-      - aira_db:/app/AIRA_ECOSYSTEM/database
-      - aira_workspace:/app/workspace
-      - aira_logs:/app/AIRA_ECOSYSTEM/logs
+      - vera_db:/app/VERA_ECOSYSTEM/database
+      - vera_workspace:/app/workspace
+      - vera_logs:/app/VERA_ECOSYSTEM/logs
     deploy:
       resources:
         limits:
@@ -29,9 +30,9 @@ services:
           memory: 256M
 
 volumes:
-  aira_db:
-    name: aira_os_database
-  aira_workspace:
-    name: aira_os_workspace
-  aira_logs:
-    name: aira_os_logs
+  vera_db:
+    name: vera_platform_database
+  vera_workspace:
+    name: vera_platform_workspace
+  vera_logs:
+    name: vera_platform_logs

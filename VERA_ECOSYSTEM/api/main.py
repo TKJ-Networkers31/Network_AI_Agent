@@ -1,0 +1,357 @@
+"""
+api/main.py — Entry point FastAPI untuk VERA (Enterprise Network Intelligence Platform).
+
+Jalankan dari root repository atau VERA_ECOSYSTEM/:
+    uvicorn api.main:app --reload --port 8000
+
+Startup:
+- Lokasi hosting dihangatkan di thread terpisah (chat pertama tidak menunggu).
+- WebSocketEventBridge di-start di event loop utama (sekaligus bind_loop
+  ke Event Bus).
+- Interaction memory dibersihkan dari entri kedaluwarsa (purge_expired).
+- (SPRINT 2.7.1 P0) Capability Registry dipopulasi dari tool schemas
+  (AGENT_TOOL_SCHEMAS) dan dari External Context provider (Google Maps).
+  Kedua fungsi register_* SUDAH ADA sejak Sprint 2.7
+  (core/capability/integration.py, core/external_context/capability_bridge.py)
+  tapi tidak pernah dipanggil sebelumnya.
+Shutdown:
+- Bridge dihentikan rapi, semua sesi SSH APCE ditutup.
+
+SPRINT 2.7.1 (P0 Recovery): file ini sekarang juga mendaftarkan
+api/routers/vision.py dan api/routers/workspace_links.py (sudah ada sejak
+Sprint 2.7 tapi tidak pernah di-include_router - 404 di production), serta
+api/routers/capabilities.py dan api/routers/artifacts.py (baru, thin HTTP
+adapter di atas core/capability dan core/artifacts yang sudah ada -
+BUKAN subsistem baru).
+"""
+
+import asyncio
+import logging
+import os
+import threading
+from core.topology_db import init_topology_database, get_write_coordinator
+from pathlib import Path
+
+from core.logger import setup_logging
+
+setup_logging()
+
+logger = logging.getLogger("vera.api")
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from api.routers import (
+    chat, providers, memory, devices, sessions, tools, logs, models, persona,
+    connections, files, location, settings, selection, attachments,
+    workspace_links, capabilities, artifacts, topology, nms, voice,
+    network_intelligence, operations,
+)
+from api.routers import ws
+from api.ws_bridge import get_ws_bridge
+from agents.akane.connection_manager import get_connection_manager
+from core.dio import get_interaction_memory
+from core.location import location_service
+from core.capability import Capability, CapabilityUIMetadata, get_capability_registry
+
+
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+APP_DIST = BASE_DIR / "app" / "frontend" / "dist"
+
+app = FastAPI(title="VERA Enterprise Network Intelligence API")
+
+# OWASP ASVS 5.0 Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "font-src 'self' data:; "
+        "connect-src 'self' ws: wss: http: https:; "
+        "frame-ancestors 'none';"
+    )
+    return response
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(chat.router)
+app.include_router(providers.router)
+app.include_router(memory.router)
+app.include_router(devices.router)
+app.include_router(sessions.router)
+app.include_router(tools.router)
+app.include_router(logs.router)
+app.include_router(models.router)
+app.include_router(persona.router)
+app.include_router(connections.router)
+app.include_router(files.router)
+app.include_router(files.router, prefix="/api")
+app.include_router(location.router)
+app.include_router(settings.router)
+app.include_router(selection.router)
+app.include_router(attachments.router)
+app.include_router(workspace_links.router)  # === SPRINT 2.7.1 P0 FIX ===
+app.include_router(capabilities.router)     # === SPRINT 2.7.1 P0 FIX (baru) ===
+app.include_router(artifacts.router)        # === SPRINT 2.7.1 P0 FIX (baru) ===
+app.include_router(topology.router)         # The Dude Native Topology Engine
+app.include_router(nms.router)              # Network Management System & Live Telemetry
+app.include_router(voice.router)            # Background Voice Service
+app.include_router(network_intelligence.router)  # Network Intelligence, Playbooks & Config Simulator
+app.include_router(operations.router)            # Proactive Network Operations & Intelligence (Networking VII)
+from api.routers import gateways
+app.include_router(gateways.router)              # Hybrid Edge Gateways (Networking VIII)
+from api.routers import decisions
+app.include_router(decisions.router)             # Operational Decision Intelligence (Networking VIII / Phase C)
+from api.routers import portal
+app.include_router(portal.router)                # Customer Self-Service Portal (Networking VIII / Phase D)
+app.include_router(ws.router)
+
+from api.routers import auth, admin_platform, automations, playbooks, personalization
+app.include_router(auth.router)
+app.include_router(admin_platform.router)
+from api.routers import user_management
+app.include_router(user_management.router)
+app.include_router(automations.router)
+app.include_router(playbooks.router)
+app.include_router(personalization.router)
+
+
+@app.get("/api/v1/nms/status", tags=["nms"])
+def get_nms_status_v1_alias():
+    """Alias for /api/nms/overview."""
+    from core.nms_engine import get_nms_engine
+    return {"success": True, "overview": get_nms_engine().get_overview()}
+
+
+def _warm_host_location() -> None:
+    try:
+        location_service.get_host()
+    except Exception:
+        pass
+
+
+
+@app.on_event("startup")
+def _startup_topology_db_and_concurrency():
+    """
+    Validates single-worker deployment invariant and ensures topology.db access policy
+    (WAL mode, busy_timeout=30s, synchronous=NORMAL) is initialized idempotently.
+    """
+    try:
+        init_topology_database()
+        logger.info("Topology database concurrency and WAL policy initialized successfully.")
+    except Exception as exc:
+        logger.warning("Could not initialize topology database WAL policy on startup: %s", exc)
+
+    web_concurrency = os.getenv("WEB_CONCURRENCY")
+    uvicorn_workers = os.getenv("UVICORN_WORKERS")
+    for var_name, val in [("WEB_CONCURRENCY", web_concurrency), ("UVICORN_WORKERS", uvicorn_workers)]:
+        if val is not None:
+            try:
+                count = int(val)
+                if count > 1:
+                    err_msg = (
+                        f"Unsupported multi-worker deployment: {var_name}={count}. "
+                        "AIRA OS SQLite topology architecture requires single-worker execution (workers=1). "
+                        "Multi-worker process concurrency is not supported and is rejected to protect database integrity."
+                    )
+                    logger.critical(err_msg)
+                    raise RuntimeError(err_msg)
+            except ValueError:
+                pass
+
+
+@app.on_event("startup")
+def _startup_location():
+    threading.Thread(target=_warm_host_location, daemon=True).start()
+
+
+@app.on_event("startup")
+def _startup_purge_interaction_memory():
+    try:
+        get_interaction_memory().purge_expired()
+    except Exception:
+        pass
+
+
+@app.on_event("startup")
+def register_ui_capabilities():
+    reg = get_capability_registry()
+    defs = [
+        ("ui.health_check", "Health check router", "tool", "hero",
+         "Cek health check semua router: identity, resource (CPU/RAM/uptime), dan status interface. Buka koneksi dulu kalau perlu."),
+        ("ui.network_report", "Laporan jaringan", "folder", "capability_dock",
+         "Buatkan laporan status jaringan dalam file docx yang bisa saya unduh."),
+        ("ui.list_connections", "Koneksi aktif", "link", "capability_dock",
+         "Tampilkan semua koneksi SSH yang sedang aktif."),
+    ]
+    for cid, label, icon, group, prompt in defs:
+        try:
+            reg.register(Capability(
+                id=cid, name=label, ui=CapabilityUIMetadata(label=label, icon=icon, group=group),
+                metadata={"action": {"type": "prompt", "prompt": prompt}},
+            ), overwrite=True)
+        except Exception:
+            pass
+
+@app.on_event("startup")
+def _startup_capability_registry():
+    """
+    Populate Capability Registry (tool schemas + provider peta aktif) supaya
+    GET /api/capabilities punya isi. UI capabilities didaftarkan oleh
+    register_ui_capabilities() (startup hook terpisah di atas).
+    """
+    logger = logging.getLogger("aira.startup.capability")
+
+    try:
+        from core.orchestrator import AGENT_TOOL_SCHEMAS, AGENT_TOOL_CATEGORY, DANGEROUS_TOOLS
+        from core.capability.integration import register_tool_capabilities
+
+        result = register_tool_capabilities(AGENT_TOOL_SCHEMAS, AGENT_TOOL_CATEGORY, DANGEROUS_TOOLS)
+        logger.info(
+            "CAPABILITY | tool bridge: %d registered, %d skipped, %d error.",
+            len(result["registered"]), len(result["skipped"]), len(result["errors"]),
+        )
+    except Exception:
+        logger.exception("Gagal registrasi tool capabilities saat startup.")
+
+    try:
+        from core.external_context.factory import get_maps_provider
+        from core.external_context.capability_bridge import register_provider_capabilities
+
+        result = register_provider_capabilities(get_maps_provider(), overwrite=True)
+        logger.info("CAPABILITY | provider bridge: %d registered.", len(result["registered"]))
+    except Exception:
+        logger.exception("Gagal registrasi provider capabilities saat startup.")
+
+@app.on_event("startup")
+def _startup_sync_devices():
+    try:
+        from api.routers.devices import sync_inventory_and_topology
+        sync_inventory_and_topology()
+        logger.info("INVENTORY-TOPOLOGY-NMS sync completed on startup.")
+    except Exception as exc:
+        logger.warning("INVENTORY-TOPOLOGY-NMS startup sync skipped: %s", exc)
+
+@app.on_event("startup")
+async def _startup_event_bridge():
+    # Async supaya berjalan DI event loop utama (loop yang sama dengan
+    # WebSocket) - bridge mengikat loop ini ke Event Bus.
+    get_ws_bridge().start(asyncio.get_running_loop())
+
+
+@app.on_event("shutdown")
+async def _shutdown_event_bridge():
+    await get_ws_bridge().stop()
+
+
+@app.on_event("startup")
+async def _startup_topology_nms_sync():
+    try:
+        from core.topology_engine import get_topology_engine
+        engine = get_topology_engine()
+        engine.start_nms_sync()
+        logger.info("Topology NMS State Synchronization started successfully on startup.")
+    except Exception as exc:
+        logger.error("Failed to start Topology NMS State Synchronization on startup: %s", exc)
+
+
+@app.on_event("shutdown")
+def _shutdown_topology_nms_sync():
+    try:
+        from core.topology_engine import get_topology_engine
+        get_topology_engine().stop_nms_sync()
+        logger.info("Topology NMS State Synchronization stopped.")
+    except Exception as exc:
+        logger.error("Error stopping Topology NMS State Synchronization on shutdown: %s", exc)
+
+
+@app.on_event("startup")
+async def _startup_nms_monitoring():
+    try:
+        from core.nms_engine import get_nms_engine
+        engine = get_nms_engine()
+        settings = engine.get_settings()
+        if settings.get("auto_monitoring_enabled", True):
+            engine.start_monitoring()
+            logger.info("NMS background monitoring scheduler started successfully on application startup.")
+    except Exception as exc:
+        logger.error("Failed to start NMS background monitoring scheduler on startup: %s", exc)
+
+
+@app.on_event("shutdown")
+def _shutdown_nms_monitoring():
+    try:
+        from core.nms_engine import get_nms_engine
+        get_nms_engine().stop_monitoring()
+        logger.info("NMS background monitoring scheduler stopped.")
+    except Exception as exc:
+        logger.error("Error stopping NMS monitoring scheduler on shutdown: %s", exc)
+
+
+@app.on_event("shutdown")
+def _shutdown_voice_service():
+    try:
+        from agents.yuki.service import get_voice_service
+        get_voice_service().stop()
+        logger.info("Background voice service stopped.")
+    except Exception as exc:
+        logger.error("Error stopping voice service on shutdown: %s", exc)
+
+
+@app.on_event("shutdown")
+def _shutdown_connections():
+    get_connection_manager().shutdown()
+
+@app.on_event("startup")
+def _startup_automation_engine():
+    try:
+        from core.scheduler import get_automation_engine
+        get_automation_engine().start_scheduler_loop()
+        logger.info("Automation engine scheduler loop started successfully on startup.")
+    except Exception as exc:
+        logger.error("Failed to start automation engine on startup: %s", exc)
+
+
+@app.on_event("shutdown")
+def _shutdown_automation_engine():
+    try:
+        from core.scheduler import get_automation_engine
+        get_automation_engine().stop_scheduler_loop()
+        logger.info("Automation engine scheduler loop stopped.")
+    except Exception as exc:
+        logger.error("Error stopping automation engine on shutdown: %s", exc)
+
+
+
+@app.get("/health")
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "ecosystem": "AIRA"}
+
+
+class SafeStaticFiles(StaticFiles):
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "websocket":
+            await send({"type": "websocket.close", "code": 404})
+            return
+        await super().__call__(scope, receive, send)
+
+if APP_DIST.exists():
+    app.mount("/", SafeStaticFiles(directory=str(APP_DIST), html=True), name="app")

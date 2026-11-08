@@ -6,6 +6,7 @@ from pathlib import Path
 _workspace_tmp = Path(__file__).resolve().parent / ".tmp"
 _workspace_tmp.mkdir(parents=True, exist_ok=True)
 
+os.environ.setdefault("VERA_TMP_DIR", str(_workspace_tmp))
 os.environ.setdefault("AIRA_TMP_DIR", str(_workspace_tmp))
 if not os.environ.get("TEMP") or tempfile.gettempdir().startswith("C:"):
     tempfile.tempdir = str(_workspace_tmp)

@@ -1,16 +1,16 @@
 # ==============================================================================
-# AIRA OS — Multi-stage Lightweight Production Dockerfile
-# Optimized for low-resource VPS (<= 2GB RAM)
+# VERA — Multi-stage Lightweight Production Dockerfile
+# Enterprise Network Intelligence Platform
 # ==============================================================================
 
 # Stage 1: Build Frontend Assets
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
 
-COPY AIRA_ECOSYSTEM/app/frontend/package*.json ./
+COPY VERA_ECOSYSTEM/app/frontend/package*.json ./
 RUN npm ci --prefer-offline --no-audit
 
-COPY AIRA_ECOSYSTEM/app/frontend/ ./
+COPY VERA_ECOSYSTEM/app/frontend/ ./
 RUN npm run build
 
 # Stage 2: Minimal Python Runtime
@@ -32,21 +32,23 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy Backend codebase
-COPY AIRA_ECOSYSTEM/ ./AIRA_ECOSYSTEM/
+COPY VERA_ECOSYSTEM/ ./VERA_ECOSYSTEM/
+RUN ln -s VERA_ECOSYSTEM AIRA_ECOSYSTEM
 
 # Copy built frontend distribution to static hosting path
-COPY --from=frontend-builder /app/frontend/dist ./AIRA_ECOSYSTEM/app/frontend/dist
+COPY --from=frontend-builder /app/frontend/dist ./VERA_ECOSYSTEM/app/frontend/dist
 
 # Security: Non-root user setup
-RUN groupadd -g 10001 aira && \
-    useradd -u 10001 -g aira -s /bin/bash -m aira && \
-    mkdir -p /app/AIRA_ECOSYSTEM/database /app/workspace /app/AIRA_ECOSYSTEM/logs && \
-    chown -R aira:aira /app
+RUN groupadd -g 10001 vera && \
+    useradd -u 10001 -g vera -s /bin/bash -m vera && \
+    mkdir -p /app/VERA_ECOSYSTEM/database /app/workspace /app/VERA_ECOSYSTEM/logs && \
+    chown -R vera:vera /app
 
-USER aira
+USER vera
 
-ENV PYTHONPATH=/app/AIRA_ECOSYSTEM \
+ENV PYTHONPATH=/app/VERA_ECOSYSTEM \
     PYTHONUNBUFFERED=1 \
+    VERA_ENV=production \
     AIRA_ENV=production \
     PORT=8000
 
