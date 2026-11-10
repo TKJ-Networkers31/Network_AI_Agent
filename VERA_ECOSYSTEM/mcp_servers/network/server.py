@@ -82,7 +82,7 @@ def create_network_mcp_server() -> MCPServer:
     # Group A: Read-Only Diagnostics (Local host & Device inspection)
     # ------------------------------------------------------------------
 
-    @server.tool(name="network_ping", description="Ping an IPv4/IPv6 address or domain from the AIRA host.")
+    @server.tool(name="network_ping", description="Ping an IPv4/IPv6 address or domain from the VERA host.")
     def network_ping(target: str, count: int = 4) -> dict:
         try:
             valid_target = validate_network_target(target)
@@ -90,7 +90,7 @@ def create_network_mcp_server() -> MCPServer:
         except Exception as exc:
             return {"success": False, "tool": "network_ping", "error": str(exc)}
 
-    @server.tool(name="network_nslookup", description="Perform DNS forward/reverse resolution from the AIRA host.")
+    @server.tool(name="network_nslookup", description="Perform DNS forward/reverse resolution from the VERA host.")
     def network_nslookup(target: str) -> dict:
         try:
             valid_target = validate_network_target(target)
@@ -106,7 +106,7 @@ def create_network_mcp_server() -> MCPServer:
         except Exception as exc:
             return {"success": False, "tool": "network_traceroute", "error": str(exc)}
 
-    @server.tool(name="network_list_devices", description="List all configured network devices in the AIRA inventory.")
+    @server.tool(name="network_list_devices", description="List all configured network devices in the VERA inventory.")
     def network_list_devices(include_disabled: bool = False) -> dict:
         raw = _inv_list_devices(include_disabled=include_disabled)
         return mask_sensitive_data(raw)

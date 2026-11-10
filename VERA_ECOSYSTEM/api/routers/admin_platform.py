@@ -59,7 +59,7 @@ def require_platform_admin(authorization: Optional[str] = Header(None)) -> Tenan
     if not (ctx.is_internal and has_admin_role):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Platform administration access required. Akses ditolak: AIRA Control Plane memerlukan kredensial staf internal administrator.",
+            detail="Platform administration access required. Akses ditolak: VERA Control Plane memerlukan kredensial staf internal administrator.",
         )
     return ctx
 

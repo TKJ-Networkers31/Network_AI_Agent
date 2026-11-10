@@ -20,6 +20,7 @@ from core.orchestrator import AGENT_TOOL_MAP
 from core.slash_commands import apply_slash_command
 from core.tenant.manager import IdentityManager
 from agents.rei.dio_tools import resolve_submission
+from core.vae import brain_response_to_vae_payload
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -68,6 +69,10 @@ def chat(
 
     # 3. Message & Selection Quote Composition
     if payload.dio_submission:
+        cancelled = payload.dio_submission.get("cancelled", False)
+        status = "CANCELLED" if cancelled else "SUBMITTED"
+        schema_id = payload.dio_submission.get("schema_id")
+        store.resolve_turn_interaction(session_id, schema_id=schema_id, status=status)
         display_message, llm_message = resolve_submission(payload.dio_submission)
     else:
         display_message = payload.message.strip()
@@ -76,7 +81,7 @@ def chat(
     if payload.selected_text and payload.selected_text.strip():
         quote_snippet = payload.selected_text.strip()
         llm_message = (
-            f"[KUTIPAN DARI ASISTEN AIRA]:\n"
+            f"[KUTIPAN DARI ASISTEN VERA]:\n"
             f'"{quote_snippet}"\n\n'
             f"[PERTANYAAN PENGGUNA TERHADAP KUTIPAN]:\n"
             f"{llm_message}"
@@ -104,6 +109,15 @@ def chat(
 
     row = store.get_session_row(session_id, user_id=user_id)
 
+    # 4. VERA Adaptive Experience (VAE) Protocol v2 payload generation
+    vae_payload_obj = brain_response_to_vae_payload(
+        answer=result.answer,
+        interaction_schema=result.interaction_schema,
+        steps=result.steps,
+        session_id=session_id,
+        query=display_message,
+    )
+
     return {
         "answer": result.answer,
         "steps": result.steps,
@@ -113,6 +127,7 @@ def chat(
         "session_id": session_id,
         "session_title": row["title"] if row else "Chat baru",
         "interaction_schema": result.interaction_schema,
+        "vae_payload": vae_payload_obj.to_dict(),
         "quota": None,
     }
 

@@ -85,10 +85,10 @@ const PAGE_KEYWORDS = [
   },
   {
     page: "persona",
-    label: "AIRA Persona",
-    spoken: "Halaman persona AIRA sudah dibuka.",
+    label: "VERA Persona",
+    spoken: "Halaman persona VERA sudah dibuka.",
     patterns: [
-      /\b(persona|profil aira|karakter|gaya bicara|sifat)\b/i,
+      /\b(persona|profil vera|profil aira|karakter|gaya bicara|sifat)\b/i,
     ],
   },
   {

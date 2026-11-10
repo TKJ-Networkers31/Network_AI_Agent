@@ -83,12 +83,9 @@ class LLMVisionProvider:
         try:
             raw = Path(reference["absolute_path"]).read_bytes()
             b64 = base64.b64encode(raw).decode()
-            if model.provider == "ollama":
-                msgs = [{"role": "user", "content": PROMPT, "images": [b64]}]
-            else:
-                uri = f"data:{metadata.mime_type};base64,{b64}"
-                msgs = [{"role": "user", "content": [{"type": "text", "text": PROMPT},
-                                                     {"type": "image_url", "image_url": {"url": uri}}]}]
+            uri = f"data:{metadata.mime_type};base64,{b64}"
+            msgs = [{"role": "user", "content": [{"type": "text", "text": PROMPT},
+                                                 {"type": "image_url", "image_url": {"url": uri}}]}]
             res = ProviderClient.chat(provider=model.provider, model=model.model_id, messages=msgs, tools=None, timeout=60)
         except Exception as exc:
             return VisionResult(status=VisionStatus.UNAVAILABLE.value, provider=model.display_name, reason=str(exc))

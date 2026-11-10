@@ -9,11 +9,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
+from tests.auth_helper import get_test_auth_headers
 
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, headers=get_test_auth_headers())
 
 
 def test_api_predictive_overview(client: TestClient) -> None:

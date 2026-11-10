@@ -417,7 +417,8 @@ def test_15_route_history_api_endpoints_and_topology_history_preservation(tmp_pa
     app.dependency_overrides[require_topology_admin] = lambda: "admin_tester"
 
     try:
-        client = TestClient(app)
+        from tests.auth_helper import get_test_auth_headers
+        client = TestClient(app, headers=get_test_auth_headers())
         r_post = client.post(
             "/api/topology/route-snapshots",
             json={"device_ids": ["dev_chr"], "description": "Snap 1", "topology_snapshot_id": topo_snap.snapshot_id},

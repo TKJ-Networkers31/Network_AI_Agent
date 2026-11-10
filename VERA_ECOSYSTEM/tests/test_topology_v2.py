@@ -764,9 +764,12 @@ class TestTopologyFabricV2(unittest.TestCase):
     # =========================================================================
 
     def _build_test_client(self) -> TestClient:
+        from tests.auth_helper import get_test_auth_headers
         app = FastAPI()
         app.include_router(topology_router_module.router)
-        return TestClient(app)
+        client = TestClient(app)
+        client.headers.update(get_test_auth_headers())
+        return client
 
     def test_26_fastapi_backward_compatible_and_v2_endpoints(self):
         """26. Existing & V2 REST endpoints work end-to-end via FastAPI TestClient."""

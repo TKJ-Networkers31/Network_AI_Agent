@@ -164,6 +164,12 @@ function isHeldKind(kind) {
  * ("![router](https://exa.com/r.jpg)") dibiarkan - langsung tampil.
  */
 export function stripIncompleteInline(text) {
+  // Hide incomplete HTML comments (e.g. streaming "<!-- suggestions: ...")
+  const openComment = text.lastIndexOf("<!--");
+  if (openComment !== -1 && text.indexOf("-->", openComment) === -1) {
+    text = text.slice(0, openComment);
+  }
+
   const open = text.lastIndexOf("[");
 
   if (open === -1) return text;

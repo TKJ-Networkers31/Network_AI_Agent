@@ -1,5 +1,5 @@
 """
-AIRA OS — Comprehensive Fresh Install Data Reset Script.
+VERA Platform — Comprehensive Fresh Install Data Reset Script.
 Safely resets all dynamic operational data (memory, devices, topology, NMS metrics,
 chat sessions, security findings, actions, incidents, logs, artifacts) back to a pristine
 fresh-install state while preserving core schemas, system configurations, and the
@@ -28,11 +28,11 @@ DATABASE_DIR = BASE_DIR / "database"
 BACKUPS_DIR = DATABASE_DIR / "backups"
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
-logger = logging.getLogger("aira.fresh_install")
+logger = logging.getLogger("vera.fresh_install")
 
 
 def create_pre_reset_backup() -> Path:
-    """Creates a full timestamped backup of all .db files in database/."""
+    """Creates a full timestamped backup of all .db files in database/, data/config_snapshots, and logs/."""
     timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
     backup_target = BACKUPS_DIR / f"fresh_install_backup_{timestamp}"
     backup_target.mkdir(parents=True, exist_ok=True)
@@ -41,6 +41,18 @@ def create_pre_reset_backup() -> Path:
         dest = backup_target / db_path.name
         shutil.copy2(db_path, dest)
         logger.info("Backed up %s -> %s", db_path.name, dest.name)
+
+    cfg_dir = BASE_DIR / "data" / "config_snapshots"
+    if cfg_dir.exists():
+        cfg_backup = backup_target / "config_snapshots"
+        cfg_backup.mkdir(parents=True, exist_ok=True)
+        for f in cfg_dir.glob("*.json"):
+            shutil.copy2(f, cfg_backup / f.name)
+
+    for log_name in ["aira.log", "aira.log.1", "paramiko_debug.log"]:
+        f_log = BASE_DIR / "logs" / log_name
+        if f_log.exists():
+            shutil.copy2(f_log, backup_target / log_name)
 
     logger.info("Backup successfully completed at: %s", backup_target)
     return backup_target
@@ -61,11 +73,14 @@ def execute_fresh_install_reset() -> dict:
     art_db = DATABASE_DIR / "artifacts.db"
     if art_db.exists():
         with sqlite3.connect(art_db) as conn:
-            cnt = conn.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0]
-            conn.execute("DELETE FROM artifacts")
-            conn.commit()
-            conn.execute("VACUUM")
-            report["cleared_databases"]["artifacts.db"] = {"artifacts": cnt}
+            try:
+                cnt = conn.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0]
+                conn.execute("DELETE FROM artifacts")
+                conn.commit()
+                conn.execute("VACUUM")
+                report["cleared_databases"]["artifacts.db"] = {"artifacts": cnt}
+            except sqlite3.OperationalError:
+                report["cleared_databases"]["artifacts.db"] = "table artifacts does not exist"
 
     # 2. attachments.db
     att_db = DATABASE_DIR / "attachments.db"
@@ -127,6 +142,24 @@ def execute_fresh_install_reset() -> dict:
             conn.execute("VACUUM")
             report["cleared_databases"]["logs.db"] = {"logs": cnt}
 
+    # 6b. jobs.db
+    jobs_db = DATABASE_DIR / "jobs.db"
+    if jobs_db.exists():
+        with sqlite3.connect(jobs_db) as conn:
+            try:
+                j_cnt = conn.execute("SELECT COUNT(*) FROM durable_jobs").fetchone()[0]
+                e_cnt = conn.execute("SELECT COUNT(*) FROM job_events").fetchone()[0]
+                conn.execute("DELETE FROM job_events")
+                conn.execute("DELETE FROM durable_jobs")
+                conn.commit()
+                conn.execute("VACUUM")
+                report["cleared_databases"]["jobs.db"] = {
+                    "durable_jobs": j_cnt,
+                    "job_events": e_cnt,
+                }
+            except sqlite3.OperationalError as ex:
+                report["cleared_databases"]["jobs.db"] = f"skipped: {ex}"
+
     # 7. long_term_memory.db & semantic_memory.db
     lt_db = DATABASE_DIR / "long_term_memory.db"
     if lt_db.exists():
@@ -179,6 +212,55 @@ def execute_fresh_install_reset() -> dict:
             f.unlink()
             del_img_cnt += 1
         report["cleared_databases"]["vision_snapshots"] = {"deleted_images": del_img_cnt}
+
+    # 10b. location.db
+    loc_db = DATABASE_DIR / "location.db"
+    if loc_db.exists():
+        with sqlite3.connect(loc_db) as conn:
+            cnt = conn.execute("SELECT COUNT(*) FROM host_location").fetchone()[0]
+            conn.execute("DELETE FROM host_location")
+            conn.commit()
+            conn.execute("VACUUM")
+            report["cleared_databases"]["location.db"] = {"host_location": cnt}
+
+    # 10c. management.db (Multi-Path Management Profiles & RoMON Neighbor Cache)
+    mgmt_db = DATABASE_DIR / "management.db"
+    if mgmt_db.exists():
+        with sqlite3.connect(mgmt_db) as conn:
+            try:
+                p_cnt = conn.execute("SELECT COUNT(*) FROM device_management_profiles").fetchone()[0]
+                n_cnt = conn.execute("SELECT COUNT(*) FROM romon_neighbors_cache").fetchone()[0]
+                conn.execute("DELETE FROM device_management_profiles")
+                conn.execute("DELETE FROM romon_neighbors_cache")
+                conn.commit()
+                conn.execute("VACUUM")
+                report["cleared_databases"]["management.db"] = {
+                    "device_management_profiles": p_cnt,
+                    "romon_neighbors_cache": n_cnt,
+                }
+            except sqlite3.OperationalError as ex:
+                report["cleared_databases"]["management.db"] = f"skipped: {ex}"
+
+    # 10d. config_snapshots and application logs
+    cfg_dir = BASE_DIR / "data" / "config_snapshots"
+    if cfg_dir.exists():
+        del_cfg_cnt = 0
+        for f in cfg_dir.glob("*.json"):
+            f.unlink()
+            del_cfg_cnt += 1
+        report["cleared_databases"]["config_snapshots"] = {"deleted_files": del_cfg_cnt}
+
+    logs_dir = BASE_DIR / "logs"
+    if logs_dir.exists():
+        truncated_logs = []
+        for log_f in logs_dir.glob("*.log*"):
+            try:
+                with open(log_f, "w") as f:
+                    f.truncate(0)
+                truncated_logs.append(log_f.name)
+            except Exception as e:
+                logger.warning("Could not truncate %s: %e", log_f.name, e)
+        report["cleared_databases"]["application_logs"] = truncated_logs
 
     # 11. persona.db
     p_db = DATABASE_DIR / "persona.db"
@@ -250,7 +332,7 @@ def execute_fresh_install_reset() -> dict:
                 "operational_automations",
                 "operational_automation_executions",
 
-                # Sessions & Audits & Memory
+                # Sessions & Audits & Memory & Billing Dynamic Data
                 "user_memories",
                 "user_preferences",
                 "operational_user_sessions",
@@ -258,6 +340,11 @@ def execute_fresh_install_reset() -> dict:
                 "operational_audit_log",
                 "operational_customer_profiles",
                 "operational_customer_notification_preferences",
+                "operational_token_usage_ledger",
+                "operational_token_quota_adjustments",
+                "operational_billing_invoices",
+                "operational_billing_transactions",
+                "operational_billing_webhook_events",
             ]
 
             # Handle immutable triggers for topology_snapshots and route_snapshots
@@ -288,10 +375,25 @@ def execute_fresh_install_reset() -> dict:
                 END;
             """)
 
+            # Playbooks: Delete custom playbooks, retain builtins
+            custom_pb_cnt = conn.execute("SELECT COUNT(*) FROM operational_playbooks WHERE is_builtin = 0").fetchone()[0]
+            conn.execute("DELETE FROM operational_playbooks WHERE is_builtin = 0")
+            top_cleared["operational_playbooks_custom"] = custom_pb_cnt
+
             # Personas: Delete custom personas, retain default builtin presets
             custom_personas_cnt = conn.execute("SELECT COUNT(*) FROM user_personas WHERE user_id IS NOT NULL").fetchone()[0]
             conn.execute("DELETE FROM user_personas WHERE user_id IS NOT NULL")
             top_cleared["user_personas_custom"] = custom_personas_cnt
+
+            # Groups: Delete non-default/test groups (is_system = 0), retain system default groups
+            test_groups = conn.execute("SELECT group_id FROM operational_groups WHERE is_system = 0").fetchall()
+            test_group_ids = [g[0] for g in test_groups]
+            if test_group_ids:
+                placeholders = ",".join(["?"] * len(test_group_ids))
+                conn.execute(f"DELETE FROM operational_group_permissions WHERE group_id IN ({placeholders})", test_group_ids)
+                conn.execute(f"DELETE FROM operational_user_group_memberships WHERE group_id IN ({placeholders})", test_group_ids)
+                conn.execute(f"DELETE FROM operational_groups WHERE group_id IN ({placeholders})", test_group_ids)
+            top_cleared["operational_groups_test_removed"] = len(test_group_ids)
 
             # Users: Delete ephemeral test users, retain superadmin 'lingga_admin'
             test_users = conn.execute("SELECT user_id FROM operational_users WHERE username != 'lingga_admin'").fetchall()
@@ -301,26 +403,54 @@ def execute_fresh_install_reset() -> dict:
                 conn.execute(f"DELETE FROM operational_user_roles WHERE user_id IN ({placeholders})", test_user_ids)
                 conn.execute(f"DELETE FROM operational_user_group_memberships WHERE user_id IN ({placeholders})", test_user_ids)
                 conn.execute(f"DELETE FROM operational_user_subscriptions WHERE user_id IN ({placeholders})", test_user_ids)
+                conn.execute(f"DELETE FROM operational_token_balances WHERE user_id IN ({placeholders})", test_user_ids)
+                conn.execute(f"DELETE FROM user_preferences WHERE user_id IN ({placeholders})", test_user_ids)
+                conn.execute(f"DELETE FROM network_workspaces WHERE user_id IN ({placeholders})", test_user_ids)
                 conn.execute(f"DELETE FROM operational_users WHERE user_id IN ({placeholders})", test_user_ids)
             top_cleared["operational_users_test_removed"] = len(test_user_ids)
 
-            # Record preserved system state from topology.db
-            report["preserved_system_records"]["operational_users"] = [r[0] for r in conn.execute("SELECT username FROM operational_users").fetchall()]
-            report["preserved_system_records"]["operational_tenants"] = [r[0] for r in conn.execute("SELECT slug FROM operational_tenants").fetchall()]
-            report["preserved_system_records"]["operational_groups"] = conn.execute("SELECT COUNT(*) FROM operational_groups").fetchone()[0]
-            report["preserved_system_records"]["operational_permissions"] = conn.execute("SELECT COUNT(*) FROM operational_permissions").fetchone()[0]
-            report["preserved_system_records"]["operational_playbooks"] = conn.execute("SELECT COUNT(*) FROM operational_playbooks").fetchone()[0]
-            report["preserved_system_records"]["user_personas_builtin"] = conn.execute("SELECT COUNT(*) FROM user_personas").fetchone()[0]
+            # Ensure lingga_admin user is active, enabled, unlocked, and assigned to grp_super_admin
+            lingga_row = conn.execute("SELECT user_id FROM operational_users WHERE username = 'lingga_admin'").fetchone()
+            if lingga_row:
+                lingga_uid = lingga_row[0]
+                now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                conn.execute("""
+                    UPDATE operational_users
+                    SET is_active = 1, account_enabled = 1, failed_login_attempts = 0, locked_until_utc = NULL
+                    WHERE user_id = ?
+                """, (lingga_uid,))
+                conn.execute("DELETE FROM operational_user_group_memberships WHERE user_id = ? AND group_id != 'grp_super_admin'", (lingga_uid,))
+                conn.execute("""
+                    INSERT OR IGNORE INTO operational_user_group_memberships (user_id, group_id, assigned_at)
+                    VALUES (?, 'grp_super_admin', ?)
+                """, (lingga_uid, now_iso))
+                conn.execute("""
+                    UPDATE user_preferences
+                    SET custom_instructions = '', settings_json = '{}', active_persona_id = 'preset_general'
+                    WHERE user_id = ?
+                """, (lingga_uid,))
 
             conn.commit()
-            conn.execute("VACUUM")
-            report["cleared_databases"]["topology.db"] = top_cleared
 
-    # Re-bootstrap superadmin to verify lingga_admin account is pristine & fully privileged
+    # Re-ensure tenant schema and re-bootstrap superadmin to guarantee canonical fresh-install state
     sys.path.insert(0, str(BASE_DIR))
+    from core.tenant.db import ensure_tenant_schema
     from core.bootstrap_superadmin import bootstrap_superadmin
+    ensure_tenant_schema(top_db)
     superadmin_res = bootstrap_superadmin(db_path=top_db, force_reset=False)
     report["superadmin_verification"] = superadmin_res
+
+    # Record preserved system state from topology.db
+    with sqlite3.connect(top_db) as conn:
+        report["preserved_system_records"]["operational_users"] = [r[0] for r in conn.execute("SELECT username FROM operational_users").fetchall()]
+        report["preserved_system_records"]["operational_tenants"] = [r[0] for r in conn.execute("SELECT slug FROM operational_tenants").fetchall()]
+        report["preserved_system_records"]["operational_groups"] = [r[0] for r in conn.execute("SELECT name FROM operational_groups").fetchall()]
+        report["preserved_system_records"]["operational_permissions"] = conn.execute("SELECT COUNT(*) FROM operational_permissions").fetchone()[0]
+        report["preserved_system_records"]["operational_playbooks"] = conn.execute("SELECT COUNT(*) FROM operational_playbooks").fetchone()[0]
+        report["preserved_system_records"]["user_personas_builtin"] = conn.execute("SELECT COUNT(*) FROM user_personas").fetchone()[0]
+        report["preserved_system_records"]["operational_sites"] = [r[0] for r in conn.execute("SELECT site_id FROM operational_sites").fetchall()]
+        report["preserved_system_records"]["network_workspaces"] = [r[0] for r in conn.execute("SELECT workspace_id FROM network_workspaces").fetchall()]
+        conn.execute("VACUUM")
 
     return report
 

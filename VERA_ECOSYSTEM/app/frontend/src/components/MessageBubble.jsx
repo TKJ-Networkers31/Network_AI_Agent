@@ -37,6 +37,7 @@ import SelectionToolbar from "./selection/SelectionToolbar.jsx";
 import MessageCapabilityActions from "./capabilities/MessageCapabilityActions.jsx";
 import StreamingMarkdown from "./StreamingMarkdown.jsx";
 import { parseQuotedMessage } from "../utils/quotedMessage.js";
+import ExperienceRenderer from "../platform/adaptive-experience/renderer/ExperienceRenderer.jsx";
 
 function ProcessSteps({ steps }) {
   const [open, setOpen] = useState(false);
@@ -216,39 +217,60 @@ function isDioSubmissionText(text) {
 }
 
 
-function extractFollowupSuggestions(rawText) {
+function extractFollowupSuggestions(rawText, isStreaming = false) {
   if (!rawText || typeof rawText !== "string") {
-    return { cleanText: rawText, suggestions: [] };
+    return { cleanText: rawText || "", suggestions: [] };
   }
 
+  let text = rawText;
+  let suggestions = [];
+
   // 1. JSON comment format: <!-- suggestions: ["Saran 1", "Saran 2"] -->
-  const jsonMatch = rawText.match(/<!--\s*suggestions:\s*(\[.*?\])\s*-->/is);
+  const jsonMatch = text.match(/<!--\s*suggestions:\s*(\[.*?\])\s*-->/is);
   if (jsonMatch) {
     try {
       const parsed = JSON.parse(jsonMatch[1]);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const clean = rawText.replace(jsonMatch[0], "").trim();
-        return { cleanText: clean, suggestions: parsed.map((s) => String(s).trim()).filter(Boolean) };
+        suggestions = parsed.map((s) => String(s).trim()).filter(Boolean);
       }
     } catch {}
+    text = text.replace(jsonMatch[0], "");
   }
 
   // 2. Bracket tag format: [SUGGESTIONS: "Saran 1", "Saran 2"]
-  const bracketMatch = rawText.match(/\[SUGGESTIONS?:\s*(.+?)\]/is);
+  const bracketMatch = text.match(/\[SUGGESTIONS?:\s*(.+?)\]/is);
   if (bracketMatch) {
     try {
       const items = bracketMatch[1]
         .split(/[,;\n]/)
         .map((s) => s.replace(/^["'\s*-]+|["'\s]+$/g, "").trim())
         .filter(Boolean);
-      if (items.length > 0) {
-        const clean = rawText.replace(bracketMatch[0], "").trim();
-        return { cleanText: clean, suggestions: items };
+      if (items.length > 0 && suggestions.length === 0) {
+        suggestions = items;
       }
     } catch {}
+    text = text.replace(bracketMatch[0], "");
   }
 
-  return { cleanText: rawText, suggestions: [] };
+  // 3. During streaming: hide trailing unclosed comments or suggestion prefixes
+  if (isStreaming) {
+    const unclosedCommentIdx = text.lastIndexOf("<!--");
+    if (unclosedCommentIdx !== -1 && text.indexOf("-->", unclosedCommentIdx) === -1) {
+      text = text.slice(0, unclosedCommentIdx);
+    }
+    const unclosedBracketIdx = text.lastIndexOf("[SUGGESTION");
+    if (unclosedBracketIdx !== -1 && text.indexOf("]", unclosedBracketIdx) === -1) {
+      text = text.slice(0, unclosedBracketIdx);
+    }
+  }
+
+  // 4. Strip any remaining complete HTML comments
+  text = text.replace(/<!--[\s\S]*?-->/g, "");
+
+  // 5. Strip leaked tool bookkeeping strings from prose (e.g. "1 tool digunakan svg")
+  text = text.replace(/\b\d+\s+tool(?:s)?\s+digunakan\s+[a-z0-9_-]+\b/gi, "");
+
+  return { cleanText: text.trim(), suggestions };
 }
 
 export default function MessageBubble({
@@ -261,6 +283,7 @@ export default function MessageBubble({
   streamed,
   interactionSchema,
   interactionResolved,
+  interactionStatus,
   onSubmitInteraction,
   busy,
   canRegenerate,
@@ -273,13 +296,15 @@ export default function MessageBubble({
   onSelectionAction,
   onCapabilityInvoke,
   onSelectSuggestion,
+  vaePayload,
+  blocks,
 }) {
   const isUser = role === "user";
   const quoted = isUser ? parseQuotedMessage(content) : null;
   const { cleanText, suggestions } = useMemo(() => {
     if (isUser) return { cleanText: content, suggestions: [] };
-    return extractFollowupSuggestions(content);
-  }, [isUser, content]);
+    return extractFollowupSuggestions(content, Boolean(streaming));
+  }, [isUser, content, streaming]);
   const hasInteraction = !isUser && Boolean(interactionSchema);
   const [editing, setEditing] = useState(false);
 
@@ -308,19 +333,6 @@ export default function MessageBubble({
       <div className={`max-w-[88%] sm:max-w-[75%] ${widthClass}`}>
         {!isUser && <ProcessSteps steps={steps} />}
 
-        {hasInteraction && !interactionResolved && (
-          <div className="mb-2">
-            <Renderer schema={interactionSchema} onSubmitAction={onSubmitInteraction} />
-          </div>
-        )}
-
-        {hasInteraction && interactionResolved && (
-          <div className="mb-2 flex items-center gap-2 text-xs text-white/40 italic px-1">
-            <span>✓</span>
-            <span>Form sudah dikirim.</span>
-          </div>
-        )}
-
         {isUser && editing ? (
           <EditBox
             initial={content}
@@ -331,35 +343,47 @@ export default function MessageBubble({
               onEdit?.(text);
             }}
           />
-        ) : (
+        ) : isUser ? (
           content && (
+            <div
+              ref={contentRef}
+              className="rounded-2xl px-4 py-3 text-sm leading-relaxed break-words transition-all duration-200 bg-gradient-to-r from-cyan-600/90 to-purple-600/90 text-white whitespace-pre-wrap border border-cyan-400/35 shadow-[0_0_15px_rgba(56,189,248,0.2)] hover:border-cyan-400/70 hover:shadow-[0_0_24px_rgba(56,189,248,0.35)]"
+            >
+              {quoted ? (
+                <>
+                  <div className="mb-2 rounded-lg border-l-4 border-white/60 bg-black/20 px-2.5 py-1.5 text-xs text-white/80 line-clamp-4 whitespace-pre-wrap">
+                    {quoted.quote}
+                  </div>
+                  {quoted.body && <div>{quoted.body}</div>}
+                </>
+              ) : (
+                content
+              )}
+            </div>
+          )
+        ) : (
+          (content || hasInteraction) && (
             <div
               ref={contentRef}
               className={`rounded-2xl px-4 py-3 text-sm leading-relaxed break-words transition-all duration-200
                 ${
-                  isUser
-                    ? "bg-gradient-to-r from-cyan-600/90 to-purple-600/90 text-white whitespace-pre-wrap border border-cyan-400/35 shadow-[0_0_15px_rgba(56,189,248,0.2)] hover:border-cyan-400/70 hover:shadow-[0_0_24px_rgba(56,189,248,0.35)]"
-                    : local
+                  local
                     ? "bg-black/70 border border-white/10 text-white/60"
                     : "bg-surface/85 backdrop-blur-md border border-white/10 text-white/90 hover:border-cyan-400/50 hover:shadow-[0_0_22px_rgba(56,189,248,0.2)]"
                 }`}
             >
-              {isUser ? (
-                quoted ? (
-                  <>
-                    <div className="mb-2 rounded-lg border-l-4 border-white/60 bg-black/20 px-2.5 py-1.5 text-xs text-white/80 line-clamp-4 whitespace-pre-wrap">
-                      {quoted.quote}
-                    </div>
-                    {quoted.body && <div>{quoted.body}</div>}
-                  </>
-                ) : (
-                  content
-                )
-              ) : streaming || streamed ? (
-                <StreamingMarkdown content={cleanText} streaming={Boolean(streaming)} />
-              ) : (
-                <Markdown content={cleanText} />
-              )}
+              <ExperienceRenderer
+                content={cleanText}
+                interactionSchema={interactionSchema}
+                interactionResolved={interactionResolved}
+                interactionStatus={interactionStatus}
+                vaePayload={vaePayload}
+                blocks={blocks || vaePayload?.blocks}
+                streaming={Boolean(streaming)}
+                streamed={Boolean(streamed)}
+                onInteractionSubmit={onSubmitInteraction}
+                onActionInvoke={onCapabilityInvoke}
+              />
             </div>
           )
         )}

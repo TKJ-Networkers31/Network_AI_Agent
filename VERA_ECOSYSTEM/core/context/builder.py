@@ -442,22 +442,64 @@ class ContextBuilder:
         legacy = None if user_id else self._text_section(SECTION_MEMORY, "memory", self._memory_text, warnings)
         semantic = self._semantic_section(user_input, session_id, warnings)
 
+        # Grounded historical engineering heritage (AIRA -> VERA lineage)
+        heritage_text = ""
+        try:
+            from core.knowledge.heritage import get_heritage_service
+            h_records = get_heritage_service().query_heritage(user_input, limit=2)
+            if h_records:
+                heritage_text = get_heritage_service().format_heritage_snippet(h_records)
+        except Exception:
+            pass
+
         if not user_mem_text:
+            if semantic is None and legacy is None:
+                if heritage_text:
+                    return ContextSection(
+                        SECTION_MEMORY,
+                        text=heritage_text,
+                        data={"sources": ["heritage"]},
+                        source="heritage",
+                    )
+                return None
             if semantic is None:
+                if heritage_text:
+                    return ContextSection(
+                        SECTION_MEMORY,
+                        text=f"{legacy.text}\n\n{heritage_text}",
+                        data={"sources": ["legacy", "heritage"]},
+                        source="legacy+heritage",
+                    )
                 return legacy
             if legacy is None:
+                if heritage_text:
+                    return ContextSection(
+                        SECTION_MEMORY,
+                        text=f"{semantic.text}\n\n{heritage_text}",
+                        data={**semantic.data, "sources": ["semantic", "heritage"]},
+                        source="semantic+heritage",
+                    )
                 return semantic
+            text = f"{legacy.text}\n\n{semantic.text}"
+            source = "memory+semantic_memory"
+            sources = ["legacy", "semantic"]
+            if heritage_text:
+                text += f"\n\n{heritage_text}"
+                source = "memory+semantic_memory+heritage"
+                sources.append("heritage")
             return ContextSection(
                 SECTION_MEMORY,
-                text=f"{legacy.text}\n\n{semantic.text}",
-                data={**semantic.data, "sources": ["legacy", "semantic"]},
-                source="memory+semantic_memory",
+                text=text,
+                data={**semantic.data, "sources": sources},
+                source=source,
             )
 
-        text_parts = [p for p in [user_mem_text, getattr(semantic, "text", "")] if p]
+        text_parts = [p for p in [user_mem_text, getattr(semantic, "text", ""), heritage_text] if p]
         sources = ["user_memory"]
         if semantic and semantic.text:
             sources.append("semantic")
+        if heritage_text:
+            sources.append("heritage")
 
         return ContextSection(
             SECTION_MEMORY,

@@ -54,6 +54,7 @@ from core.events import event_scope, new_correlation_id
 from core import chat_sessions as store
 from core.orchestrator import AGENT_TOOL_MAP
 from core.slash_commands import apply_slash_command
+from core.vae import brain_response_to_vae_payload
 
 logger = logging.getLogger("aira.ws")
 
@@ -79,11 +80,86 @@ def _decode_voice_audio(raw: dict) -> "np.ndarray | None":
         return None
 
 
+def update_active_run_event(session_id: str, event_type: str, data: dict) -> None:
+    """Updates the in-memory active run cache and logs durable event history."""
+    run = _ACTIVE_RUNS.get(session_id)
+    if not run:
+        return
+
+    job_id = run.get("job_id")
+    if job_id:
+        try:
+            from core.job_store import get_job_store
+            get_job_store().record_event(
+                job_id=job_id,
+                event_type=event_type,
+                event_data=data,
+                session_id=session_id,
+                run_id=run.get("run_id"),
+            )
+        except Exception:
+            pass
+
+    if event_type == "thinking":
+        run["phase"] = "thinking"
+    elif event_type in ("stream_start",):
+        run["phase"] = "streaming"
+    elif event_type in ("stream_delta", "response_chunk"):
+        run["phase"] = "streaming"
+        chunk = data.get("delta") or data.get("chunk") or data.get("text") or ""
+        prev_len = len(run.get("accumulated_text", ""))
+        run["accumulated_text"] = run.get("accumulated_text", "") + str(chunk)
+        new_len = len(run["accumulated_text"])
+        # Checkpoint streaming text every ~200 characters into jobs.db
+        if job_id and (new_len // 200 > prev_len // 200):
+            try:
+                from core.job_store import get_job_store
+                get_job_store().update_job_progress(
+                    job_id=job_id,
+                    progress=50.0,
+                    stage="streaming",
+                    checkpoint_data={"accumulated_text": run["accumulated_text"]},
+                )
+            except Exception:
+                pass
+    elif event_type == "tool_start":
+        run["phase"] = "tool_execution"
+        tools = run.setdefault("live_tools", [])
+        tools.append({
+            "tool": data.get("tool"),
+            "arguments": data.get("arguments"),
+            "status": "running",
+            "tool_call_id": data.get("tool_call_id"),
+        })
+    elif event_type == "tool_finish":
+        tools = run.get("live_tools", [])
+        call_id = data.get("tool_call_id")
+        tool_name = data.get("tool")
+        for t in tools:
+            if (call_id and t.get("tool_call_id") == call_id) or (t.get("tool") == tool_name and t.get("status") == "running"):
+                t["status"] = "error" if data.get("error") else "success"
+                t["output"] = data.get("result") or data.get("output")
+                break
+        if job_id:
+            try:
+                from core.job_store import get_job_store
+                get_job_store().update_job_progress(
+                    job_id=job_id,
+                    progress=60.0,
+                    stage="tool_execution",
+                    checkpoint_data={"live_tools": tools},
+                )
+            except Exception:
+                pass
+
+
 async def _emit(session_id: str, run_id, event_type: str, data: dict | None = None) -> None:
     """Event protokol milik ws.py sendiri (bukan event domain Event Bus)."""
+    payload_data = {**(data or {}), "session_id": session_id, "run_id": run_id}
+    update_active_run_event(session_id, event_type, payload_data)
     await manager.send(session_id, {
         "type": event_type,
-        "data": {**(data or {}), "session_id": session_id, "run_id": run_id},
+        "data": payload_data,
         "ts": time.time(),
     })
 
@@ -104,6 +180,13 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
         await _emit(session_id, run_id, event_type, data)
 
     async def fail(message: str) -> None:
+        run_info = _ACTIVE_RUNS.get(session_id)
+        if run_info and run_info.get("job_id"):
+            try:
+                from core.job_store import get_job_store
+                get_job_store().fail_job(run_info["job_id"], error_message=message)
+            except Exception:
+                pass
         await bridge.flush()
         await emit("error", {"message": message, "fatal": True})
 
@@ -199,6 +282,10 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
     dio_submission = None if (msg_type == "voice_audio" or is_regenerate) else raw.get("dio_submission")
 
     if dio_submission:
+        cancelled = dio_submission.get("cancelled", False)
+        status = "CANCELLED" if cancelled else "SUBMITTED"
+        schema_id = dio_submission.get("schema_id")
+        store.resolve_turn_interaction(session_id, schema_id=schema_id, status=status)
         try:
             _, llm_message = await asyncio.to_thread(resolve_submission, dio_submission)
         except Exception as exc:
@@ -229,6 +316,18 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
 
     await emit("ack", {"message": display_message})
 
+    # Persist user prompt immediately to SQLite before execution begins
+    # (Guarantees zero prompt loss across network drops, refreshes, or server errors)
+    if replace_from is not None:
+        store.truncate_turns_from(session_id, replace_from)
+
+    user_turn_id = store.add_turn(session_id, "user", display_message)
+    store.maybe_autotitle(session_id, display_message)
+
+    run_info = _ACTIVE_RUNS.get(session_id)
+    if run_info:
+        run_info["user_turn_id"] = user_turn_id
+
     s_row = store.get_session_row(session_id)
     turn_user_id = s_row.get("user_id") if s_row else None
 
@@ -242,6 +341,10 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
     except Exception as exc:
         logger.exception("WS think() gagal | session=%s", session_id)
         memory.history = backup_history
+        try:
+            store.add_turn(session_id, "assistant", f"[Gagal memproses giliran: {exc}]")
+        except Exception:
+            pass
         await fail(str(exc))  # fail() sudah flush bridge dulu
         return
 
@@ -250,10 +353,21 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
     await bridge.flush()
 
     # --------------------------------------------------
-    # DIHENTIKAN USER: buang hasil, kembalikan memory, JANGAN tulis DB.
+    # DIHENTIKAN USER: buang hasil, kembalikan memory, catat status di DB.
     # --------------------------------------------------
     if result.cancelled or cancel_event.is_set():
         memory.history = backup_history
+        run_info = _ACTIVE_RUNS.get(session_id)
+        if run_info and run_info.get("job_id"):
+            try:
+                from core.job_store import get_job_store
+                get_job_store().cancel_job(run_info["job_id"], reason="Dibatalkan pengguna")
+            except Exception:
+                pass
+        try:
+            store.add_turn(session_id, "assistant", "[Dibatalkan pengguna]")
+        except Exception:
+            pass
         await emit("cancelled")
         return
 
@@ -263,20 +377,16 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
         return
 
     # --------------------------------------------------
-    # SUKSES: baru sekarang database boleh diubah.
+    # SUKSES: baru sekarang memory & usage diperbarui, dan turn asisten disimpan.
     # --------------------------------------------------
-    if replace_from is not None:
-        store.truncate_turns_from(session_id, replace_from)
-
     persist_memory(session_id, memory)
     add_global_usage(result.token_usage)
 
-    user_turn_id = store.add_turn(session_id, "user", display_message)
+    # User turn was already saved before think(); now save assistant response
     assistant_turn_id = store.add_turn(
         session_id, "assistant", result.answer,
         steps=result.steps, interaction_schema=result.interaction_schema,
     )
-    store.maybe_autotitle(session_id, display_message)
 
     row = store.get_session_row(session_id)
 
@@ -297,6 +407,32 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
                 "dikirim sebagai teks tanpa audio.", session_id,
             )
 
+    # VERA Adaptive Experience (VAE) Protocol v2 payload generation
+    vae_payload_obj = brain_response_to_vae_payload(
+        answer=result.answer,
+        interaction_schema=result.interaction_schema,
+        steps=result.steps,
+        session_id=session_id,
+        query=display_message,
+    )
+
+    run_info = _ACTIVE_RUNS.get(session_id)
+    if run_info and run_info.get("job_id"):
+        try:
+            from core.job_store import get_job_store
+            get_job_store().complete_job(
+                run_info["job_id"],
+                result_data={
+                    "answer": result.answer,
+                    "duration": result.duration,
+                    "vae_payload": vae_payload_obj.to_dict() if vae_payload_obj else None,
+                    "user_turn_id": user_turn_id,
+                    "assistant_turn_id": assistant_turn_id,
+                },
+            )
+        except Exception:
+            pass
+
     await emit("response", {
         "answer": result.answer,
         "steps": result.steps,
@@ -307,6 +443,7 @@ async def _process_turn(session_id: str, raw: dict, cancel_event: threading.Even
         "session_title": row["title"] if row else "Chat baru",
         "audio_base64": audio_b64_out,
         "interaction_schema": result.interaction_schema,
+        "vae_payload": vae_payload_obj.to_dict(),
         "user_turn_id": user_turn_id,
         "assistant_turn_id": assistant_turn_id,
     })
@@ -395,6 +532,53 @@ async def nms_ws(websocket: WebSocket):
         await manager.disconnect("nms", websocket)
 
 
+@router.websocket("/models")
+async def models_ws(websocket: WebSocket):
+    token = websocket.query_params.get("token") or websocket.headers.get("authorization")
+    if token and token.startswith("Bearer "):
+        token = token.split(" ", 1)[1].strip()
+    if token:
+        try:
+            from core.tenant.manager import IdentityManager
+            ctx = IdentityManager().validate_session_token(token)
+            if not ctx:
+                await websocket.close(code=1008, reason="Sesi tidak valid.")
+                return
+        except Exception:
+            pass
+
+    await manager.connect("models", websocket)
+    get_ws_bridge().ensure_started(asyncio.get_running_loop())
+
+    try:
+        from core.model_store import get_model_store
+        from core.provider_health import get_provider_health_manager
+        store = get_model_store()
+        health_mgr = get_provider_health_manager()
+        # Kirim snapshot awal model dan provider health saat koneksi terbuka
+        await websocket.send_json({
+            "type": "model_registry_snapshot",
+            "data": {
+                "models": store.list_models(),
+                "routing": store.get_routing(),
+                "policy": store.get_policy(),
+                "provider_health": health_mgr.get_all_records(),
+                "timestamp": time.time(),
+            },
+            "ts": time.time(),
+        })
+
+        while True:
+            raw = await websocket.receive_json()
+            msg_type = raw.get("type", "ping")
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong", "ts": time.time()})
+    except WebSocketDisconnect:
+        await manager.disconnect("models", websocket)
+    except Exception:
+        await manager.disconnect("models", websocket)
+
+
 @router.websocket("/chat/{session_id}")
 async def chat_ws(websocket: WebSocket, session_id: str):
     token = websocket.query_params.get("token") or websocket.headers.get("authorization")
@@ -418,6 +602,27 @@ async def chat_ws(websocket: WebSocket, session_id: str):
     # (normalnya sudah di-start di startup api/main.py).
     get_ws_bridge().ensure_started(asyncio.get_running_loop())
 
+    # State Restoration on Reconnect: check for ongoing background task in this session
+    active_run = _ACTIVE_RUNS.get(session_id)
+    if active_run and not active_run["task"].done():
+        try:
+            await websocket.send_json({
+                "type": "active_run_resumed",
+                "data": {
+                    "session_id": session_id,
+                    "run_id": active_run.get("run_id"),
+                    "job_id": active_run.get("job_id"),
+                    "phase": active_run.get("phase", "thinking"),
+                    "accumulated_text": active_run.get("accumulated_text", ""),
+                    "live_tools": active_run.get("live_tools", []),
+                    "created_at": active_run.get("created_at"),
+                    "ts": time.time(),
+                },
+                "ts": time.time(),
+            })
+        except Exception as exc:
+            logger.warning("Failed to emit active_run_resumed on WS connect for session %s: %s", session_id, exc)
+
     try:
         while True:
             raw = await websocket.receive_json()
@@ -428,11 +633,87 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                 await websocket.send_json({"type": "pong"})
                 continue
 
+            # ---- REPLAY REQUEST ----
+            if msg_type == "request_replay":
+                run = _ACTIVE_RUNS.get(session_id)
+                job_id = raw.get("job_id") or (run.get("job_id") if run else None)
+                if job_id:
+                    try:
+                        from core.job_store import get_job_store
+                        since_id = int(raw.get("since_id") or 0)
+                        events = get_job_store().get_events_for_job(job_id, since_id=since_id)
+                        await websocket.send_json({
+                            "type": "replay_events",
+                            "data": {
+                                "session_id": session_id,
+                                "job_id": job_id,
+                                "events": [e.to_dict() for e in events],
+                            },
+                            "ts": time.time(),
+                        })
+                    except Exception as exc:
+                        logger.warning("Error replaying events for job %s: %s", job_id, exc)
+                continue
+
             # ---- STOP ----
             if msg_type == "cancel":
                 run = _ACTIVE_RUNS.get(session_id)
                 if run:
                     run["cancel"].set()
+                continue
+
+            # ---- PAUSE TASK ----
+            if msg_type == "pause":
+                run = _ACTIVE_RUNS.get(session_id)
+                job_id = raw.get("job_id") or (run.get("job_id") if run else None)
+                if job_id:
+                    try:
+                        from core.job_store import get_job_store
+                        checkpoint = {
+                            "accumulated_text": run.get("accumulated_text", "") if run else "",
+                            "live_tools": run.get("live_tools", []) if run else [],
+                            "phase": run.get("phase", "running") if run else "running",
+                        }
+                        get_job_store().pause_job(job_id, checkpoint_data=checkpoint)
+                        if run:
+                            run["phase"] = "paused"
+                            run["is_paused"] = True
+                        await websocket.send_json({
+                            "type": "job_paused",
+                            "data": {
+                                "session_id": session_id,
+                                "job_id": job_id,
+                                "checkpoint": checkpoint,
+                            },
+                            "ts": time.time(),
+                        })
+                    except Exception as exc:
+                        logger.warning("Error pausing job %s: %s", job_id, exc)
+                continue
+
+            # ---- RESUME TASK ----
+            if msg_type == "resume":
+                run = _ACTIVE_RUNS.get(session_id)
+                instruction = raw.get("instruction") or raw.get("message")
+                job_id = raw.get("job_id") or (run.get("job_id") if run else None)
+                if job_id:
+                    try:
+                        from core.job_store import get_job_store
+                        get_job_store().resume_job(job_id, additional_instructions=instruction)
+                        if run:
+                            run["phase"] = "running"
+                            run["is_paused"] = False
+                        await websocket.send_json({
+                            "type": "job_resumed",
+                            "data": {
+                                "session_id": session_id,
+                                "job_id": job_id,
+                                "instruction": instruction,
+                            },
+                            "ts": time.time(),
+                        })
+                    except Exception as exc:
+                        logger.warning("Error resuming job %s: %s", job_id, exc)
                 continue
 
             # ---- masih ada proses berjalan di sesi ini? ----
@@ -452,8 +733,41 @@ async def chat_ws(websocket: WebSocket, session_id: str):
                     continue
 
             cancel_event = threading.Event()
+            run_id = raw.get("run_id") or uuid.uuid4().hex[:12]
+            raw["run_id"] = run_id
+
+            # Initialize durable job for this execution
+            job_id = None
+            try:
+                from core.job_store import get_job_store
+                user_id_turn = None
+                s_row = store.get_session_row(session_id)
+                if s_row and s_row.get("user_id"):
+                    user_id_turn = s_row.get("user_id")
+
+                job = get_job_store().create_job(
+                    job_type="chat_turn",
+                    title=(raw.get("message") or "Permintaan Chat")[:60],
+                    session_id=session_id,
+                    run_id=run_id,
+                    user_id=user_id_turn,
+                    stage="thinking",
+                )
+                job_id = job.job_id
+            except Exception as exc:
+                logger.warning("Could not initialize durable job for session %s: %s", session_id, exc)
+
             task = asyncio.create_task(_run_turn(session_id, raw, cancel_event))
-            _ACTIVE_RUNS[session_id] = {"task": task, "cancel": cancel_event}
+            _ACTIVE_RUNS[session_id] = {
+                "task": task,
+                "cancel": cancel_event,
+                "run_id": run_id,
+                "job_id": job_id,
+                "phase": "thinking",
+                "accumulated_text": "",
+                "live_tools": [],
+                "created_at": time.time(),
+            }
             task.add_done_callback(lambda t, sid=session_id: _cleanup_run(sid, t))
 
     except WebSocketDisconnect:

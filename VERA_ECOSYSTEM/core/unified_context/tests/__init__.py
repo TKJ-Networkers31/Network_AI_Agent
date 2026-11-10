@@ -31,7 +31,7 @@ from core.unified_context import (
 
 def _stub_persona_state():
     return {
-        "profile": {"assistant_name": "AIRA", "language": "id", "timezone": "Asia/Jakarta"},
+        "profile": {"assistant_name": "VERA", "language": "id", "timezone": "Asia/Jakarta"},
         "behavior": {"professionalism": 86},
     }
 

@@ -4,18 +4,20 @@
 @config "../tailwind.config.js";
 
 :root {
-  --vera-navy-dark: #071426;
-  --vera-navy-surface: #0D2340;
-  --vera-navy-subtle: #122C4F;
-  --vera-navy-border: #1C3B66;
-  --vera-blue-electric: #176BFF;
-  --vera-cyan-accent: #54D6FF;
-  --vera-ice-white: #EAF2FF;
-  --vera-steel-gray: #52657D;
-  --vera-status-healthy: #22C55E;
+  --vera-bg-dark: #000000;
+  --vera-surface: #04060c;
+  --vera-surface-hover: #0a0f1d;
+  --vera-border: rgba(255, 255, 255, 0.08);
+  --vera-cyan: #38BDF8;
+  --vera-purple: #8B5CF6;
+  --vera-violet: #A855F7;
+  --vera-blue: #2563EB;
+  --vera-text-primary: #F8FAFC;
+  --vera-text-secondary: #94A3B8;
+  --vera-status-healthy: #10B981;
   --vera-status-warning: #F59E0B;
   --vera-status-critical: #EF4444;
-  --vera-status-info: #176BFF;
+  --vera-status-info: #38BDF8;
   --vera-status-unknown: #64748B;
 }
 
@@ -30,8 +32,8 @@ html {
 body {
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
-  background-color: #071426 !important; /* VERA Deep Navy */
-  color: #EAF2FF;
+  background-color: #000000 !important; /* Hitam Pekat Murni / OLED Black */
+  color: #F8FAFC;
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -54,7 +56,7 @@ input, textarea, select {
   }
 }
 
-/* VERA Minimalist Engineering Scrollbar */
+/* Minimalist Tech Scrollbar */
 ::-webkit-scrollbar {
   width: 5px;
   height: 5px;
@@ -63,46 +65,46 @@ input, textarea, select {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(84, 214, 255, 0.2);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 999px;
   transition: background 0.2s;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(84, 214, 255, 0.5);
+  background: rgba(56, 189, 248, 0.5);
 }
 
 /* ============================================================
-   VERA DEEP NAVY GLASS & PRECISION BORDERS
+   JET BLACK GLASSMORPHISM & NEON GLOW BORDERS
    ============================================================ */
 
 .glass-panel {
-  background: rgba(13, 35, 64, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid #1C3B66;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  background: rgba(2, 4, 10, 0.75);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .glass-card {
-  background: rgba(13, 35, 64, 0.7);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid #1C3B66;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  background: rgba(3, 6, 14, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Hover precision effects (Electric Blue / Cyan) */
+/* Hover glowing effects (Electric Cyan / Cyber Purple) */
 .glass-card:hover,
 .glow-border:hover,
 .glass-panel:hover {
-  border-color: rgba(84, 214, 255, 0.5) !important;
-  box-shadow: 0 0 20px -2px rgba(23, 107, 255, 0.25), inset 0 0 10px rgba(84, 214, 255, 0.05) !important;
+  border-color: rgba(56, 189, 248, 0.55) !important;
+  box-shadow: 0 0 24px -2px rgba(56, 189, 248, 0.35), inset 0 0 12px rgba(56, 189, 248, 0.08) !important;
   transform: translateY(-1px);
 }
 
 .glow-purple:hover {
-  border-color: rgba(84, 214, 255, 0.5) !important;
-  box-shadow: 0 0 20px -2px rgba(23, 107, 255, 0.25) !important;
+  border-color: rgba(168, 85, 247, 0.55) !important;
+  box-shadow: 0 0 24px -2px rgba(168, 85, 247, 0.35), inset 0 0 12px rgba(168, 85, 247, 0.08) !important;
   transform: translateY(-1px);
 }
 
@@ -112,8 +114,8 @@ button, [role="button"], a {
 }
 
 input:focus, textarea:focus {
-  border-color: #54D6FF !important;
-  box-shadow: 0 0 16px -2px rgba(84, 214, 255, 0.35) !important;
+  border-color: rgba(56, 189, 248, 0.7) !important;
+  box-shadow: 0 0 20px -2px rgba(56, 189, 248, 0.35) !important;
   outline: none;
 }
 

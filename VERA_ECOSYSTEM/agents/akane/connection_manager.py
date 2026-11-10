@@ -30,6 +30,7 @@ FITUR & PERBAIKAN MASTER UPGRADE:
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -66,6 +67,15 @@ KEY_ONLY_ERROR = (
     "(invoke_shell) saat ini hanya mendukung password. Tambahkan credential ssh_password "
     "ke device ini di menu Devices."
 )
+
+
+MAC_REGEX = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$|^([0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}$")
+
+
+def is_mac_address(val: str) -> bool:
+    if not val or not isinstance(val, str):
+        return False
+    return bool(MAC_REGEX.match(val.strip()))
 
 
 class ConnectionManager:
@@ -184,6 +194,19 @@ class ConnectionManager:
         device_name: Optional[str] = None,
         key_data: Optional[str] = None,
     ) -> dict:
+        # Section 4: MAC Address Management Semantics
+        if host and is_mac_address(host):
+            return {
+                "success": False,
+                "error": (
+                    f"Alamat MAC '{host}' beroperasi di Layer 2 dan bukan alamat IP/hostname yang valid untuk SSH (Layer 3). "
+                    "Untuk koneksi berbasis MAC Layer 2, gunakan WinBox over MAC atau MAC Telnet "
+                    "(memerlukan keterjangkauan broadcast L2 / MNDP), atau konfigurasikan IP address pada router terlebih dahulu."
+                ),
+                "error_code": "MAC_NOT_SSH_TARGET",
+                "recommended_transports": ["winbox_mac", "mac_telnet", "mndp_discovery"],
+            }
+
         # Jika host yang diberikan adalah nama alias perangkat di inventory (mis. "R1") alih-alih IP/domain:
         if host and ("." not in host and ":" not in host):
             target = self._resolve_target(host)
@@ -809,6 +832,18 @@ class ConnectionManager:
         Reuses existing active session for (host, port, username) if one is already open and healthy.
         Never logs or exposes passwords or private keys.
         """
+        # Section 4: MAC Address Management Semantics
+        if host and is_mac_address(host):
+            return {
+                "success": False,
+                "error": (
+                    f"Alamat MAC '{host}' beroperasi di Layer 2 dan bukan alamat IP/hostname yang valid untuk SSH. "
+                    "SSH memerlukan IP Layer 3. Gunakan WinBox over MAC atau MAC Telnet untuk koneksi L2."
+                ),
+                "error_code": "MAC_NOT_SSH_TARGET",
+                "identity": None,
+            }
+
         import socket
         import paramiko
         from core.topology_models import sanitize_untrusted_text

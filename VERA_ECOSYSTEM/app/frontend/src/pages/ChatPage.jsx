@@ -65,7 +65,8 @@
 // - `sessionId={activeId}` dioper ke <MessageBubble> supaya konteks
 //   seleksi/attachment per pesan konsisten dengan sesi aktif.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { ArrowDown } from "lucide-react";
 import TopBar from "../components/TopBar.jsx";
 import MessageBubble from "../components/MessageBubble.jsx";
 import ChatInput from "../components/ChatInput.jsx";
@@ -73,7 +74,6 @@ import VoiceControls from "../components/VoiceControls.jsx";
 import LiveSteps from "../components/LiveSteps.jsx";
 import SuspenseLoader from "../components/SuspenseLoader.jsx";
 import ComposerCockpit from "../components/cockpit/ComposerCockpit.jsx";
-import DynamicHero from "../components/cockpit/DynamicHero.jsx";
 import CapabilityDock from "../components/capabilities/CapabilityDock.jsx";
 import CapabilityHeroRow from "../components/capabilities/CapabilityHeroRow.jsx";
 import { api } from "../api.js";
@@ -252,8 +252,46 @@ function ChatPageInner({ onOpenMenu }) {
     setQuote(null);
   }, [activeId]);
 
+  // Smart Reading & Auto-Scroll Policy (Phase 6):
+  // User at bottom -> auto-follow. User scrolls upward -> preserve reading position.
+  const scrollContainerRef = useRef(null);
+  const isAutoScrollEnabledRef = useRef(true);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [hasUnread, setHasUnread] = useState(false);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const isNearBottom = distanceFromBottom <= 110;
+    isAutoScrollEnabledRef.current = isNearBottom;
+
+    if (isNearBottom) {
+      setShowJumpToBottom(false);
+      setHasUnread(false);
+    } else {
+      setShowJumpToBottom(true);
+    }
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    isAutoScrollEnabledRef.current = true;
+    setShowJumpToBottom(false);
+    setHasUnread(false);
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    bottomRef.current?.scrollIntoView({ behavior: prefersReducedMotion ? "auto" : "smooth" });
+  }, []);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: streaming ? "auto" : "smooth" });
+    if (!isAutoScrollEnabledRef.current) {
+      setShowJumpToBottom(true);
+      setHasUnread(true);
+      return;
+    }
+
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const behavior = prefersReducedMotion ? "auto" : streaming ? "auto" : "smooth";
+    bottomRef.current?.scrollIntoView({ behavior });
   }, [messages, loading, streaming]);
 
   useEffect(() => {
@@ -462,7 +500,11 @@ function ChatPageInner({ onOpenMenu }) {
     // schema.actions (tombolnya dirender sendiri oleh field-nya), jadi
     // cancelled/displayText di-special-case untuk dua action id ini.
     const cancelled =
-      actionId === "deny_location" ? true : action ? action.style === "ghost" : false;
+      actionId === "deny_location" || actionId === "cancel"
+        ? true
+        : action
+        ? action.style === "ghost"
+        : false;
 
     const displayText =
       actionId === "grant_location"
@@ -479,7 +521,7 @@ function ChatPageInner({ onOpenMenu }) {
     if (actionId === "grant_location") setHasLocation(true);
     if (actionId === "deny_location") setHasLocation(false);
 
-    markInteractionResolved(index);
+    markInteractionResolved(index, cancelled ? "CANCELLED" : "SUBMITTED");
 
     sendDioSubmission(
       { schema_id: schema.id, action_id: actionId, values, cancelled },
@@ -505,7 +547,11 @@ function ChatPageInner({ onOpenMenu }) {
       />
 
       {/* Area pesan: full-width (scrollbar di tepi kanan), konten di tengah */}
-      <div className="flex-1 overflow-y-auto min-h-0 -mx-3 sm:-mx-5 lg:-mx-6 px-3 sm:px-5 lg:px-6">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto min-h-0 -mx-3 sm:-mx-5 lg:-mx-6 px-3 sm:px-5 lg:px-6 relative"
+      >
         <div className="max-w-5xl xl:max-w-6xl mx-auto w-full space-y-2.5 pb-2">
           {switching && (
             <p className="text-white/30 text-sm text-center mt-10">
@@ -513,8 +559,7 @@ function ChatPageInner({ onOpenMenu }) {
             </p>
           )}
 
-          {/* Sapaan Claude-Style Terpusat dengan Dynamic Tool Trends */}
-          {heroVisible && <DynamicHero heroModel={heroModel} />}
+          {/* Sapaan Terpusat dengan Dynamic Tool Trends */}
           {heroVisible && <Hero heroModel={heroModel} onQuickPrompt={(text) => handleSend(text)} />}
           {heroVisible && <CapabilityHeroRow onInvoke={handleCapabilityInvoke} />}
 
@@ -531,6 +576,9 @@ function ChatPageInner({ onOpenMenu }) {
                 streamed={Boolean(m.streamed)}
                 interactionSchema={m.interactionSchema}
                 interactionResolved={Boolean(m.interactionResolved)}
+                interactionStatus={m.interactionStatus}
+                vaePayload={m.vaePayload || m.vae_payload}
+                blocks={m.blocks}
                 onSubmitInteraction={(actionId, values) =>
                   handleInteractionSubmit(i, actionId, values)
                 }
@@ -551,6 +599,21 @@ function ChatPageInner({ onOpenMenu }) {
           {shouldShowLiveSteps({ loading, phase, liveTools }) && (
             <div className="flex justify-start">
               <LiveSteps phase={phase} liveTools={liveTools} />
+            </div>
+          )}
+
+          {/* Smart Reading Floating Pill: Appears when user scrolls up during active conversation */}
+          {showJumpToBottom && (
+            <div className="sticky bottom-3 flex justify-center z-30 pointer-events-none animate-in fade-in slide-in-from-bottom-2 duration-150">
+              <button
+                type="button"
+                onClick={scrollToBottom}
+                className="pointer-events-auto flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-600/95 hover:bg-cyan-500 text-white shadow-xl shadow-cyan-950/50 border border-cyan-400/40 text-xs font-semibold backdrop-blur-md transition-all active:scale-95 group"
+              >
+                {hasUnread && <span className="w-2 h-2 rounded-full bg-amber-300 animate-ping" />}
+                <span>Lihat respons terbaru</span>
+                <ArrowDown size={13} className="group-hover:translate-y-0.5 transition-transform" />
+              </button>
             </div>
           )}
 

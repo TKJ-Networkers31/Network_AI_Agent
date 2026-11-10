@@ -349,11 +349,11 @@ export function useVoiceCompanion({
         return;
       }
 
-      // 4. Murni Panggilan Wake Word ("AIRA")
+      // 4. Murni Panggilan Wake Word ("VERA" / "AIRA")
       if (command.type === "wake_acknowledgement") {
         setAiraResponse(command.spokenResponse);
         setActionCard({
-          title: "AIRA Siap",
+          title: "VERA Siap",
           target: "wake",
           status: "success",
         });

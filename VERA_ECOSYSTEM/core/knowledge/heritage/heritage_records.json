@@ -1,0 +1,175 @@
+[
+  {
+    "record_id": "HERITAGE-01-ORIGIN",
+    "title": "Asal Usul AIRA sebagai Network AI Agent",
+    "title_en": "AIRA Origin as Network AI Agent",
+    "date_range": "2026-09 s/d 2026-10",
+    "historical_identity": "AIRA (Adaptive Intelligent Reasoning Assistant)",
+    "subsystem": "Platform Genesis",
+    "description": "AIRA dimulai sebagai proyek Network AI Agent untuk membantu rekayasa jaringan komputer, otomasi MikroTik RouterOS, diagnosa jalur IP, dan pemantauan topologi berbasis dialog natural.",
+    "architectural_decisions": [
+      "Mengadopsi spesialisasi multi-agen internal (REI untuk orkestrasi/planning, AKANE untuk rekayasa jaringan/SSH/RouterOS, YUKI untuk suara/audio, HIKARI untuk penglihatan/OCR).",
+      "Menggunakan SQLite terdesentralisasi per domain data untuk portabilitas dan kesederhanaan deployment on-premise.",
+      "Mengintegrasikan LLM eksternal (OpenRouter, NVIDIA NIM) dan lokal (Ollama) dengan sistem perutean multi-model."
+    ],
+    "original_evidence_documents": [
+      "docs/AIRA_ARCHITECTURE.md",
+      "CLAUDE.md",
+      "README.md",
+      "docs/constitution.md"
+    ],
+    "verification_status": "HISTORICAL_VERIFIED",
+    "current_status": "SUPERSEDED_BY_VERA",
+    "key_takeaways": "AIRA adalah fondasi riset dan rekayasa awal yang melahirkan arsitektur intelijen jaringan yang kini diperluas dan distandarisasi di VERA."
+  },
+  {
+    "record_id": "HERITAGE-02-EVOLUTION",
+    "title": "Evolusi Arsitektur Jaringan (Networking III - VIII)",
+    "title_en": "Network Architecture Evolution (Networking III - VIII)",
+    "date_range": "2026-10",
+    "historical_identity": "AIRA OS",
+    "subsystem": "Network Intelligence & NMS",
+    "description": "Pengembangan intensif subsistem telemetri dan kendali jaringan tingkat lanjut melalui beberapa fase terstruktur: Networking III (kolektor multi-perangkat), Networking IV (analisis routing & snapshot tabel rute), Networking V (NMS scheduler, metrics store, alert hysteresis), Networking VI (grafik pengetahuan L2/L3 & 14-step RCA), Networking VII (kalender maintenance, prediksi kapasitas), dan Networking VIII (edge gateways & customer portal).",
+    "architectural_decisions": [
+      "14-Step Deterministic RCA Engine: Root cause analysis deterministik tanpa halusinasi LLM untuk mendeteksi akar masalah flapping, link dead, dan isolasi upstream.",
+      "Bounded Polling Queue: Menjaga stabilitas RouterOS CPU dengan membatasi konkurensi polling telemetri.",
+      "The Dude Native Topology Fabric: Penemuan topologi rekursif via protokol MNDP, CDP, LLDP, dan ARP dengan deteksi batas ISP.",
+      "Immutable Route Snapshots: Snapshot tabel routing yang diamankan secara kriptografis terhadap manipulasi rekaman."
+    ],
+    "original_evidence_documents": [
+      "docs/NEW_SYSTEM_ARCHITECTURE.md",
+      "docs/TOPOLOGY_AND_NMS.md",
+      "docs/NETWORKING_VIII/AIRA_NETWORKING_VIII_ARCHITECTURE.md",
+      "docs/AIRA_PHASE_8_MASTER_EXECUTION_REPORT.md"
+    ],
+    "verification_status": "HISTORICAL_VERIFIED",
+    "current_status": "INHERITED_AND_ACTIVE_IN_VERA",
+    "key_takeaways": "Seluruh kemampuan jaringan mutakhir (RCA, NMS, topologi, routing) diwarisi 100% oleh VERA dan beroperasi di VERA_ECOSYSTEM."
+  },
+  {
+    "record_id": "HERITAGE-03-REMEDIATION-STAGES",
+    "title": "Master Remediasi Rekayasa 15-Tahap (Stage 00 - 14)",
+    "title_en": "Master Engineering Remediation 15 Stages (Stage 00 - 14)",
+    "date_range": "2026-11",
+    "historical_identity": "AIRA OS Remediation",
+    "subsystem": "Platform Hardening & Security",
+    "description": "Remediasi menyeluruh 15 tahap untuk memperbaiki 28 kerentanan keamanan OWASP/ASVS, merapikan redundansi kode, mengunci isolasi multi-tenant, serta menghapus hutang teknis sebelum transisi.",
+    "architectural_decisions": [
+      "Stage 01: Baseline protection dan reconciliasi file preservasi model.",
+      "Stage 02: SecretVault AES-256-GCM enkripsi kredensial perangkat, private key SSH, dan seed MFA TOTP.",
+      "Stage 03: Penghapusan total Guest Mode untuk mencegah privilege escalation.",
+      "Stage 04: Penghapusan total Billing & AI Token Quotas (lihat HERITAGE-07).",
+      "Stage 05: SQLite single-writer concurrency hardening dengan mode WAL dan busy timeout.",
+      "Stage 06: Pemisahan multi-tenant ketat antara tenant_internal dan tenant_default.",
+      "Stage 07: AI provider failover dan isolasi timeout.",
+      "Stage 08: Validasi SSRF dan sanitasi OCR/vision file upload.",
+      "Stage 09: Integrasi traceroute visual dan sinkronisasi topologi.",
+      "Stage 10: Penguatan RBAC frontend dan proteksi endpoint administratif.",
+      "Stage 11: Konsolidasi Network Intelligence (menghapus simulasi palsu, mengikat data riil).",
+      "Stage 12: RouterOS safe execution rollback dan validasi preflight.",
+      "Stage 13: Optimasi performa frontend dan perutean query indexed.",
+      "Stage 14: Verifikasi komprehensif end-to-end tanpa error."
+    ],
+    "original_evidence_documents": [
+      "AUDIT_REPORT/FINAL_REMEDIATION_REPORT.md",
+      "AUDIT_REPORT/IMPLEMENTATION_STAGE_01_REPORT.md",
+      "AUDIT_REPORT/IMPLEMENTATION_STAGE_02_REPORT.md",
+      "AUDIT_REPORT/IMPLEMENTATION_STAGE_03_REPORT.md",
+      "AUDIT_REPORT/IMPLEMENTATION_STAGE_04_REPORT.md",
+      "AUDIT_REPORT/IMPLEMENTATION_STAGE_14_REPORT.md"
+    ],
+    "verification_status": "HISTORICAL_VERIFIED",
+    "current_status": "FOUNDATIONAL_BASE_OF_VERA",
+    "key_takeaways": "Remediasi Stage 00-14 adalah tonggak stabilitas paling kritis yang menjamin platform aman dan siap enterprise."
+  },
+  {
+    "record_id": "HERITAGE-04-BILLING-REMOVAL",
+    "title": "Keputusan Penghapusan Sistem Billing & Kuota Token AI",
+    "title_en": "Decision on Complete Removal of Billing & AI Token Quotas",
+    "date_range": "2026-11-08",
+    "historical_identity": "AIRA OS Owner Decision",
+    "subsystem": "Commercial & Operational Policy",
+    "description": "Keputusan fundamental platform owner untuk menghapus subsistem billing Stripe, model SaaS monetisasi, dan sistem pemotongan kuota token AI.",
+    "architectural_decisions": [
+      "Alasan Teknis: Pemotongan token AI pada operasi jaringan kritis menyebabkan kegagalan eksekusi diagnosa saat terjadi incident darurat jika token habis, yang melanggar prinsip keandalan infrastruktur NOC.",
+      "Alasan Operasional: Platform diposisikan sebagai Enterprise Network Intelligence Platform internal & dedicated, bukan public multi-tenant SaaS pay-per-token.",
+      "Tindakan Eksekusi: Menghapus tabel operational_token_usage_ledger dari jalur kritis, menonaktifkan endpoint pemotongan kuota, dan memberikan status ENTERPRISE tanpa batas kuota ke semua operasi internal."
+    ],
+    "original_evidence_documents": [
+      "AUDIT_REPORT/BILLING_REMOVAL_REPORT.md",
+      "AUDIT_REPORT/DECISION_USER_TOKEN_QUOTA_REMOVAL.md",
+      "AUDIT_REPORT/USER_TOKEN_QUOTA_REMOVAL_REPORT.md"
+    ],
+    "verification_status": "HISTORICAL_VERIFIED",
+    "current_status": "PERMANENT_POLICY_IN_VERA",
+    "key_takeaways": "VERA tidak memiliki kuota token komersial atau sistem billing; seluruh kemampuan rekayasa jaringan beroperasi tanpa pembatasan kuota artifisial."
+  },
+  {
+    "record_id": "HERITAGE-05-VERA-EMERGENCE",
+    "title": "Kelahiran dan Transformasi Menjadi VERA",
+    "title_en": "Emergence and Transformation into VERA",
+    "date_range": "2026-11-08 s/d 2026-11-09",
+    "historical_identity": "Transisi AIRA ke VERA",
+    "subsystem": "Product Identity & Ecosystem",
+    "description": "Transformasi menyeluruh identitas produk dari nama prototipe 'AIRA' menjadi 'VERA — Enterprise Network Intelligence Platform'.",
+    "architectural_decisions": [
+      "Mengukuhkan VERA sebagai satu-satunya identitas operasional aktif: nama aplikasi, asisten AI, log, telemetri, API metadata, dan branding.",
+      "Mempertahankan warisan engineering AIRA dalam domain memori sejarah agar VERA memahami asal-usulnya dan dapat menjawab pertanyaan teknis masa lalu.",
+      "Mendirikan direktori ekosistem VERA_ECOSYSTEM dan symlink kompatibilitas AIRA_ECOSYSTEM."
+    ],
+    "original_evidence_documents": [
+      "docs/TRANSFORMATION_BASELINE.md",
+      "docs/TRANSFORMATION_COMPLETION_REPORT.md",
+      "reports/specifications/VERA_IDENTITY_AND_EVOLUTION.md"
+    ],
+    "verification_status": "HISTORICAL_VERIFIED",
+    "current_status": "AUTHORITATIVE_CURRENT_STATE",
+    "key_takeaways": "VERA adalah platform masa kini dan masa depan; AIRA adalah pendahulu historis yang dihormati dan diingat."
+  },
+  {
+    "record_id": "HERITAGE-06-VAE-ARCHITECTURE",
+    "title": "Arsitektur VERA Adaptive Experience (VAE)",
+    "title_en": "VERA Adaptive Experience (VAE) Architecture",
+    "date_range": "2026-11-08",
+    "historical_identity": "VERA Platform",
+    "subsystem": "Frontend & AI Interaction Protocol",
+    "description": "Standarisasi protokol interaksi generatif adaptif VAE (VaePayload dan VaeBlock) yang menyatukan DIO, Action Cards, diagram Mermaid, peta Leaflet, dan grafik telemetri ke dalam satu pipeline visual yang aman.",
+    "architectural_decisions": [
+      "VaePayload & VaeBlock Specification: Standar payload JSON dengan validasi schema ketat.",
+      "ExperienceRenderer & ComponentRegistry: Rendering komponen visual reaktif (FormCard, ConfirmCard, MetricCard, GraphBlock, MapBlock, MermaidBlock).",
+      "ActionGateway: Titik tunggal eksekusi aksi interaktif dengan otentikasi sesi dan pelaporan status audit.",
+      "Strict SVG & Mermaid Sanitizer: Pipeline sanitasi untuk mencegah kerentanan XSS dari blok visual buatan LLM."
+    ],
+    "original_evidence_documents": [
+      "docs/VERA_ADAPTIVE_EXPERIENCE_ARCHITECTURE.md",
+      "docs/VAE_PROTOCOL_SPECIFICATION.md",
+      "docs/VAE_COMPONENT_CATALOG.md",
+      "docs/VAE_TEST_REPORT.md"
+    ],
+    "verification_status": "VERIFIED_ACTIVE",
+    "current_status": "AUTHORITATIVE_CURRENT_STATE",
+    "key_takeaways": "VAE adalah fondasi UI/UX interaktif VERA yang menggantikan fragmen DIO legacy."
+  },
+  {
+    "record_id": "HERITAGE-07-DESIGN-SYSTEM-RESTORATION",
+    "title": "Restorasi Desain Jet Black Cyber Glass & Observability UX",
+    "title_en": "Jet Black Cyber Glass Design Restoration & Observability UX",
+    "date_range": "2026-11-08",
+    "historical_identity": "VERA Design System",
+    "subsystem": "Design System & UI/UX",
+    "description": "Restorasi palet warna resmi Jet Black Cyber Glass (#000000 Pitch Black canvas, #04060c ultra-dark glass surface, Electric Cyan #38BDF8, Cyber Purple #8B5CF6) yang sempat tergeser oleh palet Deep Navy, perbaikan Hero greeting ganda menjadi Hero terpusat tunggal, dan penyempurnaan dasbor observabilitas ala Grafana/Datadog/Kibana.",
+    "architectural_decisions": [
+      "Mengembalikan token warna persis dari baseline commit a6eb27f.",
+      "Menghapus komponen DynamicHero ganda di sudut kiri atas ChatPage, mengembalikan Hero terpusat sebagai sapaan tunggal yang elegan.",
+      "Menambahkan filter rentang waktu Grafana (15m, 1h, 6h, 24h, 7d) dan auto-refresh pada OverviewTab Network Intelligence."
+    ],
+    "original_evidence_documents": [
+      "docs/VERA_DESIGN_SYSTEM_RESTORATION_REPORT.md",
+      "docs/VERA_UI_UX_CORRECTION_REPORT.md",
+      "docs/VERA_VISUAL_REGRESSION_REPORT.md"
+    ],
+    "verification_status": "VERIFIED_ACTIVE",
+    "current_status": "AUTHORITATIVE_CURRENT_STATE",
+    "key_takeaways": "Visual VERA menyatukan kedalaman visual Jet Black Cyber Glass dengan kematangan observabilitas kelas enterprise."
+  }
+]

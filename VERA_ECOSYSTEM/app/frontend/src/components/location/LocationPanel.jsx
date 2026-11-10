@@ -20,7 +20,7 @@ const SOURCE_LABEL = {
 
 function relationText(rel) {
   if (!rel) return "";
-  if (rel.kind === "same_machine") return "Kamu membuka AIRA langsung dari mesin hosting.";
+  if (rel.kind === "same_machine") return "Kamu membuka VERA langsung dari mesin hosting.";
   if (rel.kind === "same_network") return "Kamu berada di jaringan yang sama dengan server hosting.";
   if (rel.distance_km != null) return `Jarak kamu ke server hosting sekitar ${rel.distance_km} km.`;
   return "";
@@ -144,7 +144,7 @@ export default function LocationPanel() {
       notify({
         type: "warning",
         message:
-          "GPS browser hanya jalan di https:// atau localhost. Buka AIRA lewat http://localhost:5173, atau pakai 'Pilih di peta'.",
+          "GPS browser hanya jalan di https:// atau localhost. Buka VERA lewat http://localhost:5173, atau pakai 'Pilih di peta'.",
         duration: 7000,
       });
       return;
@@ -212,7 +212,7 @@ export default function LocationPanel() {
         <LocationCard
           icon={Server}
           title="Lokasi hosting"
-          hint="Di mana server AIRA berjalan"
+          hint="Di mana server VERA berjalan"
           location={host}
         >
           {host?.source === "ip" && (
@@ -290,7 +290,7 @@ export default function LocationPanel() {
         <LocationCard
           icon={Smartphone}
           title="Lokasi akses"
-          hint="Di mana kamu membuka AIRA sekarang"
+          hint="Di mana kamu membuka VERA sekarang"
           location={access}
         >
           {!activeId && (
@@ -306,7 +306,7 @@ export default function LocationPanel() {
 
           {!gpsPossible && (
             <p className="text-[11px] text-white/40">
-              GPS browser butuh https:// atau localhost. Buka AIRA lewat http://localhost:5173 di laptop ini, atau
+              GPS browser butuh https:// atau localhost. Buka VERA lewat http://localhost:5173 di laptop ini, atau
               tentukan titikmu lewat "Pilih di peta".
             </p>
           )}

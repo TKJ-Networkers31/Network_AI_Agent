@@ -1,4 +1,4 @@
-export default function SuspenseLoader({ label = "Menyiapkan AIRA..." }) {
+export default function SuspenseLoader({ label = "Menyiapkan VERA..." }) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-4 text-white/60 min-h-[60vh]">
       <div

@@ -476,7 +476,7 @@ export default function SettingsPage({ onOpenMenu }) {
                       type: "clear_memories",
                       title: "Bersihkan Semua Memori?",
                       description:
-                        "Tindakan ini akan menghapus seluruh catatan memori personal Anda. AIRA tidak akan lagi mengingat preferensi yang telah disimpan.",
+                        "Tindakan ini akan menghapus seluruh catatan memori personal Anda. VERA tidak akan lagi mengingat preferensi yang telah disimpan.",
                       confirmText: "Bersihkan Semua",
                     })
                   }
@@ -495,7 +495,7 @@ export default function SettingsPage({ onOpenMenu }) {
               </div>
             ) : memories.length === 0 ? (
               <div className="py-8 text-center text-xs text-neutral-400 bg-neutral-950/40 rounded-xl border border-white/[0.04]">
-                Belum ada memori yang tersimpan. Tambah memori manual atau biarkan AIRA belajar dari giliran obrolan.
+                Belum ada memori yang tersimpan. Tambah memori manual atau biarkan VERA belajar dari giliran obrolan.
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-80 overflow-y-auto pr-1">
@@ -601,7 +601,7 @@ export default function SettingsPage({ onOpenMenu }) {
                     setConfirmModal({
                       type: "clear_memories",
                       title: "Bersihkan Semua Memori?",
-                      description: "Seluruh fakta dan preferensi yang dipelajari AIRA akan dihapus secara permanen.",
+                      description: "Seluruh fakta dan preferensi yang dipelajari VERA akan dihapus secara permanen.",
                       confirmText: "Hapus Memori",
                     })
                   }
@@ -643,7 +643,7 @@ export default function SettingsPage({ onOpenMenu }) {
                     setConfirmModal({
                       type: "delete_personas",
                       title: "Hapus Semua Custom Persona?",
-                      description: "Semua persona kustom akan dihapus permanen. AIRA akan kembali menggunakan preset bawaan.",
+                      description: "Semua persona kustom akan dihapus permanen. VERA akan kembali menggunakan preset bawaan.",
                       confirmText: "Hapus Persona",
                     })
                   }
@@ -982,7 +982,7 @@ export default function SettingsPage({ onOpenMenu }) {
                 <span>Kebijakan Persetujuan Otonomi (Risk Approval Engine)</span>
               </h3>
               <p className="text-xs text-neutral-400 mt-1">
-                Tentukan kapan AIRA diizinkan menjalankan konfigurasi atau remediasi jaringan secara mandiri vs meminta persetujuan teknis.
+                Tentukan kapan VERA diizinkan menjalankan konfigurasi atau remediasi jaringan secara mandiri vs meminta persetujuan teknis.
               </p>
             </div>
 

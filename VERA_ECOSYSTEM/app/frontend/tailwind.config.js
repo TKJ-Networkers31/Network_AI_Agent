@@ -15,14 +15,14 @@ export default {
         card: colors.surface,
         border: colors.border,
 
-        // VERA Canonical Brand Tokens
+        // VERA Restored Palette Tokens
         vera: {
-          navy: colors.app,
+          dark: colors.app,
           surface: colors.surface,
           subtle: colors.surfaceHover,
           border: colors.border,
-          blue: colors.electric,
           cyan: colors.cyan,
+          purple: colors.primary,
           ice: colors.ice,
           steel: colors.steel,
         },
@@ -34,25 +34,29 @@ export default {
         info: colors.info,
         unknown: colors.unknown,
 
-        // Backward-compatibility aliases
         accent: {
-          DEFAULT: colors.electric,
+          DEFAULT: colors.cyan,
           light: colors.cyan,
-          soft: "rgba(84, 214, 255, 0.15)",
+          purple: colors.primary,
+          soft: "rgba(56, 189, 248, 0.15)",
         },
         sakura: {
           DEFAULT: colors.cyan,
-          soft: "rgba(84, 214, 255, 0.12)",
+          soft: "rgba(56, 189, 248, 0.12)",
         },
         cyan: {
           DEFAULT: colors.cyan,
+          soft: "rgba(56, 189, 248, 0.15)",
         },
         purple: {
-          DEFAULT: colors.electric,
-          soft: "rgba(23, 107, 255, 0.15)",
+          DEFAULT: colors.purple,
+          soft: "rgba(168, 85, 247, 0.15)",
         },
-        success: colors.healthy,
-        danger: colors.critical,
+        blue: {
+          DEFAULT: colors.blue,
+        },
+        success: colors.success,
+        danger: colors.danger,
         "text-primary": colors.text.primary,
         "text-secondary": colors.text.secondary,
       },
@@ -74,21 +78,22 @@ export default {
         pill: radius.pill,
       },
       boxShadow: {
-        card: "0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 0 0 1px #1C3B66",
-        floating: "0 16px 48px -8px rgba(0, 0, 0, 0.7), 0 0 0 1px #1C3B66",
-        "vera-glow": "0 0 24px -2px rgba(23, 107, 255, 0.4)",
-        "cyan-glow": "0 0 20px -2px rgba(84, 214, 255, 0.4)",
+        card: "0 8px 32px -8px rgba(0,0,0,0.6)",
+        floating: "0 20px 60px -15px rgba(0,0,0,0.8)",
+        "sakura-glow": "0 0 25px -4px rgba(56, 189, 248, 0.4)",
+        "cyan-glow": "0 0 25px -4px rgba(56, 189, 248, 0.45)",
+        "violet-glow": "0 0 25px -4px rgba(139, 92, 246, 0.45)",
+        "purple-glow": "0 0 25px -4px rgba(168, 85, 247, 0.45)",
       },
       backgroundImage: {
-        "vera-gradient": "linear-gradient(135deg, #54D6FF 0%, #176BFF 100%)",
-        "accent-gradient": "linear-gradient(90deg, #54D6FF 0%, #176BFF 100%)",
-        "tech-gradient": "linear-gradient(135deg, #071426 0%, #0D2340 50%, #122C4F 100%)",
+        "sakura-gradient": "linear-gradient(135deg, #38BDF8 0%, #8B5CF6 100%)",
+        "accent-gradient": "linear-gradient(90deg, #38BDF8 0%, #8B5CF6 100%)",
+        "tech-gradient": "linear-gradient(135deg, #0284C7 0%, #38BDF8 50%, #8B5CF6 100%)",
+        "vera-gradient": "linear-gradient(135deg, #38BDF8 0%, #8B5CF6 100%)",
         "hero-gradient":
-          "radial-gradient(60% 60% at 50% 40%, rgba(23, 107, 255, 0.15) 0%, rgba(84, 214, 255, 0.05) 50%, rgba(7, 20, 38, 0) 80%)",
+          "radial-gradient(60% 60% at 50% 40%, rgba(56, 189, 248, 0.15) 0%, rgba(139, 92, 246, 0.08) 45%, rgba(0, 0, 0, 0) 75%)",
         "core-glow":
-          "radial-gradient(circle at 50% 50%, #54D6FF 0%, #176BFF 55%, rgba(23, 107, 255, 0) 75%)",
-        // Legacy gradient aliases
-        "sakura-gradient": "linear-gradient(135deg, #54D6FF 0%, #176BFF 100%)",
+          "radial-gradient(circle at 50% 50%, #38BDF8 0%, #8B5CF6 55%, rgba(139, 92, 246, 0) 75%)",
       },
       maxWidth: {
         shell: "1600px",

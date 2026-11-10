@@ -7,6 +7,7 @@ from core.artifacts.engine import ArtifactEngine
 from core.artifacts.models import ArtifactStatus, ArtifactType
 from core.artifacts.specs import (
     CsvSpec, DocumentSpec, PresentationSpec, SlideSection, SpreadsheetSpec, WorksheetSpec,
+    VisualizationSpec, VisualizationNode,
     heading, paragraph, bullet_list, table_block,
 )
 from core.artifacts.store import ArtifactStore
@@ -72,6 +73,13 @@ class TestEveryArtifactType(ArtifactEngineTestBase):
 
     def test_pptx(self):
         self._assert_ready(self.engine.create_presentation(_presentation_spec(), ArtifactType.PPTX), ".pptx")
+
+    def test_html(self):
+        spec = VisualizationSpec(
+            title="Topology HTML",
+            nodes=[VisualizationNode(id="n1", label="Node 1", type="router")],
+        )
+        self._assert_ready(self.engine.create_visualization(spec, ArtifactType.HTML), ".html")
 
     def _assert_ready(self, result, suffix):
         self.assertTrue(result.success, result.errors)

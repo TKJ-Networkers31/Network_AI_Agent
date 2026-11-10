@@ -118,8 +118,8 @@ def client():
         username="lingga_admin",
         is_internal=True,
         tenant_id="tenant_internal",
-        roles=["SUPER_ADMIN"],
-        groups=["SUPER_ADMIN"],
+        roles=["PLATFORM_OWNER", "SUPER_ADMIN"],
+        groups=["PLATFORM_OWNER", "SUPER_ADMIN"],
         permissions={"*"},
         account_enabled=True,
     )

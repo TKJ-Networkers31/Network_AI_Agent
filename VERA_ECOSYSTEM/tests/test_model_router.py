@@ -22,7 +22,7 @@ from core.task_classifier import TaskClassifier, parse_classification
 
 # model_id sengaja palsu (test/...) - bukan ID provider sungguhan.
 FAKE_MODELS = [
-    ("gemma3", "ollama", "test/gemma3", "Gemma 3", "general", 8192),
+    ("gemma3", "openrouter", "test/gemma3", "Gemma 3", "general", 8192),
     ("glm", "openrouter", "test/glm-5.2", "GLM 5.2", "coding", 128000),
     ("nemotron_super", "openrouter", "test/nemotron-super", "Nemotron Super", "networking", 128000),
     ("nemotron_ultra", "openrouter", "test/nemotron-ultra", "Nemotron Ultra", "reasoning", 256000),
@@ -216,7 +216,7 @@ class TestStore(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             store, _, _ = make_env(tmp)
             self.assertFalse(store.create_model("nope", "x", "X")["success"])
-            self.assertFalse(store.create_model("ollama", "x", "X", label="cooking")["success"])
+            self.assertFalse(store.create_model("openrouter", "x", "X", label="cooking")["success"])
             self.assertFalse(store.set_default_model("coding", "tidak_ada")["success"])
 
 

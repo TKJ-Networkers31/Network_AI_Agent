@@ -21,6 +21,7 @@ from core.nms.models import (
     TelemetryFreshness,
     TelemetrySample,
     TelemetrySource,
+    evaluate_freshness,
 )
 from core.nms.capability import (
     CapabilityAssessment,

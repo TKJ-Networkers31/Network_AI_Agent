@@ -65,15 +65,24 @@ export default function SelectionToolbar({ selection, onAction, onClose }) {
     onClose?.();
   };
 
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(selection.selected_text);
+    } catch {}
+    onClose?.();
+  };
+
   return (
     <div
       ref={containerRef}
+      data-selection-toolbar="true"
       role="region"
-      aria-label="Tanya AIRA kontekstual"
-      className="inline-block animate-in fade-in zoom-in-95 duration-150 z-30"
+      aria-label="Tanya VERA kontekstual"
+      onMouseDown={(e) => e.stopPropagation()}
+      className="inline-block selection-toolbar-root animate-in fade-in zoom-in-95 duration-150 z-30"
     >
       {!isComposerOpen ? (
-        // State 1: Sleek, compact floating pill with 1 primary action
+        // State 1: Sleek, compact floating pill with primary actions
         <div className="flex items-center gap-1 bg-surface-card/95 backdrop-blur-md border border-cyan-500/30 rounded-full px-2 py-1 shadow-2xl shadow-cyan-950/40 text-xs">
           <button
             type="button"
@@ -81,7 +90,23 @@ export default function SelectionToolbar({ selection, onAction, onClose }) {
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25 hover:text-white transition-all font-medium group"
           >
             <Sparkles size={13} className="text-cyan-400 group-hover:scale-110 transition-transform" />
-            <span>Tanya AIRA</span>
+            <span>Tanya VERA</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleQuickChip("Jelaskan bagian ini secara teknis dan implikasinya.")}
+            className="px-2 py-1 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition text-[11px]"
+          >
+            Jelaskan
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="px-2 py-1 rounded-full text-white/50 hover:text-white hover:bg-white/10 transition text-[11px]"
+          >
+            Salin
           </button>
 
           <div className="h-3.5 w-px bg-white/10 mx-0.5" />

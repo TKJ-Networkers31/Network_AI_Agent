@@ -133,6 +133,16 @@ def _extract(user_input: str, assistant_answer: str, user_id: Optional[str] = No
             logger.warning(f"auto_memory: rule candidate extraction error: {e}")
 
     # 2. LLM-based fact extraction for deeper context
+    try:
+        from core.provider_health import get_provider_health_manager
+        from core.model_router import get_model_router
+        general_model = get_model_router().select_for_label("general", publish=False)
+        if general_model and not get_provider_health_manager().is_provider_available(general_model.provider):
+            logger.info("auto_memory: Provider '%s' circuit is OPEN, skipping background LLM extraction.", general_model.provider)
+            return []
+    except Exception:
+        pass
+
     messages = [
         {"role": "system", "content": EXTRACTION_PROMPT},
         {"role": "user", "content": f"User: {user_input}\nAssistant: {assistant_answer}"},

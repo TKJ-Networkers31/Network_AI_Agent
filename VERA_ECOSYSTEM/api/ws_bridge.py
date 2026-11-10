@@ -82,6 +82,18 @@ NMS_WS_EVENT_MAP: dict[str, str] = {
     EventNames.NMS_INTERFACE_STATUS_CHANGED: "nms_interface_status_changed",
 }
 
+# Realtime Model Intelligence & Synchronization Events
+MODEL_WS_EVENT_MAP: dict[str, str] = {
+    EventNames.MODEL_REGISTRY_UPDATED: "model_registry_updated",
+    EventNames.MODEL_STATUS_CHANGED: "model_status_changed",
+    EventNames.PROVIDER_HEALTH_CHANGED: "provider_health_changed",
+    EventNames.MODEL_AVAILABILITY_CHANGED: "model_availability_changed",
+    EventNames.MODEL_PRIORITY_CHANGED: "model_priority_changed",
+    EventNames.MODEL_DISCOVERY_COMPLETED: "model_discovery_completed",
+    EventNames.MODEL_SYNC_FAILED: "model_sync_failed",
+    EventNames.ACTIVE_MODEL_CHANGED: "active_model_changed",
+}
+
 Sender = Callable[[str, dict], Awaitable[None]]
 
 _FALSE_VALUES = {"0", "false", "off", "no"}
@@ -113,7 +125,13 @@ async def _default_sender(session_id: str, payload: dict) -> None:
     # Import malas: modul ini bisa dites tanpa FastAPI.
     from api.ws_manager import manager
 
-    await manager.send(session_id, payload)
+    if session_id == "models":
+        await manager.send("models", payload)
+        await manager.broadcast(payload)
+    elif session_id == "broadcast":
+        await manager.broadcast(payload)
+    else:
+        await manager.send(session_id, payload)
 
 
 class WebSocketEventBridge:
@@ -129,7 +147,7 @@ class WebSocketEventBridge:
         self._map = dict(
             event_map
             if event_map is not None
-            else {**DEFAULT_WS_EVENT_MAP, **STREAM_WS_EVENT_MAP}
+            else {**DEFAULT_WS_EVENT_MAP, **STREAM_WS_EVENT_MAP, **NMS_WS_EVENT_MAP, **MODEL_WS_EVENT_MAP}
         )
 
         self._lock = threading.Lock()
@@ -226,6 +244,20 @@ class WebSocketEventBridge:
                 "correlation_id": event.correlation_id,
             }
 
+        # Forward MODEL system events directly to "models" channel / broadcast
+        if event.event in MODEL_WS_EVENT_MAP:
+            ws_type = MODEL_WS_EVENT_MAP[event.event]
+            data = json_safe(dict(event.data))
+            if not isinstance(data, dict):
+                data = {"value": data}
+            return "models", {
+                "type": ws_type,
+                "data": data,
+                "ts": time.time(),
+                "event_id": event.event_id,
+                "correlation_id": event.correlation_id,
+            }
+
         session_id = event.metadata.get("session_id")
         run_id = event.metadata.get("run_id")
 
@@ -259,6 +291,15 @@ class WebSocketEventBridge:
 
         if translated is None:
             return
+
+        # Update active run state cache for stream resume/replay
+        sess_target, payload_data = translated
+        if sess_target not in ("nms", "models"):
+            try:
+                from api.routers.ws import update_active_run_event
+                update_active_run_event(sess_target, payload_data.get("type"), payload_data.get("data", {}))
+            except Exception:
+                pass
 
         with self._lock:
             loop, queue = self._loop, self._queue

@@ -32,6 +32,7 @@ class ArtifactType(str, Enum):
     MARKDOWN = "markdown"
     TXT = "txt"
     CSV = "csv"
+    HTML = "html"
 
     @classmethod
     def coerce(cls, value: Any) -> "ArtifactType":
@@ -54,6 +55,7 @@ MIME_TYPES: dict[str, str] = {
     ArtifactType.MARKDOWN.value: "text/markdown",
     ArtifactType.TXT.value: "text/plain",
     ArtifactType.CSV.value: "text/csv",
+    ArtifactType.HTML.value: "text/html",
 }
 
 EXTENSIONS: dict[str, str] = {
@@ -64,6 +66,7 @@ EXTENSIONS: dict[str, str] = {
     ArtifactType.MARKDOWN.value: ".md",
     ArtifactType.TXT.value: ".txt",
     ArtifactType.CSV.value: ".csv",
+    ArtifactType.HTML.value: ".html",
 }
 
 # Which family of spec each artifact_type accepts - used for validator/engine
@@ -75,6 +78,7 @@ DOCUMENT_TYPES = frozenset({
 })
 SPREADSHEET_TYPES = frozenset({ArtifactType.XLSX.value, ArtifactType.CSV.value})
 PRESENTATION_TYPES = frozenset({ArtifactType.PPTX.value})
+VISUALIZATION_TYPES = frozenset({ArtifactType.HTML.value})
 
 
 class ArtifactStatus(str, Enum):

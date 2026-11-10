@@ -44,13 +44,15 @@ from core.topology_parsers import (
     parse_mikrotik_resource,
     parse_mikrotik_routerboard,
 )
-from core.nms.scheduler import DevicePollCoordinator, DevicePollState, HardenedNmsScheduler
+from core.nms.scheduler import DevicePollCoordinator, DevicePollState, HardenedNmsScheduler, PollingProfile
 from core.nms.alerts import AlertEngine, AlertSeverity, AlertState
 from core.nms.models import (
     MetricTaxonomy,
     TelemetrySample,
     SampleQuality,
     MetricSemanticType,
+    TelemetryFreshness,
+    evaluate_freshness,
 )
 
 logger = logging.getLogger("aira.nms.engine")
@@ -67,6 +69,8 @@ _PROFILE_MIGRATION_COLUMNS = [
     ("device_identity", "TEXT DEFAULT ''"),
     ("routeros_version", "TEXT DEFAULT ''"),
     ("routeros_model", "TEXT DEFAULT ''"),
+    ("freshness_state", "TEXT DEFAULT 'UNKNOWN'"),
+    ("freshness_reason", "TEXT DEFAULT ''"),
 ]
 
 _IFACE_MIGRATION_COLUMNS = [
@@ -135,7 +139,8 @@ class NmsEngine:
             with self._lock, closing(self._get_connection()) as conn:
                 rows = conn.execute(
                     """
-                    SELECT n.id, n.ip, p.monitoring_enabled, p.is_paused, p.management_mode
+                    SELECT n.id, n.ip, n.device_type, n.model, p.monitoring_enabled, p.is_paused, p.management_mode,
+                           p.routeros_model
                     FROM topology_nodes n
                     LEFT JOIN nms_device_profiles p ON n.id = p.device_id
                     WHERE n.ip IS NOT NULL AND TRIM(n.ip) != ''
@@ -146,7 +151,13 @@ class NmsEngine:
                     is_enabled = bool(r["monitoring_enabled"] if r["monitoring_enabled"] is not None else 1)
                     is_paused = bool(r["is_paused"]) if r["is_paused"] is not None else False
                     if is_enabled and not is_paused:
-                        self._hardened_scheduler.register_device(dev_id, profile_name="standard")
+                        # Adaptive profile selection: low-resource devices (e.g. hAP ac lite, RB951, RB750, switches, APs)
+                        # receive BULK profile (120-180s) to prevent CPU resource exhaustion
+                        model_str = ((r["routeros_model"] or r["model"]) or "").lower()
+                        dev_type = (r["device_type"] or "").lower()
+                        is_small_device = any(s in model_str for s in ["hap ac lite", "rb951", "rb750", "lite", "hex"]) or dev_type in ["switch", "access_point"]
+                        profile_name = PollingProfile.BULK.value if is_small_device else PollingProfile.STANDARD.value
+                        self._hardened_scheduler.register_device(dev_id, profile_name=profile_name)
                     else:
                         self._hardened_scheduler.unregister_device(dev_id)
         except Exception as exc:
@@ -478,6 +489,18 @@ class NmsEngine:
                 })
             return result
 
+    def get_device_profile(self, device_id: str) -> Optional[Dict[str, Any]]:
+        """Returns the monitoring profile dictionary for the given device ID."""
+        detail = self.get_device_detail(device_id)
+        if not detail:
+            return None
+        prof = dict(detail.get("profile") or {})
+        prof["device_id"] = device_id
+        prof["ip"] = detail.get("ip") or ""
+        prof["host"] = detail.get("ip") or ""
+        prof["name"] = detail.get("name") or ""
+        return prof
+
     def get_device_detail(self, device_id: str) -> Optional[Dict[str, Any]]:
         settings = self.get_settings()
         interval = int(settings.get("default_interval_sec", 15))
@@ -594,6 +617,8 @@ class NmsEngine:
                     "device_identity": profile["device_identity"] or "",
                     "routeros_version": profile["routeros_version"] or "",
                     "routeros_model": profile["routeros_model"] or "",
+                    "freshness_state": profile["freshness_state"] if "freshness_state" in profile.keys() and profile["freshness_state"] else ("LIVE" if not stale and (profile["status"] or "UNKNOWN") == "UP" else ("STALE" if stale else "UNKNOWN")),
+                    "freshness_reason": profile["freshness_reason"] if "freshness_reason" in profile.keys() and profile["freshness_reason"] else "",
                     "outage_started_at": profile["outage_started_at"],
                     "last_error": profile["last_error"] or "",
                     "is_stale": stale,
@@ -1224,7 +1249,19 @@ class NmsEngine:
                 "interfaces_count": len(interfaces_to_save),
             }
 
-        # 6. Update Database: nms_device_profiles AND topology_nodes
+        # 6. Freshness Evaluation (Phase 2.5) & Database Persistence
+        poll_int = float(settings.get("poll_interval_sec", 30))
+        collector_stat = "SUCCESS" if ping_ok else ("AUTH_FAILED" if "auth" in (last_error or "").lower() else "FAILED")
+        freshness_enum, freshness_reason = evaluate_freshness(
+            measured_at=now if ping_ok else (profile.get("last_successful_poll_at") or profile.get("last_polled_at")),
+            poll_interval_sec=poll_int,
+            device_status=new_status,
+            collector_status=collector_stat,
+            is_supported=True,
+            now=now,
+        )
+        freshness_state = freshness_enum.value
+
         events_to_publish: List[Tuple[str, Dict[str, Any]]] = []
         incidents_to_publish: List[Dict[str, Any]] = []
         with self._lock, closing(self._get_connection()) as conn:
@@ -1248,6 +1285,8 @@ class NmsEngine:
                     device_identity = CASE WHEN ? != '' THEN ? ELSE device_identity END,
                     routeros_version = CASE WHEN ? != '' THEN ? ELSE routeros_version END,
                     routeros_model = CASE WHEN ? != '' THEN ? ELSE routeros_model END,
+                    freshness_state = ?,
+                    freshness_reason = ?,
                     metrics_summary_json = ?,
                     updated_at = ?
                 WHERE device_id = ?
@@ -1273,6 +1312,8 @@ class NmsEngine:
                     routeros_version,
                     routeros_model,
                     routeros_model,
+                    freshness_state,
+                    freshness_reason,
                     json.dumps(metrics_summary),
                     now,
                     device_id,
@@ -1603,6 +1644,23 @@ class NmsEngine:
 
             conn.commit()
 
+        # Multi-Path Management profile synchronization (Phase 3)
+        try:
+            from core.management import get_multi_path_manager
+            mpm = get_multi_path_manager()
+            dev_mac = None
+            if node_row and "mac" in node_row.keys():
+                dev_mac = node_row["mac"]
+            mpm.evaluate_and_save_profile(
+                device_id=device_id,
+                host=host,
+                mac_address=dev_mac,
+                routeros_version=routeros_version or None,
+                routeros_model=routeros_model or None,
+            )
+        except Exception as exc:
+            logger.debug(f"MultiPathManager evaluation during NMS poll skipped: {exc}")
+
         # Publish all real-time events AFTER database transaction commit and lock release
         for ev_name, ev_data in events_to_publish:
             try:
@@ -1621,6 +1679,8 @@ class NmsEngine:
                     "previous_status": curr_status,
                     "latency_ms": latency_ms,
                     "metrics": metrics_summary,
+                    "freshness_state": freshness_state,
+                    "freshness_reason": freshness_reason,
                     "timestamp": now,
                     "monitoring_method": monitoring_method,
                 },

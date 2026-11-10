@@ -96,11 +96,59 @@ class SampleQuality(str, Enum):
 
 
 class TelemetryFreshness(str, Enum):
-    """Temporal freshness state."""
-    FRESH = "FRESH"      # Collected within normal sampling window (< 2.5x interval)
-    STALE = "STALE"      # Exceeded freshness threshold; retained for historical context
-    EXPIRED = "EXPIRED"  # Older than active operational window
-    UNKNOWN = "UNKNOWN"  # Freshness cannot be determined
+    """Canonical temporal freshness states (Phase 2.5)."""
+    LIVE = "LIVE"                # Collected within normal sampling window (< 1.5x interval)
+    DELAYED = "DELAYED"          # Minor delay (1.5x - 3.0x interval)
+    STALE = "STALE"              # Exceeded freshness threshold (3.0x - 10.0x interval)
+    UNKNOWN = "UNKNOWN"          # Freshness cannot be determined or never polled
+    UNAVAILABLE = "UNAVAILABLE"  # Exceeded 10x interval, device offline, or collector failed
+
+    # Backward compatibility aliases
+    FRESH = "LIVE"
+    EXPIRED = "UNAVAILABLE"
+
+
+def evaluate_freshness(
+    measured_at: Optional[float],
+    poll_interval_sec: float = 30.0,
+    device_status: str = "UP",
+    collector_status: str = "SUCCESS",
+    is_supported: bool = True,
+    now: Optional[float] = None,
+) -> Tuple[TelemetryFreshness, str]:
+    """
+    Evaluates explicit freshness state and human-readable reason (Phase 2.5):
+    Distinguishes:
+    - Device is offline
+    - Collector failed / unreachable
+    - Authentication failed
+    - Data is stale
+    - Device does not support the metric
+    """
+    if not is_supported:
+        return TelemetryFreshness.UNAVAILABLE, "Perangkat tidak mendukung metrik ini."
+    if str(device_status).upper() in ("DOWN", "UNREACHABLE", "OFFLINE"):
+        return TelemetryFreshness.UNAVAILABLE, "Perangkat sedang offline / tidak terjangkau."
+    if str(collector_status).upper() in ("AUTH_FAILED", "PERMISSION_DENIED"):
+        return TelemetryFreshness.UNAVAILABLE, "Otentikasi kredensial monitoring gagal."
+    if str(collector_status).upper() in ("FAILED", "TIMEOUT"):
+        return TelemetryFreshness.UNAVAILABLE, "Kolektor telemetri gagal menghubungi perangkat (timeout/network error)."
+
+    if measured_at is None or measured_at <= 0:
+        return TelemetryFreshness.UNKNOWN, "Belum ada sampel metrik yang terkumpul."
+
+    current_time = now if now is not None else time.time()
+    age = max(0.0, current_time - measured_at)
+    interval = max(5.0, float(poll_interval_sec))
+
+    if age <= (1.5 * interval):
+        return TelemetryFreshness.LIVE, f"Data terkini ({round(age, 1)}s lalu)."
+    elif age <= (3.0 * interval):
+        return TelemetryFreshness.DELAYED, f"Pengumpulan sedikit terlambat ({round(age, 1)}s lalu)."
+    elif age <= (10.0 * interval):
+        return TelemetryFreshness.STALE, f"Data basi ({round(age, 1)}s lalu; melebihi batas toleransi polling)."
+    else:
+        return TelemetryFreshness.UNAVAILABLE, f"Data kedaluwarsa ({round(age, 1)}s lalu; perangkat mungkin berhenti merespons)."
 
 
 class CollectionStatus(str, Enum):

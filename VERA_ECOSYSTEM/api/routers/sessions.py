@@ -83,6 +83,21 @@ def rename(
     return {"success": True, "title": title}
 
 
+@router.post("/{session_id}/interactions/{schema_id}/resolve")
+def resolve_interaction(
+    session_id: str,
+    schema_id: str,
+    payload: dict,
+    ctx: TenantContext = Depends(get_current_authenticated_user),
+):
+    """Explicitly marks an interaction form as SUBMITTED, CANCELLED, or EXPIRED."""
+    if not store.get_session_row(session_id, user_id=ctx.user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesi tidak ditemukan atau akses ditolak.")
+    status_val = payload.get("status", "SUBMITTED")
+    ok = store.resolve_turn_interaction(session_id, schema_id=schema_id, status=status_val)
+    return {"success": ok, "status": status_val}
+
+
 @router.delete("/{session_id}")
 def delete(
     session_id: str,

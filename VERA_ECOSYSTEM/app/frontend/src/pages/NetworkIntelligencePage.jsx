@@ -7,7 +7,7 @@
 // 2. Investigations (History, current investigation, detected issues, supporting evidence, affected devices, topology, NMS metrics, AI analysis, recommendations)
 // 3. Action Center (Proposed, pending approvals, approved, rejected, executing, completed, failed, verification results)
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import TopBar from "../components/TopBar.jsx";
 import { api } from "../api.js";
 import { useToast } from "../components/Toast.jsx";
@@ -128,16 +128,16 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
   // Data Fetching
   // -------------------------------------------------------------------------
 
-  const fetchOverview = async () => {
+  const fetchOverview = useCallback(async () => {
     try {
       const res = await api.intelligence.getOverview();
       if (res?.overview) setOverviewData(res.overview);
     } catch (e) {
       console.warn("Overview fetch:", e);
     }
-  };
+  }, []);
 
-  const fetchActions = async () => {
+  const fetchActions = useCallback(async () => {
     setLoadingActions(true);
     try {
       const res = await api.intelligence.listActions(null, 50);
@@ -149,25 +149,25 @@ export default function NetworkIntelligencePage({ onOpenMenu }) {
     } finally {
       setLoadingActions(false);
     }
-  };
+  }, []);
 
-  const fetchGraph = async (layer = null) => {
+  const fetchGraph = useCallback(async (layer = null) => {
     try {
       const res = await api.intelligence.getGraph({ layer });
       if (res?.graph) setGraphData(res.graph);
     } catch (e) {
       console.warn("Graph fetch:", e);
     }
-  };
+  }, []);
 
-  const fetchHistorical = async () => {
+  const fetchHistorical = useCallback(async () => {
     try {
       const res = await api.intelligence.getHistory();
       if (res?.history) setHistoricalData(res.history);
     } catch (e) {
       console.warn("History fetch:", e);
     }
-  };
+  }, []);
 
   const loadInitialData = async () => {
     setLoading(true);

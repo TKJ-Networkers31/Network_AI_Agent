@@ -218,7 +218,9 @@ def test_planning_and_simulation_never_invokes_apply_engine():
 
 
 def test_rest_api_intelligence_endpoints_never_invoke_apply_engine():
+    from tests.auth_helper import get_test_auth_headers
     client = TestClient(app)
+    client.headers.update(get_test_auth_headers())
 
     with patch.object(SafeConfigEngine, "apply_change", autospec=True) as mock_apply:
         # 1. POST /api/intelligence/incidents

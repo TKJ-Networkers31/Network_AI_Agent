@@ -412,7 +412,7 @@ function DeviceEditPage({ initial, credentials, saving, onSubmit, onCancel, onOp
               checked={form.enabled}
               onChange={(e) => set("enabled", e.target.checked)}
             />
-            <span>Status Aktif (dapat diakses tool dan otomasi AIRA)</span>
+            <span>Status Aktif (dapat diakses tool dan otomasi VERA)</span>
           </label>
 
           <div className="flex items-center gap-2.5 ml-auto">
@@ -673,17 +673,34 @@ export default function DevicesPage({ onOpenMenu }) {
     run(() => inventoryApi.credentials.remove(credential.name), `Kredensial "${credential.name}" dihapus.`);
   }
 
-  async function testDevice(device) {
-    setTests((t) => ({ ...t, [device.name]: { state: "running", text: "Menghubungkan via SSH..." } }));
+  async function testDevice(device, method = "ssh_ip") {
+    setTests((t) => ({ ...t, [device.name]: { state: "running", text: `Menguji konektivitas via ${method.toUpperCase()}...` } }));
     try {
-      const res = await inventoryApi.devices.test(device.name);
-      setTests((t) => ({
-        ...t,
-        [device.name]: {
-          state: res.success ? "ok" : "fail",
-          text: res.success ? `Tersambung: ${res.output || "Identitas OK"}` : res.error || "Gagal terkoneksi.",
-        },
-      }));
+      if (method === "ssh_ip" || method === "ssh") {
+        const res = await inventoryApi.devices.test(device.name);
+        setTests((t) => ({
+          ...t,
+          [device.name]: {
+            state: res.success ? "ok" : "fail",
+            text: res.success ? `Tersambung (SSH): ${res.output || "Identitas OK"}` : res.error || "Gagal terkoneksi via SSH.",
+          },
+        }));
+      } else {
+        const res = await fetch(`/api/devices/${encodeURIComponent(device.name)}/management/test`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ method }),
+        });
+        const json = await res.json();
+        const ok = json.success && json.result?.reachable;
+        setTests((t) => ({
+          ...t,
+          [device.name]: {
+            state: ok ? "ok" : "fail",
+            text: ok ? `Tersambung (${method}): latency ${json.result?.latency_ms || 0}ms` : json.result?.error || json.message || `Gagal terkoneksi via ${method}.`,
+          },
+        }));
+      }
     } catch (err) {
       setTests((t) => ({ ...t, [device.name]: { state: "fail", text: err.message } }));
     }
@@ -745,7 +762,7 @@ export default function DevicesPage({ onOpenMenu }) {
           <div>
             <h3 className="font-semibold text-text-primary text-lg">Daftar Perangkat Jaringan</h3>
             <p className="text-xs text-text-secondary">
-              Total {devices.length} perangkat terdaftar di sistem AIRA
+              Total {devices.length} perangkat terdaftar di sistem VERA
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -882,14 +899,28 @@ export default function DevicesPage({ onOpenMenu }) {
                 )}
 
                 {/* Tombol Aksi */}
-                <div className="flex items-center justify-between pt-2 border-t border-border/40">
-                  <button
-                    className={`${BTN} text-sakura border border-sakura/20 hover:bg-sakura/10`}
-                    disabled={test?.state === "running"}
-                    onClick={() => testDevice(d)}
-                  >
-                    {test?.state === "running" ? "Menguji..." : "⚡ Tes SSH"}
-                  </button>
+                <div className="flex items-center justify-between pt-2 border-t border-border/40 gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      className={`${BTN} text-sakura border border-sakura/20 hover:bg-sakura/10`}
+                      disabled={test?.state === "running"}
+                      onClick={() => testDevice(d, "ssh_ip")}
+                    >
+                      {test?.state === "running" ? "Menguji..." : "⚡ Tes SSH"}
+                    </button>
+                    <select
+                      className="text-[11px] bg-white/5 border border-border rounded-pill px-2.5 py-1.5 text-text-secondary hover:text-text-primary outline-none cursor-pointer transition"
+                      disabled={test?.state === "running"}
+                      value=""
+                      onChange={(e) => e.target.value && testDevice(d, e.target.value)}
+                      title="Uji jalur manajemen lain (API, RoMON, MAC)"
+                    >
+                      <option value="">+ Jalur Lain</option>
+                      <option value="api_ip">RouterOS API (8728)</option>
+                      <option value="romon">RoMON Overlay</option>
+                      <option value="mac_telnet">MAC Telnet</option>
+                    </select>
+                  </div>
                   <div className="flex gap-1.5">
                     <button
                       className={`${BTN} hover:border-sakura/40 text-text-primary`}
@@ -912,7 +943,7 @@ export default function DevicesPage({ onOpenMenu }) {
                 {search ? "Tidak ada perangkat yang cocok dengan pencarian." : "Belum ada perangkat terdaftar."}
               </p>
               <p className="text-xs text-text-secondary/60 mt-1">
-                Klik "+ Tambah Perangkat" di atas atau ketik prompt ke AIRA di chat:
+                Klik "+ Tambah Perangkat" di atas atau ketik prompt ke VERA di chat:
                 <br />
                 <span className="font-mono text-sakura mt-1 inline-block">
                   "Tambahkan router MikroTik IP 192.168.88.1 bernama Core-R1 password admin123"

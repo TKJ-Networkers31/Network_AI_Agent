@@ -64,7 +64,7 @@ MARKERS = ("RUNTIME_MARKER", "MEMORY_MARKER", "LOCATION_MARKER")
 
 PERSONA_STATE = {
     "profile": {
-        "assistant_name": "AIRA",
+        "assistant_name": "VERA",
         "user_name": "Tester",
         "language": "id",
         "timezone": "Asia/Jakarta",
@@ -264,7 +264,7 @@ class TestBuilderFull(unittest.TestCase):
         persona = self.context.persona
 
         self.assertEqual(identity.data, {
-            "assistant_name": "AIRA", "user_name": "Tester",
+            "assistant_name": "VERA", "user_name": "Tester",
             "language": "id", "timezone": "Asia/Jakarta",
         })
         self.assertEqual(identity.text, "")

@@ -830,9 +830,15 @@ class TestNmsRestApi(unittest.TestCase):
                 self.assertEqual(msg["type"], "nms_snapshot")
                 self.assertIn("overview", msg["data"])
                 self.assertIn("total_devices", msg["data"]["overview"])
-                # Test ping-pong
+                # Test ping-pong with deterministic event filtering
                 ws.send_json({"type": "ping"})
-                pong = ws.receive_json()
+                pong = None
+                for _ in range(10):
+                    frame = ws.receive_json()
+                    if frame.get("type") == "pong":
+                        pong = frame
+                        break
+                self.assertIsNotNone(pong, "Expected 'pong' frame from WebSocket within 10 frames")
                 self.assertEqual(pong["type"], "pong")
 
     def test_nms_event_bus_emission_on_poll(self):

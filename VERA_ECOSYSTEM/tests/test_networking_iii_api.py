@@ -12,10 +12,13 @@ from core.network_intelligence.metrics_service import (
 )
 
 
+from tests.auth_helper import get_test_auth_headers
+
+
 @pytest.fixture
 def client():
-    # Use TestClient with topology admin authentication headers
-    return TestClient(app, headers={"X-Topology-Admin": "true"})
+    # Use TestClient with authenticated session and topology admin headers
+    return TestClient(app, headers=get_test_auth_headers())
 
 
 def test_api_multi_device_batch_collect(client):

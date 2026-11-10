@@ -9,7 +9,7 @@ from typing import Optional
 
 @dataclass
 class PersonaProfile:
-    assistant_name: str = "AIRA"
+    assistant_name: str = "VERA"
     user_name: Optional[str] = None
     language: str = "id"
     timezone: str = "Asia/Jakarta"

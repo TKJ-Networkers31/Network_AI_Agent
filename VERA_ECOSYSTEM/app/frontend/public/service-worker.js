@@ -79,3 +79,55 @@ self.addEventListener("fetch", (event) => {
     );
   }
 });
+
+// ============================================================
+// PUSH NOTIFICATIONS & DESKTOP NOTIFICATION CLICK HANDLING
+// ============================================================
+
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+
+  let payload = {};
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { title: "VERA Enterprise Intelligence", body: event.data.text() };
+  }
+
+  const title = payload.title || "VERA — Network Intelligence Platform";
+  const options = {
+    body: payload.body || "Operasi jaringan selesai atau memerlukan perhatian.",
+    icon: payload.icon || "/favicon.ico",
+    badge: payload.badge || "/favicon.ico",
+    tag: payload.tag || "vera-background-notification",
+    data: payload.data || {},
+    renotify: Boolean(payload.renotify),
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const targetUrl = event.notification.data?.url || "/";
+
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) {
+          if (client.url && client.url.includes(self.location.origin)) {
+            client.focus();
+            if (targetUrl && client.navigate) {
+              client.navigate(targetUrl);
+            }
+            return;
+          }
+        }
+      }
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(targetUrl);
+      }
+    })
+  );
+});

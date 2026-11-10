@@ -387,7 +387,8 @@ def test_13_wp_4_6_2_api_contracts(monkeypatch):
     )
     monkeypatch.setattr(rc_mod, "_route_collector_singleton", collector)
 
-    client = TestClient(app)
+    from tests.auth_helper import get_test_auth_headers
+    client = TestClient(app, headers=get_test_auth_headers())
 
     r_lpm = client.get("/api/intelligence/routes/dev_a/lookup?destination=172.20.0.5")
     assert r_lpm.status_code == 200

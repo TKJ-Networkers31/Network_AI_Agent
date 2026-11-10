@@ -57,7 +57,7 @@ export default function VoiceCompanionHost({ onNavigate }) {
       if (sendMessage) {
         try {
           await sendMessage(prompt);
-          return "Permintaan berhasil dikirim ke AIRA.";
+          return "Permintaan berhasil dikirim ke VERA.";
         } catch (err) {
           return "Maaf, kendala komunikasi: " + (err?.message || err);
         }

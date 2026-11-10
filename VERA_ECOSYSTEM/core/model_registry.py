@@ -39,7 +39,7 @@ _write_lock = threading.Lock()
 # Provider yang didukung saat ini. Menambah provider baru (mis. "anthropic",
 # "groq") CUKUP tambah nama di sini + adapter call/health-check di
 # agents/rei/provider_client.py - TIDAK perlu mengubah orchestrator/planner.
-VALID_PROVIDERS = {"openrouter", "ollama", "gemini"}
+VALID_PROVIDERS = {"openrouter", "gemini", "nvidia", "kumo"}
 
 
 def _connect() -> sqlite3.Connection:
@@ -76,8 +76,7 @@ def init_db() -> None:
 def _seed_defaults() -> None:
     """
     Isi awal supaya sistem tidak "kosong model" begitu Phase 1.2 aktif,
-    memigrasikan 4 provider yang dulu hardcoded di PROVIDERS (versi lama
-    agents/rei/provider_client.py) menjadi baris registry. Hanya berjalan
+    memigrasikan provider yang dulu hardcoded menjadi baris registry. Hanya berjalan
     kalau tabel masih benar-benar kosong.
     """
     with closing(_connect()) as conn:
@@ -89,30 +88,15 @@ def _seed_defaults() -> None:
 
     seed_rows = [
         {
-            "nickname": "ollama-qwen3-1.7b",
-            "provider": "ollama",
-            "model_id": "qwen3:1.7b",
-            "endpoint": "http://localhost:11434",
+            "nickname": "Nemotron 3.5 Lightning",
+            "provider": "openrouter",
+            "model_id": "nvidia/nemotron-3.5-lightning:free",
+            "endpoint": "https://openrouter.ai/api/v1",
             "api_key": None,
             "is_default": 1,
             "is_fallback": 0,
             "enabled": 1,
         },
-        {
-            "nickname": "ollama-qwen3-4b",
-            "provider": "ollama",
-            "model_id": "qwen3:4b",
-            "endpoint": "http://localhost:11434",
-            "api_key": None,
-            "is_default": 0,
-            "is_fallback": 0,
-            "enabled": 1,
-        },
-        {
-            "nickname": "Nemotron 3.5 Lightning",
-            "provider": "openrouter",
-            "model_id": "nvidia/nemotron-3.5-lightning:free",
-            "endpoint": "https://openrouter.ai/api/v1",
             "api_key": None,
             "is_default": 0,
             "is_fallback": 1,

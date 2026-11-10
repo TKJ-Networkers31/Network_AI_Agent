@@ -175,12 +175,12 @@ test("display_name: settings > persona.user_name; nickname hanya dari settings",
 });
 
 test("assistant_name & language: settings > persona > default; language dinormalisasi", () => {
-  assert.equal(buildGreetingContext({}).assistant_name, "AIRA");
+  assert.equal(buildGreetingContext({}).assistant_name, "VERA");
   assert.equal(buildGreetingContext({}).language, "id");
 
   const context = buildGreetingContext({
     settings: { assistant_name: "Akane", language: "EN-us" },
-    persona: { assistant_name: "AIRA", language: "id" },
+    persona: { assistant_name: "VERA", language: "id" },
   });
   assert.equal(context.assistant_name, "Akane");
   assert.equal(context.language, "en");
@@ -193,7 +193,7 @@ test("assistant_name & language: settings > persona > default; language dinormal
 // ============================================================
 
 test("settings tidak tersedia (berbagai bentuk) -> context tetap terbentuk dari persona/default", () => {
-  const persona = { user_name: "Lingga", timezone: "Asia/Jakarta", language: "id", assistant_name: "AIRA" };
+  const persona = { user_name: "Lingga", timezone: "Asia/Jakarta", language: "id", assistant_name: "VERA" };
   const unavailable = [
     undefined,
     null,
@@ -225,7 +225,7 @@ test("settings & persona sama-sama tidak ada -> default penuh, tidak raise", () 
     {
       display_name: null,
       nickname: null,
-      assistant_name: "AIRA",
+      assistant_name: "VERA",
       timezone: "Asia/Jakarta",
       language: "id",
       time_period: AFTERNOON,

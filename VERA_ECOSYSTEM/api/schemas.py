@@ -39,6 +39,7 @@ class ChatResponse(BaseModel):
     # FIX (Optimalisasi DIO): Universal Interaction Schema (dict) kalau
     # giliran ini memanggil request_structured_input - None kalau tidak.
     interaction_schema: Optional[dict] = None
+    vae_payload: Optional[dict] = None
     quota: Optional[dict] = None
 
 

@@ -44,7 +44,7 @@ export default function VoiceOverlay({
       statusBadgeClass = "bg-purple-500/20 text-purple-300 border-purple-500/40";
       break;
     case VOICE_DIAGNOSTICS.TRANSCRIPT_RECEIVED:
-      statusLabel = "AIRA Menjawab...";
+      statusLabel = "VERA Menjawab...";
       statusBadgeClass = "bg-indigo-500/20 text-indigo-300 border-indigo-500/40";
       break;
     case VOICE_DIAGNOSTICS.PERMISSION_DENIED:
@@ -64,7 +64,7 @@ export default function VoiceOverlay({
         statusLabel = "Menyambungkan...";
         statusBadgeClass = "bg-purple-500/20 text-purple-300 border-purple-500/40";
       } else if (speaking) {
-        statusLabel = "AIRA Menjawab...";
+        statusLabel = "VERA Menjawab...";
         statusBadgeClass = "bg-indigo-500/20 text-indigo-300 border-indigo-500/40";
       } else if (waitingReply) {
         statusLabel = "Memproses...";

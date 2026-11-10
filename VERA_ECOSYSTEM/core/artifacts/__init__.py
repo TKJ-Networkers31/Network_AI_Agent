@@ -23,17 +23,18 @@ core/artifacts/engine.py); no second storage system is created here.
 
 from core.artifacts.models import (
     Artifact, ArtifactResult, ArtifactStatus, ArtifactType,
-    DOCUMENT_TYPES, EXTENSIONS, MIME_TYPES, PRESENTATION_TYPES, SPREADSHEET_TYPES,
+    DOCUMENT_TYPES, EXTENSIONS, MIME_TYPES, PRESENTATION_TYPES, SPREADSHEET_TYPES, VISUALIZATION_TYPES,
 )
 from core.artifacts.specs import (
     CsvSpec, DocumentBlock, DocumentSpec, PresentationSpec, SlideSection,
-    SpreadsheetSpec, WorksheetSpec, VALID_COLUMN_FORMATS,
+    SpreadsheetSpec, WorksheetSpec, VisualizationSpec, VisualizationNode, VisualizationEdge,
+    VALID_COLUMN_FORMATS,
     heading, paragraph, bullet_list, table_block,
 )
 from core.artifacts.validator import (
     ValidationIssue, ValidationResult,
     validate_csv_spec, validate_document_spec, validate_for_type,
-    validate_presentation_spec, validate_spreadsheet_spec,
+    validate_presentation_spec, validate_spreadsheet_spec, validate_visualization_spec,
 )
 from core.artifacts.store import ArtifactStore, get_artifact_store
 from core.artifacts.engine import ArtifactEngine, get_artifact_engine
@@ -41,13 +42,14 @@ from core.artifacts.generators import GenerationError
 
 __all__ = [
     "Artifact", "ArtifactResult", "ArtifactStatus", "ArtifactType",
-    "DOCUMENT_TYPES", "SPREADSHEET_TYPES", "PRESENTATION_TYPES", "MIME_TYPES", "EXTENSIONS",
+    "DOCUMENT_TYPES", "SPREADSHEET_TYPES", "PRESENTATION_TYPES", "VISUALIZATION_TYPES", "MIME_TYPES", "EXTENSIONS",
     "CsvSpec", "DocumentBlock", "DocumentSpec", "PresentationSpec", "SlideSection",
-    "SpreadsheetSpec", "WorksheetSpec", "VALID_COLUMN_FORMATS",
+    "SpreadsheetSpec", "WorksheetSpec", "VisualizationSpec", "VisualizationNode", "VisualizationEdge",
+    "VALID_COLUMN_FORMATS",
     "heading", "paragraph", "bullet_list", "table_block",
     "ValidationIssue", "ValidationResult",
     "validate_csv_spec", "validate_document_spec", "validate_for_type",
-    "validate_presentation_spec", "validate_spreadsheet_spec",
+    "validate_presentation_spec", "validate_spreadsheet_spec", "validate_visualization_spec",
     "ArtifactStore", "get_artifact_store",
     "ArtifactEngine", "get_artifact_engine",
     "GenerationError",

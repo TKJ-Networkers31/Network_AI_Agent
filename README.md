@@ -73,6 +73,12 @@ Engineers / NOC
 │   ├── branding/                 # VERA brand guidelines & SVG vector assets
 │   ├── brand-history/            # Historical record from AIRA to VERA
 │   └── migration/                # Baseline, rename manifest, and rollback plan
+├── reports/                      # Forensic audits, engineering reports, and specifications
+│   ├── audits/                   # Network, UX, and security forensic audits
+│   ├── engineering/              # Technical implementation & reliability reports
+│   ├── migration/                # Migration phase completion reports & plans
+│   ├── specifications/           # VAE protocols, UI component catalogs & specs
+│   └── README.md                 # Complete index and navigation catalog
 ├── Dockerfile                    # Multi-stage production container build
 ├── docker-compose.yml            # Container deployment orchestration
 └── pytest.ini                    # Pytest test paths & configuration

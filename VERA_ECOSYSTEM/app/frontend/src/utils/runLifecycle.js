@@ -347,6 +347,8 @@ export function applyResponse(messages, data) {
     content: data.answer,
     steps: data.steps,
     interactionSchema: data.interaction_schema || null,
+    vaePayload: data.vae_payload || data.vaePayload || null,
+    blocks: (data.vae_payload && data.vae_payload.blocks) || data.blocks || null,
     turnId: data.assistant_turn_id ?? null,
     isNew: true,
     runId: data.run_id ?? null,

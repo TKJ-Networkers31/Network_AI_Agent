@@ -410,8 +410,8 @@ def export_personal_data(ctx: TenantContext = Depends(get_current_user_context))
             "tenant_id": ctx.tenant_id,
         },
         "export_metadata": {
-            "platform": "AIRA OS",
-            "version": "Phase F",
+            "platform": "VERA Enterprise Network Intelligence Platform",
+            "version": "2.1.0",
             "user_id": ctx.user_id,
             "username": ctx.username,
             "exported_at": _memory_svc.get_or_create_user_preferences(ctx.user_id)["updated_at"],

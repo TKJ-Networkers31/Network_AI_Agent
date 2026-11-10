@@ -125,7 +125,7 @@ class TestLoaderResilience(unittest.TestCase):
                 content = f"assistant_name: HACKED\n{key}: x\n"
                 base = make_config_dir(tmp, **{"identity.yaml": content})
                 config = load_persona_config(base)
-            self.assertEqual(config.identity["assistant_name"], "AIRA", key)
+            self.assertEqual(config.identity["assistant_name"], "VERA", key)
             self.assertTrue(any("di luar ranah persona" in w for w in config.warnings))
 
     def test_forbidden_key_nested_in_style_rejects_style(self):
@@ -149,7 +149,7 @@ class TestLoaderResilience(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             base = make_config_dir(tmp, **{"identity.yaml": "assistant_name: 123\nlanguage: en\n"})
             config = load_persona_config(base)
-        self.assertEqual(config.identity["assistant_name"], "AIRA")
+        self.assertEqual(config.identity["assistant_name"], "VERA")
         self.assertEqual(config.identity["language"], "en")
 
     def test_defaults_are_clamped_and_bool_rejected(self):
@@ -199,7 +199,7 @@ class TestPersonaContext(unittest.TestCase):
     def test_identity_block_matches_legacy_layout(self):
         ctx = ctx_for(AKANE, user_name="Lingga")
         lines = ctx.identity_text.split("\n")
-        self.assertEqual(lines[0], "Kamu adalah AIRA (Adaptive Intelligent Reasoning Assistant).")
+        self.assertEqual(lines[0], "Kamu adalah VERA (Enterprise Network Intelligence Platform).")
         self.assertTrue(lines[1].startswith("Nama panggilan internalmu adalah Akane"))
         self.assertEqual(lines[2], "User memperkenalkan diri sebagai 'Lingga' - gunakan natural, jangan dipaksakan.")
         self.assertEqual(lines[3], "Jawab dalam bahasa: id. Zona waktu acuan: Asia/Jakarta.")
@@ -223,7 +223,7 @@ class TestPersonaContext(unittest.TestCase):
 
     def test_missing_or_garbage_inputs_use_defaults(self):
         ctx = build_persona_context(None, {"empathy": None, "friendliness": "abc"}, None)
-        self.assertEqual(ctx.assistant_name, "AIRA")
+        self.assertEqual(ctx.assistant_name, "VERA")
         self.assertEqual(ctx.behavior["empathy"], D.DEFAULT_BEHAVIOR["defaults"]["empathy"])
         self.assertEqual(ctx.behavior["friendliness"], 50)   # clamp_behavior_value untuk non-angka
         self.assertEqual(set(ctx.behavior), set(BEHAVIOR_KEYS))
@@ -253,7 +253,7 @@ class TestPersonaContext(unittest.TestCase):
             base = make_config_dir(tmp, **{"identity.yaml": "expansion: Sistem Uji\n"})
             config = load_persona_config(base)
         ctx = build_persona_context(AKANE["profile"], AKANE["behavior"], AKANE["persona_text"], config=config)
-        self.assertTrue(ctx.identity_text.startswith("Kamu adalah AIRA (Sistem Uji)."))
+        self.assertTrue(ctx.identity_text.startswith("Kamu adalah VERA (Sistem Uji)."))
 
 
 # ============================================================ prompt
@@ -263,7 +263,7 @@ class TestPromptAssembly(unittest.TestCase):
     def test_section_order(self):
         prompt = build_prompt(AKANE["profile"], AKANE["behavior"], AKANE["persona_text"], "EXTRA_MARK")
         order = [
-            "Kamu adalah AIRA", "=== ATURAN INTI ===", "=== GAYA BICARA ===", "=== GAYA JAWAB ===",
+            "Kamu adalah VERA", "=== ATURAN INTI ===", "=== GAYA BICARA ===", "=== GAYA JAWAB ===",
             "=== EKSPRESI EMOSI ===", "=== FORMAT JAWABAN ===", "=== ILUSTRASI VISUAL",
             "=== LOKASI USER ===", "EXTRA_MARK",
         ]
@@ -357,7 +357,7 @@ class TestContextBuilderIntegration(unittest.TestCase):
     def test_persona_prompt_flows_through_builder_contract(self):
         context = self._builder(AKANE).build("cek R1", session_id="s1", task={"primary_label": "networking"})
 
-        self.assertEqual(context.system_prompt.count("Kamu adalah AIRA"), 1)
+        self.assertEqual(context.system_prompt.count("Kamu adalah VERA"), 1)
         for marker in ("RUNTIME_MARK", "MEMORY_MARK", "LOCATION_MARK"):
             self.assertEqual(context.system_prompt.count(marker), 1)
         self.assertTrue(context.system_prompt.index("=== LOKASI USER ===") < context.system_prompt.index("RUNTIME_MARK"))

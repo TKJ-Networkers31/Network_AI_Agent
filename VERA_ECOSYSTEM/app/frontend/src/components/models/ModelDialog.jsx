@@ -1,12 +1,14 @@
 // src/components/models/ModelDialog.jsx
 import React, { useState } from "react";
 import { LABEL_OPTIONS, PROVIDER_OPTIONS } from "./constants.js";
+import { HealthBadge, LifecycleBadge } from "./Badges.jsx";
 
 export default function ModelDialog({
   title,
   initial,
   isEdit,
   testing,
+  providers = [],
   onCancel,
   onSubmit,
   onDelete,
@@ -30,11 +32,24 @@ export default function ModelDialog({
     }
   }
 
+  // Use providers list from backend API if available, else static fallback
+  const providerList = providers.length > 0
+    ? providers.map((p) => ({ value: p.id, label: `${p.name} (${p.base_url || ""})` }))
+    : PROVIDER_OPTIONS;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-      <div className="bg-[#18181b] border border-white/10 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 overflow-y-auto py-8">
+      <div className="bg-[#18181b] border border-white/10 rounded-2xl w-full max-w-xl p-6 shadow-2xl space-y-4 my-auto">
         <div className="flex items-center justify-between border-b border-white/10 pb-3">
-          <h3 className="font-semibold text-lg text-white">{title}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-lg text-white">{title}</h3>
+            {isEdit && form.lifecycle_status && (
+              <LifecycleBadge status={form.lifecycle_status} />
+            )}
+            {isEdit && form.health_status && (
+              <HealthBadge status={form.health_status} />
+            )}
+          </div>
           <button
             type="button"
             onClick={onCancel}
@@ -53,7 +68,7 @@ export default function ModelDialog({
                 onChange={(e) => update("provider", e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-sakura/50"
               >
-                {PROVIDER_OPTIONS.map((p) => (
+                {providerList.map((p) => (
                   <option key={p.value} value={p.value} className="bg-zinc-900 text-white">
                     {p.label}
                   </option>
@@ -62,7 +77,7 @@ export default function ModelDialog({
             </div>
 
             <div>
-              <label className="text-xs text-white/60 block mb-1">Task Label</label>
+              <label className="text-xs text-white/60 block mb-1">Task Label (Primary)</label>
               <select
                 value={form.label}
                 onChange={(e) => update("label", e.target.value)}
@@ -77,15 +92,27 @@ export default function ModelDialog({
             </div>
           </div>
 
-          <div>
-            <label className="text-xs text-white/60 block mb-1">Display Name</label>
-            <input
-              required
-              value={form.display_name}
-              onChange={(e) => update("display_name", e.target.value)}
-              placeholder="mis. Qwen 2.5 Coder 7B"
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-sakura/50"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-white/60 block mb-1">Display Name</label>
+              <input
+                required
+                value={form.display_name}
+                onChange={(e) => update("display_name", e.target.value)}
+                placeholder="mis. Nemotron 3.5 Bolt"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-sakura/50"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-white/60 block mb-1">Publisher</label>
+              <input
+                value={form.publisher || ""}
+                onChange={(e) => update("publisher", e.target.value)}
+                placeholder="mis. nvidia, google, meta"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-sakura/50"
+              />
+            </div>
           </div>
 
           <div>
@@ -94,33 +121,104 @@ export default function ModelDialog({
               required
               value={form.model_id}
               onChange={(e) => update("model_id", e.target.value)}
-              placeholder="mis. qwen2.5-coder:7b atau gemini-1.5-pro"
+              placeholder="mis. nvidia/nemotron-3.5-bolt-e4b"
               className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono outline-none focus:border-sakura/50"
             />
           </div>
 
-          <div>
-            <label className="text-xs text-white/60 block mb-1">Context Window (Tokens)</label>
-            <input
-              type="number"
-              value={form.context_window || ""}
-              onChange={(e) => update("context_window", Number(e.target.value))}
-              placeholder="mis. 32768 (0 jika tidak tahu)"
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-sakura/50"
-            />
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs text-white/60 block mb-1">Context Window</label>
+              <input
+                type="number"
+                value={form.context_window || ""}
+                onChange={(e) => update("context_window", Number(e.target.value))}
+                placeholder="mis. 131072"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-sakura/50"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-white/60 block mb-1">Routing Priority</label>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={form.priority !== undefined ? form.priority : 10}
+                onChange={(e) => update("priority", Number(e.target.value))}
+                placeholder="1 (Tertinggi) - 100"
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-sakura/50"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-white/60 block mb-1">Model Architecture</label>
+              <select
+                value={form.model_type || "dense"}
+                onChange={(e) => update("model_type", e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-sakura/50"
+              >
+                <option value="dense" className="bg-zinc-900 text-white">Dense</option>
+                <option value="moe" className="bg-zinc-900 text-white">MoE (Mixture-of-Experts)</option>
+              </select>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 pt-1">
-            <input
-              type="checkbox"
-              id="enabled"
-              checked={form.enabled}
-              onChange={(e) => update("enabled", e.target.checked)}
-              className="rounded border-white/20 bg-white/5 text-sakura focus:ring-sakura/50"
-            />
-            <label htmlFor="enabled" className="text-sm text-white/80 cursor-pointer">
-              Aktifkan Model ini (Enabled)
-            </label>
+          {/* Capabilities Switches */}
+          <div className="p-3 bg-white/[0.02] border border-white/10 rounded-xl space-y-2">
+            <span className="text-xs font-semibold text-white/80 block">Verified Capabilities</span>
+            <div className="grid grid-cols-3 gap-2">
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-white/70">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.supports_tool_calling)}
+                  onChange={(e) => update("supports_tool_calling", e.target.checked)}
+                  className="rounded border-white/20 bg-white/5 text-sakura focus:ring-sakura/50"
+                />
+                Tool Calling
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-white/70">
+                <input
+                  type="checkbox"
+                  checked={form.supports_streaming !== undefined ? Boolean(form.supports_streaming) : true}
+                  onChange={(e) => update("supports_streaming", e.target.checked)}
+                  className="rounded border-white/20 bg-white/5 text-sakura focus:ring-sakura/50"
+                />
+                Streaming
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-white/70">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.supports_vision)}
+                  onChange={(e) => update("supports_vision", e.target.checked)}
+                  className="rounded border-white/20 bg-white/5 text-sakura focus:ring-sakura/50"
+                />
+                Vision / Multimodal
+              </label>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="enabled"
+                checked={Boolean(form.enabled)}
+                onChange={(e) => update("enabled", e.target.checked)}
+                className="rounded border-white/20 bg-white/5 text-sakura focus:ring-sakura/50"
+              />
+              <label htmlFor="enabled" className="text-sm text-white/80 cursor-pointer">
+                Aktifkan Model ini (Enabled)
+              </label>
+            </div>
+
+            {isEdit && form.verified_at && (
+              <span className="text-[10px] text-white/40 font-mono">
+                Verified: {new Date(form.verified_at).toLocaleDateString()}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center justify-between pt-4 border-t border-white/10">
@@ -158,7 +256,7 @@ export default function ModelDialog({
                       disabled={testing}
                       className="px-3 py-1.5 text-xs rounded-lg bg-white/5 text-white/70 hover:text-white border border-white/10 transition disabled:opacity-50"
                     >
-                      {testing ? "Menguji..." : "Test Koneksi"}
+                      {testing ? "Menguji..." : "Health Check"}
                     </button>
                   </div>
                 )

@@ -144,7 +144,7 @@ test("targetForTool / navigateForTool: hanya tool ber-aksi; aman tanpa window", 
 test("settingsSnapshotFromApi: hanya key greeting yang berstring, beku", () => {
   const snapshot = settingsSnapshotFromApi({
     settings: {
-      display_name: "Lingga", nickname: "Ling", assistant_name: "AIRA", timezone: "Asia/Jakarta",
+      display_name: "Lingga", nickname: "Ling", assistant_name: "VERA", timezone: "Asia/Jakarta",
       language: "id", theme: "arctic-blue", greeting_style: "default",
       voice_enabled: true, kunci_asing: "x",
     },

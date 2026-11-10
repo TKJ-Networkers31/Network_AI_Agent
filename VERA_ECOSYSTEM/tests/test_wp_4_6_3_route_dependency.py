@@ -358,7 +358,8 @@ def test_12_alternative_branches_api_and_zero_fabricated_topology_edges(tmp_path
     app.dependency_overrides[require_topology_admin] = lambda: {"role": "admin"}
 
     try:
-        client = TestClient(app)
+        from tests.auth_helper import get_test_auth_headers
+        client = TestClient(app, headers=get_test_auth_headers())
         resp_g = client.get("/api/intelligence/routes/dependencies?device_id=dev_chr")
         assert resp_g.status_code == 200
         assert resp_g.json()["dependency_graph"]["semantic_domain"] == "ROUTE_DEPENDENCY"

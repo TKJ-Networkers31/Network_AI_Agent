@@ -52,17 +52,40 @@ from core.dio.parameter_resolver import (
 
 logger = logging.getLogger("aira.orchestrator")
 
-AGENT_TOOL_MAP = {**AKANE_TOOLS, **HIKARI_TOOLS, **REI_TOOLS, **mt.MAPS_TOOLS, **art.ARTIFACT_TOOLS}
 
-AGENT_TOOL_CATEGORY = {
-    **AKANE_TOOL_CATEGORY, **HIKARI_TOOL_CATEGORY, **REI_TOOL_CATEGORY,
-    **mt.MAPS_TOOL_CATEGORY, **art.ARTIFACT_TOOL_CATEGORY,
+def _deduplicate_schemas(schemas: list) -> list:
+    """Deduplicates tool schema definitions by function name to satisfy strict LLM APIs."""
+    seen: set[str] = set()
+    unique: list = []
+    for entry in schemas:
+        name = entry.get("function", {}).get("name") if isinstance(entry, dict) else None
+        if not name or name not in seen:
+            if name:
+                seen.add(name)
+            unique.append(entry)
+    return unique
+
+
+AGENT_TOOL_MAP = {
+    **AKANE_TOOLS,
+    **HIKARI_TOOLS,
+    **REI_TOOLS,
+    **mt.MAPS_TOOLS,
 }
 
-AGENT_TOOL_SCHEMAS = [
-    *AKANE_TOOL_SCHEMAS, *HIKARI_TOOL_SCHEMAS, *REI_TOOL_SCHEMAS,
-    *mt.MAPS_TOOL_SCHEMAS, *art.ARTIFACT_TOOL_SCHEMAS,
-]
+AGENT_TOOL_CATEGORY = {
+    **AKANE_TOOL_CATEGORY,
+    **HIKARI_TOOL_CATEGORY,
+    **REI_TOOL_CATEGORY,
+    **mt.MAPS_TOOL_CATEGORY,
+}
+
+AGENT_TOOL_SCHEMAS = _deduplicate_schemas([
+    *AKANE_TOOL_SCHEMAS,
+    *HIKARI_TOOL_SCHEMAS,
+    *REI_TOOL_SCHEMAS,
+    *mt.MAPS_TOOL_SCHEMAS,
+])
 
 DANGEROUS_TOOLS: set[str] = set(AKANE_DANGEROUS_TOOLS) | set(HIKARI_DANGEROUS_TOOLS)
 
@@ -138,15 +161,25 @@ TOOL_REQUIRED_PERMISSIONS: dict[str, str] = {
 
 def _is_device_registration_request(text: str) -> bool:
     clean = (text or "").strip().lower()
-    add_words = ["tambah", "tambahkan", "daftarkan", "register", "add"]
-    dev_words = ["router", "device", "perangkat"]
+
+    # Section 4: Conceptual, explanatory, or configuration questions must NEVER trigger onboarding form
+    conceptual_markers = [
+        "bagaimana", "cara", "apa itu", "jelaskan", "mengapa", "kenapa", "apakah",
+        "tutorial", "panduan", "konsep", "bisa kah", "bisakah", "contoh", "teori",
+        "mac", "mac-address", "mac address", "arp", "bridge", "switch", "port-security",
+        "filter", "whitelist", "blacklist", "dhcp lease", "access-list", "access list",
+    ]
+    if any(marker in clean for marker in conceptual_markers):
+        return False
+
+    add_words = ["tambah", "tambahkan", "daftarkan", "register", "onboard"]
+    dev_words = ["router baru", "device baru", "perangkat baru", "node baru", "ke inventory", "di inventory"]
     has_add = any(w in clean for w in add_words)
     has_dev = any(w in clean for w in dev_words)
-    has_inv = "inventory" in clean
 
     # If IP is already provided, let normal execution proceed
     has_ip = bool(re.search(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", clean))
-    return (has_add and (has_dev or has_inv)) and not has_ip
+    return has_add and has_dev and not has_ip
 
 
 def _parse_form_submission_values(text: str) -> Optional[dict]:

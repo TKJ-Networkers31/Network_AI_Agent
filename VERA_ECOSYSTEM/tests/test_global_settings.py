@@ -77,7 +77,7 @@ class TestRead(TempStoreCase):
         result = store.read("assistant_name")
 
         self.assertTrue(result["success"])
-        self.assertEqual(result["value"], "AIRA")
+        self.assertEqual(result["value"], "VERA")
 
     def test_read_unknown_key_fails(self):
         store = self.store()
@@ -253,7 +253,7 @@ class TestMissingKeysAndReset(TempStoreCase):
         result = store.read("assistant_name")
 
         self.assertTrue(result["success"])
-        self.assertEqual(result["value"], "AIRA")
+        self.assertEqual(result["value"], "VERA")
         self.assertIsNone(result["updated_at"])
 
         # NOTE: sqlite3.Connection used as `with conn:` only commits/rolls

@@ -484,7 +484,8 @@ def test_14_route_collection_api_endpoints_and_secret_redaction(monkeypatch):
     test_collector = MultiDeviceRouteCollector(registry=registry, command_executor=executor)
     monkeypatch.setattr(rc_mod, "_route_collector_singleton", test_collector)
 
-    client = TestClient(app)
+    from tests.auth_helper import get_test_auth_headers
+    client = TestClient(app, headers=get_test_auth_headers())
 
     # Trigger collection
     resp = client.post("/api/intelligence/routes/collect", json={"targets": ["CHR"], "max_concurrency": 2})

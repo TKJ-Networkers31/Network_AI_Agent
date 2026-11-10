@@ -8,18 +8,69 @@ import {
 import { api } from "../api.js";
 
 const SessionsContext = createContext(null);
+const SESSION_STORAGE_KEY = "vera_active_session_id";
+
+function getInitialActiveId() {
+  if (typeof window === "undefined") return null;
+  try {
+    const urlParam = new URLSearchParams(window.location.search).get("session");
+    if (urlParam && urlParam !== "new" && urlParam !== "null") {
+      return urlParam;
+    }
+    const saved = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (saved && saved !== "null" && saved !== "undefined") {
+      return saved;
+    }
+  } catch {}
+  return null;
+}
 
 export function SessionsProvider({ children }) {
   const [sessions, setSessions] = useState([]);
-  // activeId = null berarti "New Chat kosong" (belum ada sesi di server).
-  const [activeId, setActiveId] = useState(null);
+  const [activeId, setActiveIdState] = useState(getInitialActiveId);
   const [sessionsReady, setSessionsReady] = useState(false);
+
+  const setActiveId = useCallback((idOrUpdater) => {
+    setActiveIdState((prev) => {
+      const nextId = typeof idOrUpdater === "function" ? idOrUpdater(prev) : idOrUpdater;
+      try {
+        if (nextId) {
+          localStorage.setItem(SESSION_STORAGE_KEY, nextId);
+          const url = new URL(window.location.href);
+          url.searchParams.set("session", nextId);
+          window.history.replaceState({}, "", url.toString());
+        } else {
+          localStorage.removeItem(SESSION_STORAGE_KEY);
+          const url = new URL(window.location.href);
+          url.searchParams.delete("session");
+          window.history.replaceState({}, "", url.toString());
+        }
+      } catch {}
+      return nextId;
+    });
+  }, []);
 
   const loadSessions = useCallback(() => {
     return api.sessions
       .list()
-      .then((res) => setSessions(res.sessions))
-      .catch(() => {});
+      .then((res) => {
+        const list = res.sessions || [];
+        setSessions(list);
+        setActiveIdState((currentId) => {
+          if (currentId && list.length > 0 && !list.some((s) => s.id === currentId)) {
+            try {
+              localStorage.removeItem(SESSION_STORAGE_KEY);
+              const url = new URL(window.location.href);
+              url.searchParams.delete("session");
+              window.history.replaceState({}, "", url.toString());
+            } catch {}
+            return null;
+          }
+          return currentId;
+        });
+        return list;
+      })
+      .catch(() => []);
   }, []);
 
   // FIX (Sprint 2.5 - Session): sebelumnya init() memanggil
@@ -49,8 +100,14 @@ export function SessionsProvider({ children }) {
   }, [loadSessions]);
 
   const startNewChat = useCallback(() => {
+    try {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("session");
+      window.history.replaceState({}, "", url.toString());
+    } catch {}
     setActiveId(null);
-  }, []);
+  }, [setActiveId]);
 
   const renameSession = useCallback(async (id, title) => {
     await api.sessions.rename(id, title);

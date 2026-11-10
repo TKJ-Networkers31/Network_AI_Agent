@@ -64,7 +64,7 @@ class ModelPolicy:
         fallback_id = self.store.get_policy().get("fallback_model_id")
         if fallback_id and fallback_id not in seen:
             row = self.store.get_model(fallback_id)
-            if row and row["enabled"]:
+            if row and row["enabled"] and row.get("availability_status") != "UNAVAILABLE" and row.get("lifecycle_status") != "DOWNLOADABLE_ONLY":
                 candidates.append(row)
                 seen.add(fallback_id)
 
@@ -72,17 +72,29 @@ class ModelPolicy:
         general_id = self.store.get_routing().get(DEFAULT_LABEL)
         if general_id and general_id not in seen:
             row = self.store.get_model(general_id)
-            if row and row["enabled"]:
+            if row and row["enabled"] and row.get("availability_status") != "UNAVAILABLE" and row.get("lifecycle_status") != "DOWNLOADABLE_ONLY":
                 candidates.append(row)
                 seen.add(general_id)
 
         # 3. Any other enabled models
         for row in self.store.list_models(enabled_only=True):
+            if row.get("availability_status") in ("UNAVAILABLE", "DEPRECATED", "ARCHIVED"):
+                continue
+            if row.get("lifecycle_status") == "DOWNLOADABLE_ONLY":
+                continue
             if row["id"] not in seen:
                 candidates.append(row)
                 seen.add(row["id"])
 
-        return candidates
+        # Prioritize candidates whose provider circuit breaker is healthy
+        try:
+            from core.provider_health import get_provider_health_manager
+            health_mgr = get_provider_health_manager()
+            healthy = [c for c in candidates if health_mgr.is_provider_available(c.get("provider", ""))]
+            degraded = [c for c in candidates if not health_mgr.is_provider_available(c.get("provider", ""))]
+            return healthy + degraded
+        except Exception:
+            return candidates
 
     # ------------------------------------------------------------ rules
 
@@ -128,11 +140,58 @@ class ModelPolicy:
 
         return selected
 
-    def on_provider_failure(self, failed: SelectedModel, reason: str) -> Optional[SelectedModel]:
-        """Rule 2."""
-        fallback = self.fallback_model(exclude_id=failed.id)
-        if not fallback:
+    def on_provider_failure(
+        self,
+        failed: SelectedModel,
+        reason: str,
+        required_capabilities: Optional[list[str]] = None,
+    ) -> Optional[SelectedModel]:
+        """
+        Rule 2: Fallback when provider fails or circuit breaker opens.
+        Enforces strict provider independence:
+        - When the failed provider's circuit breaker is OPEN (or reason == "circuit_open"),
+          ALL models sharing that provider endpoint are strictly excluded.
+        - Fallback only succeeds if an independent, healthy provider (e.g. Ollama, OpenRouter) is available.
+        - If required_capabilities are provided (e.g. supports_tool_calling), candidates lacking them are excluded.
+        - If no independent qualified candidate exists, returns None immediately.
+        """
+        candidates = self.fallback_candidates(exclude_ids={failed.id})
+        try:
+            from core.provider_health import get_provider_health_manager
+            health_mgr = get_provider_health_manager()
+            is_provider_degraded = (reason == "circuit_open") or (not health_mgr.is_provider_available(failed.provider))
+
+            if is_provider_degraded:
+                # STRICT INDEPENDENCE: Exclude ALL models sharing this degraded provider endpoint
+                candidates = [
+                    c for c in candidates
+                    if c.get("provider") != failed.provider and health_mgr.is_provider_available(c.get("provider", ""))
+                ]
+            else:
+                # Transient error on healthy provider: prioritize healthy providers
+                healthy = [
+                    c for c in candidates
+                    if health_mgr.is_provider_available(c.get("provider", ""))
+                ]
+                candidates = healthy
+        except Exception:
+            pass
+
+        # Capability preservation: if caller or task requires specific capabilities (e.g. tool calling)
+        if required_capabilities:
+            candidates = [
+                c for c in candidates
+                if all(bool(c.get(cap)) for cap in required_capabilities)
+            ]
+
+        if not candidates:
+            logger.warning(
+                "PROVIDER FAILURE | No independent healthy fallback available for provider '%s' (model: %s, reason: %s).",
+                failed.provider, failed.id, reason,
+            )
             return None
+
+        fallback = candidates[0]
         self._publish_fallback(failed.id, fallback["id"], reason)
         return SelectedModel.from_row(fallback, fallback_from=failed.id)
 

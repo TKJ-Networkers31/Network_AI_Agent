@@ -379,11 +379,33 @@ class Planner:
                     pending_interaction_schema = result["interaction_schema"]
                     interaction_pending = True
 
+                call_id = call.get("id") or f"call_{int(time.time()*1000)}"
+                is_success = bool(result.get("success")) if isinstance(result, dict) else True
+                target_dev = (
+                    arguments.get("device_name")
+                    or arguments.get("target")
+                    or arguments.get("device")
+                    or (result.get("device") if isinstance(result, dict) else None)
+                )
+
                 steps.append({
-                    "type": "tool_call", "name": name, "category": category,
+                    "type": "tool_call",
+                    "tool_call_id": call_id,
+                    "tool_name": name,
+                    "name": name,
+                    "target_device": target_dev,
+                    "execution_status": "SUCCESS" if is_success else "FAILED",
+                    "command": arguments.get("command") or safe_arguments,
+                    "request": safe_arguments,
+                    "raw_result": result.get("output") or result.get("raw_output") if isinstance(result, dict) else None,
+                    "parsed_result": result if isinstance(result, dict) else str(result),
+                    "execution_timestamp": time.time(),
+                    "category": category,
                     "arguments": safe_arguments,  # argumen LLM, secret disamarkan, tanpa session_id
-                    "success": bool(result.get("success")),
-                    "duration": round(step_duration, 3), "result_preview": _preview(result),
+                    "success": is_success,
+                    "duration": round(step_duration, 3),
+                    "result_preview": _preview(result),
+                    "error": result.get("error") if isinstance(result, dict) and not is_success else None,
                 })
 
                 emit(EventNames.TOOL_FINISH, {

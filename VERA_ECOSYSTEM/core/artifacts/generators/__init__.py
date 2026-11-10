@@ -14,9 +14,10 @@ from core.artifacts.generators.xlsx_gen import generate_xlsx
 from core.artifacts.generators.pptx_gen import generate_pptx
 from core.artifacts.generators.document_text import generate_markdown, generate_txt
 from core.artifacts.generators.csv_gen import generate_csv
+from core.artifacts.generators.html_gen import generate_interactive_html
 
 __all__ = [
     "GenerationError",
     "generate_docx", "generate_pdf", "generate_xlsx", "generate_pptx",
-    "generate_markdown", "generate_txt", "generate_csv",
+    "generate_markdown", "generate_txt", "generate_csv", "generate_interactive_html",
 ]

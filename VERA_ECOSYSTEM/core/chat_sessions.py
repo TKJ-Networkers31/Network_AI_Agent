@@ -71,6 +71,7 @@ def init_db():
                 content TEXT NOT NULL,
                 steps_json TEXT,
                 interaction_schema_json TEXT,
+                interaction_status TEXT DEFAULT 'NONE',
                 created_at REAL NOT NULL
             )
         """)
@@ -87,6 +88,11 @@ def _migrate_add_columns() -> None:
             conn.execute("ALTER TABLE chat_turns ADD COLUMN interaction_schema_json TEXT")
             conn.commit()
             logger.info("MIGRATION | kolom interaction_schema_json ditambahkan ke chat_turns.")
+
+        if "interaction_status" not in turn_cols:
+            conn.execute("ALTER TABLE chat_turns ADD COLUMN interaction_status TEXT DEFAULT 'NONE'")
+            conn.commit()
+            logger.info("MIGRATION | kolom interaction_status ditambahkan ke chat_turns.")
 
         sess_cols = [row[1] for row in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()]
         if "user_id" not in sess_cols:
@@ -227,24 +233,92 @@ def delete_all_user_sessions(user_id: str) -> int:
         return len(sids)
 
 
+def expire_pending_interactions(session_id: str) -> int:
+    """Transition any unsubmitted/unanswered interactions in this session to EXPIRED."""
+    with closing(_connect()) as conn:
+        cursor = conn.execute(
+            "UPDATE chat_turns SET interaction_status = 'EXPIRED' "
+            "WHERE session_id = ? AND interaction_status IN ('CREATED', 'ACTIVE')",
+            (session_id,),
+        )
+        conn.commit()
+        return cursor.rowcount
+
+
+def resolve_turn_interaction(
+    session_id: str,
+    schema_id: str | None = None,
+    status: str = "SUBMITTED",
+) -> bool:
+    """
+    Update interaction status for a turn in this session.
+    Status can be 'SUBMITTED', 'CANCELLED', 'EXPIRED', 'FAILED'.
+    """
+    valid_statuses = {"CREATED", "ACTIVE", "SUBMITTED", "CANCELLED", "EXPIRED", "FAILED"}
+    status = status.upper() if status else "SUBMITTED"
+    if status not in valid_statuses:
+        status = "SUBMITTED"
+
+    with closing(_connect()) as conn:
+        if schema_id:
+            rows = conn.execute(
+                "SELECT id, interaction_schema_json FROM chat_turns "
+                "WHERE session_id = ? AND interaction_schema_json IS NOT NULL ORDER BY id DESC",
+                (session_id,),
+            ).fetchall()
+            matched_id = None
+            for row in rows:
+                try:
+                    s_data = json.loads(row["interaction_schema_json"])
+                    if s_data.get("id") == schema_id or s_data.get("form_id") == schema_id:
+                        matched_id = row["id"]
+                        break
+                except Exception:
+                    continue
+            if matched_id:
+                conn.execute(
+                    "UPDATE chat_turns SET interaction_status = ? WHERE id = ?",
+                    (status, matched_id),
+                )
+                conn.commit()
+                return True
+
+        cursor = conn.execute(
+            "UPDATE chat_turns SET interaction_status = ? "
+            "WHERE id = ("
+            "  SELECT id FROM chat_turns WHERE session_id = ? AND interaction_schema_json IS NOT NULL "
+            "  ORDER BY id DESC LIMIT 1"
+            ")",
+            (status, session_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
 def add_turn(
     session_id: str,
     role: str,
     content: str,
     steps: list | None = None,
     interaction_schema: dict | None = None,
+    interaction_status: str | None = None,
 ) -> int:
     """Simpan satu turn. Return: id baris (chat_turns.id)."""
     now = time.time()
     steps_json = json.dumps(steps, ensure_ascii=False) if steps is not None else None
     schema_json = json.dumps(interaction_schema, ensure_ascii=False) if interaction_schema is not None else None
 
+    if role == "user":
+        expire_pending_interactions(session_id)
+
+    status = interaction_status or ("ACTIVE" if interaction_schema else "NONE")
+
     with closing(_connect()) as conn:
         cursor = conn.execute(
             "INSERT INTO chat_turns "
-            "(session_id, role, content, steps_json, interaction_schema_json, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (session_id, role, content, steps_json, schema_json, now),
+            "(session_id, role, content, steps_json, interaction_schema_json, interaction_status, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (session_id, role, content, steps_json, schema_json, status, now),
         )
         conn.commit()
         return cursor.lastrowid
@@ -253,7 +327,7 @@ def add_turn(
 def get_turns(session_id: str) -> list[dict]:
     with closing(_connect()) as conn:
         rows = conn.execute(
-            "SELECT id, role, content, steps_json, interaction_schema_json, created_at FROM chat_turns "
+            "SELECT id, role, content, steps_json, interaction_schema_json, interaction_status, created_at FROM chat_turns "
             "WHERE session_id = ? ORDER BY id ASC",
             (session_id,),
         ).fetchall()
@@ -265,6 +339,9 @@ def get_turns(session_id: str) -> list[dict]:
         raw_schema = item.pop("interaction_schema_json")
         item["steps"] = json.loads(raw_steps) if raw_steps else []
         item["interaction_schema"] = json.loads(raw_schema) if raw_schema else None
+        status = item.get("interaction_status") or ("ACTIVE" if item["interaction_schema"] else "NONE")
+        item["interaction_status"] = status
+        item["interaction_resolved"] = status in ("SUBMITTED", "CANCELLED", "EXPIRED", "FAILED")
         turns.append(item)
 
     return turns

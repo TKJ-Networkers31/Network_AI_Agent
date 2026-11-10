@@ -50,7 +50,6 @@ export default function ActionCardBlock({ code }) {
     setLoading(true);
     try {
       const res = await api.post("/api/v1/admin/permissions/simulate", {
-        user_id: "usr_25b8282cc548",
         resource: `device:${device}`,
         action: risk === "HIGH" || risk === "CRITICAL" ? "APPROVE" : "EXECUTE",
       });

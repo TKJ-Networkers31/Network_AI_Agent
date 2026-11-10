@@ -33,13 +33,13 @@ export default function BrandEmblem({ size = 32, glow = false, className = "" })
       >
         <defs>
           <linearGradient id="vera-emblem-grad" x1="20" y1="20" x2="100" y2="100" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="#54D6FF" />
-            <stop offset="60%" stopColor="#176BFF" />
-            <stop offset="100%" stopColor="#004AD7" />
+            <stop offset="0%" stopColor="#38BDF8" />
+            <stop offset="60%" stopColor="#8B5CF6" />
+            <stop offset="100%" stopColor="#6D28D9" />
           </linearGradient>
           <linearGradient id="vera-emblem-core" x1="50" y1="38" x2="70" y2="58" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="#54D6FF" />
-            <stop offset="100%" stopColor="#176BFF" />
+            <stop offset="0%" stopColor="#38BDF8" />
+            <stop offset="100%" stopColor="#8B5CF6" />
           </linearGradient>
         </defs>
 
@@ -50,26 +50,26 @@ export default function BrandEmblem({ size = 32, glow = false, className = "" })
         <line x1="76" y1="58" x2="60" y2="96" stroke="url(#vera-emblem-grad)" strokeWidth="4.5" strokeLinecap="round" />
 
         {/* Internal Nexus Bridge Lines (Intelligence Mesh) */}
-        <line x1="44" y1="58" x2="60" y2="48" stroke="#54D6FF" strokeWidth="2.2" strokeDasharray="3 3" opacity="0.85" />
-        <line x1="76" y1="58" x2="60" y2="48" stroke="#54D6FF" strokeWidth="2.2" strokeDasharray="3 3" opacity="0.85" />
-        <line x1="60" y1="48" x2="60" y2="96" stroke="#54D6FF" strokeWidth="2.2" opacity="0.8" />
-        <line x1="24" y1="28" x2="60" y2="48" stroke="#176BFF" strokeWidth="1.8" opacity="0.5" />
-        <line x1="96" y1="28" x2="60" y2="48" stroke="#176BFF" strokeWidth="1.8" opacity="0.5" />
+        <line x1="44" y1="58" x2="60" y2="48" stroke="#38BDF8" strokeWidth="2.2" strokeDasharray="3 3" opacity="0.85" />
+        <line x1="76" y1="58" x2="60" y2="48" stroke="#38BDF8" strokeWidth="2.2" strokeDasharray="3 3" opacity="0.85" />
+        <line x1="60" y1="48" x2="60" y2="96" stroke="#38BDF8" strokeWidth="2.2" opacity="0.8" />
+        <line x1="24" y1="28" x2="60" y2="48" stroke="#8B5CF6" strokeWidth="1.8" opacity="0.5" />
+        <line x1="96" y1="28" x2="60" y2="48" stroke="#8B5CF6" strokeWidth="1.8" opacity="0.5" />
 
         {/* Outer Network Nodes */}
-        <circle cx="24" cy="28" r="5.5" fill="#071426" stroke="#54D6FF" strokeWidth="3" />
-        <circle cx="96" cy="28" r="5.5" fill="#071426" stroke="#54D6FF" strokeWidth="3" />
-        <circle cx="44" cy="58" r="5" fill="#071426" stroke="#176BFF" strokeWidth="3" />
-        <circle cx="76" cy="58" r="5" fill="#071426" stroke="#176BFF" strokeWidth="3" />
+        <circle cx="24" cy="28" r="5.5" fill="#000000" stroke="#38BDF8" strokeWidth="3" />
+        <circle cx="96" cy="28" r="5.5" fill="#000000" stroke="#38BDF8" strokeWidth="3" />
+        <circle cx="44" cy="58" r="5" fill="#000000" stroke="#8B5CF6" strokeWidth="3" />
+        <circle cx="76" cy="58" r="5" fill="#000000" stroke="#8B5CF6" strokeWidth="3" />
 
         {/* Apex Gateway Node */}
-        <circle cx="60" cy="96" r="6.5" fill="#071426" stroke="#176BFF" strokeWidth="3.5" />
-        <circle cx="60" cy="96" r="2.5" fill="#54D6FF" />
+        <circle cx="60" cy="96" r="6.5" fill="#000000" stroke="#8B5CF6" strokeWidth="3.5" />
+        <circle cx="60" cy="96" r="2.5" fill="#38BDF8" />
 
         {/* Central Intelligence Nexus Core */}
-        <circle cx="60" cy="48" r="10" fill="#071426" stroke="#54D6FF" strokeWidth="2.5" />
+        <circle cx="60" cy="48" r="10" fill="#000000" stroke="#38BDF8" strokeWidth="2.5" />
         <circle cx="60" cy="48" r="6.5" fill="url(#vera-emblem-core)" />
-        <circle cx="60" cy="48" r="2.2" fill="#EAF2FF" />
+        <circle cx="60" cy="48" r="2.2" fill="#F8FAFC" />
       </svg>
     </div>
   );

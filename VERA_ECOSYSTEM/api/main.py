@@ -46,7 +46,7 @@ from api.routers import (
     chat, providers, memory, devices, sessions, tools, logs, models, persona,
     connections, files, location, settings, selection, attachments,
     workspace_links, capabilities, artifacts, topology, nms, voice,
-    network_intelligence, operations,
+    network_intelligence, operations, actions,
 )
 from api.routers import ws
 from api.ws_bridge import get_ws_bridge
@@ -109,6 +109,7 @@ app.include_router(attachments.router)
 app.include_router(workspace_links.router)  # === SPRINT 2.7.1 P0 FIX ===
 app.include_router(capabilities.router)     # === SPRINT 2.7.1 P0 FIX (baru) ===
 app.include_router(artifacts.router)        # === SPRINT 2.7.1 P0 FIX (baru) ===
+app.include_router(actions.router)          # Universal VAE Action Gateway
 app.include_router(topology.router)         # The Dude Native Topology Engine
 app.include_router(nms.router)              # Network Management System & Live Telemetry
 app.include_router(voice.router)            # Background Voice Service
@@ -120,6 +121,8 @@ from api.routers import decisions
 app.include_router(decisions.router)             # Operational Decision Intelligence (Networking VIII / Phase C)
 from api.routers import portal
 app.include_router(portal.router)                # Customer Self-Service Portal (Networking VIII / Phase D)
+from api.routers import jobs
+app.include_router(jobs.router)                  # Durable Background Tasks & Job State Machine
 app.include_router(ws.router)
 
 from api.routers import auth, admin_platform, automations, playbooks, personalization
@@ -130,6 +133,8 @@ app.include_router(user_management.router)
 app.include_router(automations.router)
 app.include_router(playbooks.router)
 app.include_router(personalization.router)
+from api.routers import management
+app.include_router(management.router)
 
 
 @app.get("/api/v1/nms/status", tags=["nms"])
@@ -180,6 +185,11 @@ def _startup_topology_db_and_concurrency():
 @app.on_event("startup")
 def _startup_location():
     threading.Thread(target=_warm_host_location, daemon=True).start()
+    try:
+        from core.job_store import get_job_store
+        get_job_store().recover_interrupted_jobs()
+    except Exception as exc:
+        logger.warning("Could not recover interrupted jobs on startup: %s", exc)
 
 
 @app.on_event("startup")
@@ -343,7 +353,13 @@ def _shutdown_automation_engine():
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "ecosystem": "AIRA"}
+    return {
+        "status": "ok",
+        "ecosystem": "VERA",
+        "platform": "VERA Enterprise Network Intelligence Platform",
+        "version": "2.1.0",
+        "legacy_compatible": True,
+    }
 
 
 class SafeStaticFiles(StaticFiles):

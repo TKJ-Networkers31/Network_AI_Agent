@@ -230,31 +230,33 @@ def test_06_fastapi_endpoints_authorization_and_safety():
     # Set admin token to enforce token authentication
     os.environ["AIRA_TOPOLOGY_ADMIN_TOKEN"] = "test_adm_secret_token_999"
     try:
-        # 1. Without auth header: must be rejected with 403 Forbidden
+        # 1. Without auth header: must be rejected with 401 or 403
         res_no_auth = client.delete("/api/topology/edges/edge_test_123")
-        assert res_no_auth.status_code == 403
+        assert res_no_auth.status_code in (401, 403)
 
         res_link_no_auth = client.delete("/api/topology/links?link_id=link_test_123")
-        assert res_link_no_auth.status_code == 403
+        assert res_link_no_auth.status_code in (401, 403)
 
-        # 2. With invalid token: must be rejected with 403 Forbidden
+        # 2. With invalid token: must be rejected with 401 or 403
         res_bad_auth = client.delete(
             "/api/topology/edges/edge_test_123",
             headers={"X-AIRA-Admin-Token": "wrong_token"},
         )
-        assert res_bad_auth.status_code == 403
+        assert res_bad_auth.status_code in (401, 403)
 
         # 3. With valid admin token but non-existent ID: must return 404 Not Found
+        from tests.auth_helper import get_test_auth_headers
+        auth_hdr = get_test_auth_headers()
         res_404 = client.delete(
             "/api/topology/edges/edge_missing_999",
-            headers={"X-AIRA-Admin-Token": "test_adm_secret_token_999"},
+            headers={"X-AIRA-Admin-Token": "test_adm_secret_token_999", **auth_hdr},
         )
         assert res_404.status_code == 404
         assert "tidak ditemukan" in res_404.json()["detail"]
 
         res_link_404 = client.delete(
             "/api/topology/links?link_id=missing_link_999",
-            headers={"X-AIRA-Admin-Token": "test_adm_secret_token_999"},
+            headers={"X-AIRA-Admin-Token": "test_adm_secret_token_999", **auth_hdr},
         )
         assert res_link_404.status_code == 404
     finally:

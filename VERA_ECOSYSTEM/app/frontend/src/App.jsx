@@ -34,42 +34,60 @@ import LoginPage from "./pages/LoginPage.jsx";
 import AdminLoginPage from "./pages/AdminLoginPage.jsx";
 
 
-// Helper lazy loader dengan toleransi retry saat kendala jaringan / chunk load error
-function lazyWithRetry(componentImport) {
+// Helper lazy loader dengan toleransi retry dan auto-recovery saat chunk load error / release baru
+function lazyWithRetry(componentImport, chunkKey = "chunk") {
   return lazy(async () => {
+    const storageKey = `vera_chunk_reloaded_${chunkKey}`;
     try {
-      return await componentImport();
-    } catch (error) {
-      console.warn("[AIRA CodeSplitting] Chunk load failed, retrying once...", error);
+      const component = await componentImport();
       try {
-        return await componentImport();
-      } catch (retryError) {
-        console.error("[AIRA CodeSplitting] Chunk load retry failed:", retryError);
-        throw retryError;
+        sessionStorage.removeItem(storageKey);
+      } catch {}
+      return component;
+    } catch (error) {
+      console.warn(`[VERA CodeSplitting] Chunk load failed for ${chunkKey}, retrying...`, error);
+      let hasReloaded = false;
+      try {
+        hasReloaded = Boolean(sessionStorage.getItem(storageKey));
+      } catch {}
+
+      if (!hasReloaded) {
+        // Chunk hash mismatch setelah build/deployment baru: reload sekali untuk sinkronisasi manifest chunk terbaru
+        try {
+          sessionStorage.setItem(storageKey, "1");
+        } catch {}
+        window.location.reload();
+        return new Promise(() => {}); // prevent premature throw before reload executes
       }
+
+      try {
+        sessionStorage.removeItem(storageKey);
+      } catch {}
+      console.error(`[VERA CodeSplitting] Chunk load permanent failure for ${chunkKey}:`, error);
+      throw error;
     }
   });
 }
 
 // Secondary pages loaded on demand via dynamic imports
-const WorkspacePage = lazyWithRetry(() => import("./pages/WorkspacePage.jsx"));
-const InfrastructurePage = lazyWithRetry(() => import("./pages/InfrastructurePage.jsx"));
-const AutomationsPage = lazyWithRetry(() => import("./pages/AutomationsPage.jsx"));
-const AdminPlatformPage = lazyWithRetry(() => import("./pages/AdminPlatformPage.jsx"));
-const DevicesPage = lazyWithRetry(() => import("./pages/DevicesPage.jsx"));
-const TopologyPage = lazyWithRetry(() => import("./pages/TopologyPage.jsx"));
-const NmsPage = lazyWithRetry(() => import("./pages/NmsPage.jsx"));
-const NetworkIntelligencePage = lazyWithRetry(() => import("./pages/NetworkIntelligencePage.jsx"));
-const OperationsPage = lazyWithRetry(() => import("./pages/OperationsPage.jsx"));
-const GatewaysPage = lazyWithRetry(() => import("./pages/GatewaysPage.jsx"));
-const DecisionsPage = lazyWithRetry(() => import("./pages/DecisionsPage.jsx"));
-const CustomerPortalPage = lazyWithRetry(() => import("./pages/CustomerPortalPage.jsx"));
-const AkaneWorkspace = lazyWithRetry(() => import("./pages/AkaneWorkspace.jsx"));
-const ModelsPage = lazyWithRetry(() => import("./pages/ModelsPage.jsx"));
-const PersonaPage = lazyWithRetry(() => import("./pages/PersonaPage.jsx"));
-const MemoryPage = lazyWithRetry(() => import("./pages/MemoryPage.jsx"));
-const SettingsPage = lazyWithRetry(() => import("./pages/SettingsPage.jsx"));
-const LogsPage = lazyWithRetry(() => import("./pages/LogsPage.jsx"));
+const WorkspacePage = lazyWithRetry(() => import("./pages/WorkspacePage.jsx"), "workspace");
+const InfrastructurePage = lazyWithRetry(() => import("./pages/InfrastructurePage.jsx"), "infrastructure");
+const AutomationsPage = lazyWithRetry(() => import("./pages/AutomationsPage.jsx"), "automations");
+const AdminPlatformPage = lazyWithRetry(() => import("./pages/AdminPlatformPage.jsx"), "admin");
+const DevicesPage = lazyWithRetry(() => import("./pages/DevicesPage.jsx"), "devices");
+const TopologyPage = lazyWithRetry(() => import("./pages/TopologyPage.jsx"), "topology");
+const NmsPage = lazyWithRetry(() => import("./pages/NmsPage.jsx"), "nms");
+const NetworkIntelligencePage = lazyWithRetry(() => import("./pages/NetworkIntelligencePage.jsx"), "intelligence");
+const OperationsPage = lazyWithRetry(() => import("./pages/OperationsPage.jsx"), "operations");
+const GatewaysPage = lazyWithRetry(() => import("./pages/GatewaysPage.jsx"), "gateways");
+const DecisionsPage = lazyWithRetry(() => import("./pages/DecisionsPage.jsx"), "decisions");
+const CustomerPortalPage = lazyWithRetry(() => import("./pages/CustomerPortalPage.jsx"), "portal");
+const AkaneWorkspace = lazyWithRetry(() => import("./pages/AkaneWorkspace.jsx"), "akane");
+const ModelsPage = lazyWithRetry(() => import("./pages/ModelsPage.jsx"), "models");
+const PersonaPage = lazyWithRetry(() => import("./pages/PersonaPage.jsx"), "persona");
+const MemoryPage = lazyWithRetry(() => import("./pages/MemoryPage.jsx"), "memory");
+const SettingsPage = lazyWithRetry(() => import("./pages/SettingsPage.jsx"), "settings");
+const LogsPage = lazyWithRetry(() => import("./pages/LogsPage.jsx"), "logs");
 
 const PAGES = {
   workspace: ChatPage,
@@ -122,7 +140,7 @@ function PageLoadingFallback({ label = "Memuat halaman..." }) {
   );
 }
 
-// Boundary error untuk menangani kegagalan jaringan saat unduh chunk
+// Boundary error untuk menangani kegagalan jaringan saat unduh chunk atau runtime render error
 class PageErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -134,26 +152,38 @@ class PageErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error("[AIRA PageErrorBoundary] Uncaught chunk load error:", error, errorInfo);
+    console.error("[VERA PageErrorBoundary] Uncaught component error:", error, errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
+      const errMsg = this.state.error?.message || String(this.state.error || "");
       return (
-        <div className="flex-1 flex flex-col items-center justify-center p-8 text-neutral-400 text-center">
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-neutral-400 text-center animate-in fade-in duration-200">
           <div className="w-12 h-12 mb-3 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 font-mono text-lg font-bold">
             !
           </div>
-          <h3 className="text-sm font-medium text-white mb-1">Gagal memuat modul halaman</h3>
-          <p className="text-xs text-neutral-400 max-w-sm mb-4">
-            Terjadi kendala jaringan saat mengunduh komponen halaman. Silakan muat ulang.
+          <h3 className="text-sm font-semibold text-white mb-1">Gagal memuat modul halaman</h3>
+          <p className="text-xs text-neutral-400 max-w-sm mb-3">
+            Terjadi kendala saat mengunduh komponen halaman atau sinkronisasi pembaruan. Silakan muat ulang.
           </p>
+          {errMsg && (
+            <div className="text-[11px] font-mono text-neutral-500 max-w-md mb-4 bg-black/40 px-3 py-1.5 rounded-lg border border-white/5 break-all">
+              {errMsg}
+            </div>
+          )}
           <button
             onClick={() => {
               this.setState({ hasError: false, error: null });
+              try {
+                // Clear any chunk reload blocker before user-initiated full reload
+                Object.keys(sessionStorage).forEach((k) => {
+                  if (k.startsWith("vera_chunk_reloaded_")) sessionStorage.removeItem(k);
+                });
+              } catch {}
               window.location.reload();
             }}
-            className="px-3.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-xs font-medium text-white border border-neutral-700 transition-colors shadow-sm"
+            className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-xs font-semibold text-white border border-neutral-700 transition-colors shadow-sm"
           >
             Muat Ulang Halaman
           </button>

@@ -1,8 +1,8 @@
-# Identitas publik AIRA. HANYA presentasi: nama, bahasa, template kalimat identitas.
+# Identitas publik VERA. HANYA presentasi: nama, bahasa, template kalimat identitas.
 # Placeholder {nama} diisi saat runtime. Jangan taruh key model/tool/izin di sini
 # (file yang memuatnya ditolak loader dan diganti default).
-assistant_name: AIRA
-expansion: Adaptive Intelligent Reasoning Assistant
+assistant_name: VERA
+expansion: Enterprise Network Intelligence Platform
 language: id
 timezone: Asia/Jakarta
 templates:

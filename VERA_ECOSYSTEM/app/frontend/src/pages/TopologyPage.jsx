@@ -39,6 +39,7 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  Download,
   Eye,
   GitBranch,
   History,
@@ -58,12 +59,14 @@ import {
 } from "lucide-react";
 import TopologyHistoryModal from "../components/topology/TopologyHistoryModal.jsx";
 import { getSnapshot } from "../components/topology/topologyHistoryApi.js";
+import { downloadSvgTopology } from "../features/topology/assets/svgTopologyExporter.js";
 import RouteHistoryModal from "../components/topology/RouteHistoryModal.jsx";
 import MultiDeviceRouteInspector from "../components/topology/MultiDeviceRouteInspector.jsx";
 import {
   fetchTopologyRouteOverlay,
   getOverlaySegmentVisualStyle,
 } from "../components/topology/routeOverlayApi.js";
+import ReactFlowTopologyCanvas from "../components/topology/ReactFlowTopologyCanvas.jsx";
 
 export default function TopologyPage({ onOpenMenu }) {
   const { alert: modalAlert, confirm: modalConfirm, prompt: modalPrompt } = useModalDialog();
@@ -102,6 +105,24 @@ export default function TopologyPage({ onOpenMenu }) {
   const [operStatusFilter, setOperStatusFilter] = useState("all");
   const [confidenceFilter, setConfidenceFilter] = useState("all");
   const [selectedEdge, setSelectedEdge] = useState(null);
+  const [canvasEngine, setCanvasEngine] = useState("flow"); // "flow" (React Flow default) | "svg"
+  const [contextMenu, setContextMenu] = useState(null);
+
+  const handleNodePositionChange = useCallback(async (nodeId, posX, posY) => {
+    setData((prev) => ({
+      ...prev,
+      nodes: (prev.nodes || []).map((n) => (n.id === nodeId ? { ...n, pos_x: posX, pos_y: posY } : n)),
+    }));
+    try {
+      await fetch(`${API_BASE}/nodes/${encodeURIComponent(nodeId)}/position`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pos_x: posX, pos_y: posY }),
+      });
+    } catch (err) {
+      console.warn("Gagal simpan posisi node:", err);
+    }
+  }, []);
 
   // Modals
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
@@ -948,6 +969,29 @@ export default function TopologyPage({ onOpenMenu }) {
               <span className="hidden xl:inline">Wiring</span>
             </button>
 
+            <button
+              onClick={() => setCanvasEngine((prev) => (prev === "flow" ? "svg" : "flow"))}
+              className={`text-xs font-medium px-2.5 py-1.5 rounded-pill border transition flex items-center gap-1.5 ${
+                canvasEngine === "flow"
+                  ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                  : "bg-white/5 text-text-primary border-white/10 hover:bg-white/10"
+              }`}
+              title="Beralih antara React Flow Interactive Canvas dan Classic SVG"
+            >
+              <Network className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden xl:inline">{canvasEngine === "flow" ? "React Flow" : "SVG Mode"}</span>
+            </button>
+
+            <button
+              onClick={() => downloadSvgTopology(data.nodes, data.links, "vera-topology.svg")}
+              disabled={!data.nodes || data.nodes.length === 0}
+              className="text-xs font-medium px-2.5 py-1.5 rounded-pill bg-white/5 text-text-primary border border-white/10 hover:bg-cyan-500/20 hover:text-cyan-300 hover:border-cyan-500/40 transition flex items-center gap-1.5 disabled:opacity-40"
+              title="Unduh Peta Topologi sebagai File SVG Standalone Beresolusi Tinggi"
+            >
+              <Download className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden xl:inline">Export SVG</span>
+            </button>
+
             {data.nodes.length > 0 ? (
               <button
                 onClick={handleClearTopology}
@@ -1317,21 +1361,108 @@ export default function TopologyPage({ onOpenMenu }) {
       )}
 
       {/* MAIN INTERACTIVE CANVAS */}
-      <div
-        ref={canvasRef}
-        className="relative flex-1 bg-black overflow-hidden cursor-grab active:cursor-grabbing"
-        onMouseMove={handleCanvasMouseMove}
-        onMouseUp={handleCanvasMouseUp}
-        onClick={() => {
-          setSelectedNode(null);
-          setSelectedEdge(null);
-          setSelectedRouteSegment(null);
-        }}
-        style={{
-          backgroundImage: "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.06) 1px, transparent 0)",
-          backgroundSize: "28px 28px",
-        }}
-      >
+      {canvasEngine === "flow" ? (
+        <div className="relative flex-1 bg-black overflow-hidden" onClick={() => setContextMenu(null)}>
+          <ReactFlowTopologyCanvas
+            nodes={data.nodes || []}
+            links={data.links || []}
+            selectedNode={selectedNode}
+            selectedEdge={selectedEdge}
+            onNodeClick={(node) => {
+              setSelectedNode(node);
+              setSelectedEdge(null);
+            }}
+            onNodeDoubleClick={(node) => {
+              setEditNodeModal(node);
+            }}
+            onEdgeClick={(edge) => {
+              setSelectedEdge(edge);
+              setSelectedNode(null);
+            }}
+            onNodeContextMenu={(event, node) => {
+              setContextMenu({
+                x: event.clientX,
+                y: event.clientY,
+                node,
+              });
+            }}
+            onNodePositionChange={handleNodePositionChange}
+            searchQuery={search}
+            layerFilters={layerFilters}
+          />
+
+          {/* Context Menu Popup */}
+          {contextMenu && (
+            <div
+              style={{ top: contextMenu.y, left: contextMenu.x }}
+              className="fixed z-50 min-w-[180px] rounded-xl bg-zinc-950/95 border border-white/10 p-1.5 shadow-2xl backdrop-blur-md text-xs text-white"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-2.5 py-1 text-[10px] font-mono text-white/40 uppercase tracking-wider border-b border-white/5 mb-1">
+                {contextMenu.node.name || contextMenu.node.id}
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedNode(contextMenu.node);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-left transition"
+              >
+                <Eye size={13} className="text-cyan-400" />
+                <span>Lihat Detail</span>
+              </button>
+              <button
+                onClick={() => {
+                  setEditNodeModal(contextMenu.node);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-left transition"
+              >
+                <Sliders size={13} className="text-amber-400" />
+                <span>Edit Perangkat</span>
+              </button>
+              <button
+                onClick={() => {
+                  handleTroubleshoot(contextMenu.node.id);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-left transition"
+              >
+                <Activity size={13} className="text-purple-400" />
+                <span>Audit & Troubleshooting</span>
+              </button>
+              <button
+                onClick={() => {
+                  handleDeleteNode(contextMenu.node.id);
+                  setContextMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-rose-500/20 text-rose-400 text-left transition"
+              >
+                <Trash2 size={13} />
+                <span>Hapus Node</span>
+              </button>
+            </div>
+          )}
+
+          {/* Toggleable Legend */}
+          <TopologyLegendOverlay open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} />
+        </div>
+      ) : (
+        <div
+          ref={canvasRef}
+          className="relative flex-1 bg-black overflow-hidden cursor-grab active:cursor-grabbing"
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasMouseUp}
+          onClick={() => {
+            setSelectedNode(null);
+            setSelectedEdge(null);
+            setSelectedRouteSegment(null);
+          }}
+          style={{
+            backgroundImage: "radial-gradient(circle at 1px 1px, rgba(255,255,255,0.06) 1px, transparent 0)",
+            backgroundSize: "28px 28px",
+          }}
+        >
         {/* SVG MULTI-LAYER LINKS & EDGES */}
         <svg
           className="absolute inset-0 w-full h-full pointer-events-none"
@@ -1764,6 +1895,7 @@ export default function TopologyPage({ onOpenMenu }) {
         {/* TOGGLEABLE ACCESSIBLE LEGEND */}
         <TopologyLegendOverlay open={legendOpen} onToggle={() => setLegendOpen((v) => !v)} />
       </div>
+      )}
 
       {/* EVIDENCE-BASED NODE INSPECTOR */}
       <TopologyNodeInspector

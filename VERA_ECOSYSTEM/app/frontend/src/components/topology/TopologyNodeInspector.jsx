@@ -27,6 +27,8 @@ import {
   STATUS_CONFIG,
   formatRelativeTime,
 } from "./topologyConstants.js";
+import DeviceAssetRenderer from "../../features/topology/assets/DeviceAssetRenderer.jsx";
+import DeviceStatusIndicator from "../../features/topology/assets/DeviceStatusIndicator.jsx";
 
 export default function TopologyNodeInspector({
   node,
@@ -200,19 +202,25 @@ export default function TopologyNodeInspector({
         </div>
       </div>
 
-      {/* Title & Identity */}
-      <div className="mb-3">
-        <div className="flex items-center gap-2">
-          <h3 className="text-base font-bold text-text-primary truncate">{node.name}</h3>
-          {node.metadata?.is_isp_boundary && (
-            <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-400/30 text-[9px] font-bold">
-              ISP BOUNDARY
-            </span>
-          )}
+      {/* Title & Identity with Device Vector Illustration */}
+      <div className="mb-3 p-3 rounded-2xl bg-white/5 border border-white/10 flex items-center gap-3">
+        <div className="p-1 rounded-xl bg-slate-900 border border-slate-800 shrink-0">
+          <DeviceAssetRenderer
+            device={node}
+            size={48}
+            status={node.status || node.oper_status}
+            showGlow={true}
+          />
         </div>
-        <p className="text-[11px] text-text-secondary font-mono truncate">
-          {node.identity || node.name} • <span className="text-text-secondary/60">{node.id}</span>
-        </p>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-bold text-white truncate" title={node.name}>{node.name}</h3>
+            <DeviceStatusIndicator status={node.status || node.oper_status} size="xs" />
+          </div>
+          <p className="text-[10px] text-text-secondary font-mono truncate mt-0.5">
+            {node.ip || node.management_ip || node.host || "No IP"} • <span className="text-sky-400/80">{node.vendor || node.device_type}</span>
+          </p>
+        </div>
       </div>
 
       {/* Multi-Dimensional Status Banner */}

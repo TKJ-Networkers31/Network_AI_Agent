@@ -23,6 +23,7 @@ import {
   settleStreamingMessage,
 } from "../utils/runLifecycle.js";
 import { createStreamBatcher } from "../utils/deltaBatcher.js";
+import { showDesktopNotification } from "../services/notificationService.js";
 
 const ChatRuntimeContext = createContext(null);
 
@@ -226,6 +227,64 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
       const { isStale, isOtherRun } = classifyRunEvent(current, data, staleRunIdsRef.current);
 
       switch (type) {
+        case "active_run_resumed": {
+          batcherRef.current?.flush(sid);
+          const { run_id, phase, accumulated_text, live_tools, job_id, created_at } = data;
+          if (!run_id) break;
+
+          const restoredRun = {
+            runId: run_id,
+            jobId: job_id,
+            status: phase === "streaming" ? "streaming" : "thinking",
+            phase: phase || "thinking",
+            liveTools: Array.isArray(live_tools) ? live_tools : [],
+            startTime: created_at ? created_at * 1000 : Date.now(),
+            resumed: true,
+          };
+          setRun(sid, restoredRun);
+
+          if (accumulated_text) {
+            setMessagesForSession(sid, (prev) => {
+              const list = Array.isArray(prev) ? [...prev] : [];
+              const lastIdx = list.length - 1;
+              if (lastIdx >= 0 && list[lastIdx].role === "assistant" && list[lastIdx].streaming) {
+                list[lastIdx] = {
+                  ...list[lastIdx],
+                  content: accumulated_text,
+                  runId: run_id,
+                };
+                return list;
+              }
+              return [
+                ...list,
+                {
+                  role: "assistant",
+                  content: accumulated_text,
+                  streaming: true,
+                  runId: run_id,
+                  isNew: false,
+                },
+              ];
+            });
+          }
+          break;
+        }
+
+        case "replay_events": {
+          const { events = [] } = data;
+          if (Array.isArray(events)) {
+            for (const ev of events) {
+              if (ev && ev.event_type) {
+                handleEvent({
+                  type: ev.event_type,
+                  data: { ...(ev.event_data || {}), session_id: sid, run_id: ev.run_id },
+                });
+              }
+            }
+          }
+          break;
+        }
+
         // Semua transisi thinking/streaming ada di reducer (utils/runLifecycle.js):
         // ack (giliran suara mengadopsi run_id server), thinking, tool_*, dan
         // response_chunk (chunk pertama mengakhiri fase thinking, berikutnya no-op).
@@ -303,6 +362,15 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
             data.audio_base64,
             data.answer
           );
+
+          // Trigger native desktop notification if window/tab is not visible
+          showDesktopNotification({
+            title: "VERA — Analisis Selesai",
+            body: data.session_title
+              ? `Tanggapan pada "${data.session_title}" telah siap.`
+              : "Operasi dan tanggapan jaringan telah selesai.",
+            tag: `run-done-${sid}-${runId || "latest"}`,
+          });
           break;
         }
 
@@ -403,13 +471,24 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
     api.sessions
       .messages(sid)
       .then((res) => {
-        const turns = (res.turns || []).map((t) => ({
-          role: t.role,
-          content: t.content,
-          steps: t.steps || [],
-          interactionSchema: t.interaction_schema || null,
-          turnId: t.id,
-        }));
+        const turns = (res.turns || []).map((t) => {
+          const interactionStatus = t.interaction_status || (t.interaction_schema ? "ACTIVE" : null);
+          const isResolved = Boolean(
+            interactionStatus &&
+              ["SUBMITTED", "CANCELLED", "EXPIRED", "FAILED"].includes(interactionStatus)
+          );
+          return {
+            role: t.role,
+            content: t.content,
+            steps: t.steps || [],
+            interactionSchema: t.interaction_schema || null,
+            interactionStatus,
+            interactionResolved: isResolved,
+            vaePayload: t.vae_payload || null,
+            blocks: t.blocks || (t.vae_payload && t.vae_payload.blocks) || null,
+            turnId: t.id,
+          };
+        });
 
         const local = messagesRef.current[sid] || [];
 
@@ -691,11 +770,15 @@ export function ChatRuntimeProvider({ children, isOnChatPage }) {
   );
 
   const markInteractionResolved = useCallback(
-    (index) => {
+    (index, status = "SUBMITTED") => {
       const sid = activeIdRef.current;
       if (!sid) return;
       setMessagesForSession(sid, (prev) =>
-        prev.map((m, i) => (i === index ? { ...m, interactionResolved: true } : m))
+        prev.map((m, i) =>
+          i === index
+            ? { ...m, interactionStatus: status, interactionResolved: true }
+            : m
+        )
       );
     },
     [setMessagesForSession]

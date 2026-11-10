@@ -7,8 +7,8 @@
   "id": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#071426",
-  "theme_color": "#071426",
+  "background_color": "#000000",
+  "theme_color": "#000000",
   "icons": [
     { "src": "/assets/brand/vera-app-icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any" },
     { "src": "/assets/brand/vera-app-icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "maskable" },

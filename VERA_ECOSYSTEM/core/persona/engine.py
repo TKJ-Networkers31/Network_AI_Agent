@@ -44,7 +44,7 @@ def _init_db() -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS persona_profile (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
-                assistant_name TEXT NOT NULL DEFAULT 'AIRA',
+                assistant_name TEXT NOT NULL DEFAULT 'VERA',
                 user_name TEXT,
                 language TEXT NOT NULL DEFAULT 'id',
                 timezone TEXT NOT NULL DEFAULT 'Asia/Jakarta',
@@ -151,7 +151,7 @@ def _seed_default_profile_and_behavior() -> None:
                          greeting, active_preset, created_at, updated_at)
                     VALUES (1, ?, NULL, ?, ?, ?, ?, ?, ?)
                 """, (
-                    profile.get("assistant_name", "AIRA"),
+                    profile.get("assistant_name", "VERA"),
                     profile.get("language", "id"),
                     profile.get("timezone", "Asia/Jakarta"),
                     profile.get("greeting", ""),
@@ -328,7 +328,7 @@ class PersonaEngine:
                         greeting = ?, active_preset = ?, updated_at = ?
                     WHERE id = 1
                 """, (
-                    profile.get("assistant_name", "AIRA"),
+                    profile.get("assistant_name", "VERA"),
                     profile.get("language", "id"),
                     profile.get("timezone", "Asia/Jakarta"),
                     profile.get("greeting", ""),

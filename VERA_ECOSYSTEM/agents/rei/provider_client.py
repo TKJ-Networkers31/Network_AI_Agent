@@ -53,6 +53,7 @@ from core.model_policy import estimate_tokens, get_model_policy
 from core.model_router import get_model_router
 from core.model_store import get_model_store
 from core.model_types import DEFAULT_LABEL, EVENT_MODEL_FAILED, SelectedModel
+from core.provider_health import FailureCategory, get_provider_health_manager
 
 logger = logging.getLogger("aira.rei.provider_client")
 
@@ -69,7 +70,8 @@ EMPTY_RESPONSE_MARKER = (
 )
 
 # Hanya error sementara yang di-retry di model yang sama (jumlah = retry_provider).
-TRANSIENT_ERROR_TYPES = {"rate_limit", "connection", "timeout"}
+TRANSIENT_ERROR_TYPES = {"rate_limit", "connection", "timeout", "server_error"}
+NON_RETRYABLE_ERROR_TYPES = {"circuit_open", "auth_error", "bad_request", "not_found", "cancelled"}
 
 DEFAULT_LLM_TIMEOUT = float(os.getenv("VERA_LLM_TIMEOUT") or os.getenv("AIRA_LLM_TIMEOUT", "45"))
 
@@ -80,7 +82,6 @@ PROVIDER_ENV_KEYS: dict[str, str] = {
 }
 
 DEFAULT_ENDPOINTS: dict[str, str] = {
-    "ollama": "http://localhost:11434",
     "openrouter": "https://openrouter.ai/api/v1",
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
     "nvidia": "https://integrate.api.nvidia.com/v1",
@@ -94,27 +95,73 @@ def _endpoint(provider: str) -> str:
 
 
 def _resolve_api_key(provider: str) -> Optional[str]:
+    if provider == "openrouter":
+        return os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENROUTER_API")
+    if provider == "gemini":
+        return os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if provider == "nvidia":
+        return os.getenv("NVIDIA_API_KEY") or os.getenv("NVIDIA_NIM_API_KEY")
     env_key = PROVIDER_ENV_KEYS.get(provider)
     return os.getenv(env_key) if env_key else None
 
 
-def _classify_request_exception(exc: Exception) -> str:
+def _sanitize_tools(tools: Optional[list]) -> Optional[list]:
+    """
+    Sanitize tools payload before sending to model provider:
+    1. Removes duplicate function definitions by name (Gemini and other strict APIs reject duplicates with 400 Bad Request).
+    2. Ensures every entry has a valid dictionary structure.
+    """
+    if not tools:
+        return tools
+    seen = set()
+    sanitized = []
+    for item in tools:
+        if not isinstance(item, dict):
+            sanitized.append(item)
+            continue
+        func = item.get("function")
+        if isinstance(func, dict):
+            name = func.get("name")
+            if name:
+                if name in seen:
+                    logger.debug("Deduplicated tool function '%s' in provider payload", name)
+                    continue
+                seen.add(name)
+        sanitized.append(item)
+    return sanitized
+
+
+def _classify_request_exception(exc: Exception) -> tuple[str, FailureCategory]:
     if isinstance(exc, requests.exceptions.Timeout):
-        return "timeout"
+        return ("timeout", FailureCategory.TIMEOUT)
+    if isinstance(exc, requests.exceptions.SSLError):
+        return ("tls", FailureCategory.TLS)
     if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError)):
-        return "connection"  # ChunkedEncodingError = stream terputus di tengah jalan
+        return ("connection", FailureCategory.CONNECTION)  # ChunkedEncodingError = stream terputus di tengah jalan
     if isinstance(exc, requests.exceptions.HTTPError):
         code = getattr(exc.response, "status_code", None)
-        if code == 429:
-            return "rate_limit"
+        if code in (401, 403):
+            return ("auth_error", FailureCategory.AUTH_ERROR)
+        if code == 400:
+            return ("bad_request", FailureCategory.BAD_REQUEST)
         if code == 404:
-            return "not_found"
-        return "other"
-    return "other"
+            return ("not_found", FailureCategory.NOT_FOUND)
+        if code == 429:
+            return ("rate_limit", FailureCategory.RATE_LIMIT)
+        if code and code >= 500:
+            return ("other", FailureCategory.SERVER_ERROR)
+        return ("other", FailureCategory.OTHER)
+    return ("other", FailureCategory.OTHER)
 
 
-def _request_error(label: str, url: str, exc: Exception) -> dict:
-    error_type = _classify_request_exception(exc)
+def _request_error(
+    provider: str,
+    url: str,
+    exc: Exception,
+    model_id: Optional[str] = None,
+    record_telemetry: bool = True,
+) -> dict:
+    error_type, category = _classify_request_exception(exc)
     detail = str(exc)
     response = getattr(exc, "response", None)
 
@@ -124,8 +171,28 @@ def _request_error(label: str, url: str, exc: Exception) -> dict:
         except Exception:
             pass
 
-    logger.error("chat %s gagal (%s): %s", label, error_type, detail)
+    # Record failure telemetry in centralized ProviderHealthManager
+    if record_telemetry:
+        try:
+            health_mgr = get_provider_health_manager()
+            health_mgr.record_failure(provider, category, detail, model_id=model_id, endpoint=url)
+        except Exception:
+            pass
+
+    logger.error("chat %s (%s) gagal (%s): %s", provider, model_id or "unknown", error_type, detail)
     return {"error": f"Tidak bisa menghubungi {url}: {detail}", "error_type": error_type}
+
+
+def _normalize_timeout(timeout=None) -> tuple[float, float]:
+    health_mgr = get_provider_health_manager()
+    if timeout is None:
+        return health_mgr.get_timeouts()
+    if isinstance(timeout, (int, float)):
+        conn_to = max(health_mgr.connect_timeout, 10.0) if float(timeout) > 10.0 else health_mgr.connect_timeout
+        return (conn_to, float(timeout))
+    if isinstance(timeout, (tuple, list)) and len(timeout) == 2:
+        return (float(timeout[0]), float(timeout[1]))
+    return health_mgr.get_timeouts()
 
 
 def _normalize_message(message: dict) -> dict:
@@ -140,20 +207,8 @@ def _normalize_message(message: dict) -> dict:
     return message
 
 
-def _extract_ollama_usage(data: dict) -> Optional[dict]:
-    prompt_tokens = data.get("prompt_eval_count")
-    completion_tokens = data.get("eval_count")
-    if prompt_tokens is None and completion_tokens is None:
-        return None
-    prompt_tokens, completion_tokens = prompt_tokens or 0, completion_tokens or 0
-    return {
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_tokens": prompt_tokens + completion_tokens,
-    }
-
-
-def _post_json(url: str, payload: dict, timeout: float, headers: Optional[dict] = None) -> dict:
+def _post_json(url: str, payload: dict, timeout, headers: Optional[dict] = None) -> dict:
+    timeout = _normalize_timeout(timeout)
     response = requests.post(url, json=payload, headers=headers, timeout=timeout)
     response.raise_for_status()
     return response.json()
@@ -183,62 +238,61 @@ def _thinking_extras(provider: str, think: Optional[bool]) -> dict:
     return {}
 
 
+def _sanitize_messages_for_provider(provider: str, messages: list) -> list:
+    """
+    Sanitize messages before sending to provider:
+    For Gemini: Google's OpenAI API strictly requires thought_signature on every tool_call in assistant history.
+    """
+    if provider != "gemini" or not messages:
+        return messages
+
+    sanitized = []
+    last_extra = None
+    for msg in messages:
+        if not isinstance(msg, dict):
+            sanitized.append(msg)
+            continue
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            tcs = msg["tool_calls"]
+            msg_copy = dict(msg)
+            sig_extra = None
+            for tc in tcs:
+                if isinstance(tc, dict) and tc.get("extra_content"):
+                    sig_extra = tc["extra_content"]
+                    break
+            if not sig_extra and msg.get("extra_content"):
+                sig_extra = msg["extra_content"]
+            if not sig_extra and last_extra:
+                sig_extra = last_extra
+
+            if sig_extra:
+                last_extra = sig_extra
+                new_tcs = []
+                for tc in tcs:
+                    if isinstance(tc, dict):
+                        tc_copy = dict(tc)
+                        if not tc_copy.get("extra_content"):
+                            tc_copy["extra_content"] = sig_extra
+                        new_tcs.append(tc_copy)
+                    else:
+                        new_tcs.append(tc)
+                msg_copy["tool_calls"] = new_tcs
+            sanitized.append(msg_copy)
+        else:
+            sanitized.append(msg)
+    return sanitized
+
+
 # ============================================================ adapters
 
-def _ollama_payload(model_id, messages, tools, temperature, max_tokens, think, stream: bool) -> dict:
-    payload: dict = {"model": model_id, "messages": messages, "stream": stream}
-
-    if tools:
-        payload["tools"] = tools
-
-    options = {}
-    if temperature is not None:
-        options["temperature"] = temperature
-    if max_tokens is not None:
-        options["num_predict"] = max_tokens
-    if options:
-        payload["options"] = options
-    if think is not None:
-        payload["think"] = think
-
-    return payload
-
-
-def _chat_ollama(model_id, messages, tools, temperature, max_tokens, think, timeout) -> dict:
-    url = f"{_endpoint('ollama')}/api/chat"
-    payload = _ollama_payload(model_id, messages, tools, temperature, max_tokens, think, stream=False)
-
-    try:
-        try:
-            data = _post_json(url, payload, timeout)
-        except requests.exceptions.HTTPError as exc:
-            body = exc.response.text.lower() if exc.response is not None else ""
-            if payload.get("tools") and "does not support tools" in body:
-                logger.warning("Model '%s' tidak mendukung tools - mengulang tanpa tools.", model_id)
-                payload.pop("tools")
-                data = _post_json(url, payload, timeout)
-            else:
-                raise
-
-        return {
-            "message": _normalize_message(data.get("message", {})),
-            "usage": _extract_ollama_usage(data),
-        }
-
-    except requests.exceptions.RequestException as exc:
-        return _request_error("ollama", url, exc)
-    except ValueError as exc:
-        return {"error": f"Ollama membalas body bukan JSON valid: {exc}", "error_type": "other"}
-
-
 def _chat_openai_compatible(
-    provider, model_id, messages, tools, temperature, max_tokens, timeout, think=None,
+    provider, model_id, messages, tools, temperature, max_tokens, timeout, think=None, record_telemetry=True,
 ) -> dict:
     api_key = _resolve_api_key(provider)
 
     if not api_key:
         return {
-            "error": f"API key {provider} belum diset (.env {PROVIDER_ENV_KEYS[provider]}).",
+            "error": f"API key {provider} belum diset (.env {PROVIDER_ENV_KEYS.get(provider, 'API_KEY')}).",
             "error_type": "other",
         }
 
@@ -247,11 +301,13 @@ def _chat_openai_compatible(
 
     if provider == "openrouter":
         headers["HTTP-Referer"] = "http://localhost"
-        headers["X-Title"] = "AIRA Ecosystem"
+        headers["X-Title"] = "VERA Platform"
 
-    payload: dict = {"model": model_id, "messages": messages}
-    if tools:
-        payload["tools"] = tools
+    clean_messages = _sanitize_messages_for_provider(provider, messages)
+    payload: dict = {"model": model_id, "messages": clean_messages}
+    cleaned_tools = _sanitize_tools(tools)
+    if cleaned_tools:
+        payload["tools"] = cleaned_tools
     if temperature is not None:
         payload["temperature"] = temperature
     if max_tokens is not None:
@@ -278,10 +334,13 @@ def _chat_openai_compatible(
 
         choices = data.get("choices") or [{}]
         choice = choices[0] if choices else {}
-        return {"message": _normalize_message(choice.get("message") or {}), "usage": data.get("usage")}
+        msg = choice.get("message") or {}
+        if not msg.get("content") and msg.get("reasoning_content"):
+            msg["content"] = msg.get("reasoning_content")
+        return {"message": _normalize_message(msg), "usage": data.get("usage")}
 
     except requests.exceptions.RequestException as exc:
-        return _request_error(provider, url, exc)
+        return _request_error(provider, url, exc, model_id=model_id, record_telemetry=record_telemetry)
     except ValueError as exc:
         return {"error": f"{url} membalas body bukan JSON valid: {exc}", "error_type": "other"}
 
@@ -309,12 +368,13 @@ def _safe_delta(on_delta, text: str) -> None:
         logger.exception("on_delta gagal (diabaikan).")
 
 
-def _open_stream(url: str, payload: dict, timeout: float, headers: Optional[dict] = None):
+def _open_stream(url: str, payload: dict, timeout, headers: Optional[dict] = None):
     """
     POST dengan stream=True. Status >= 400: body error dibaca penuh (kecil)
     supaya exc.response.text tersedia, lalu HTTPError dilempar. Status OK:
     response dikembalikan TERBUKA - pemanggil wajib menutupnya.
     """
+    timeout = _normalize_timeout(timeout)
     response = requests.post(url, json=payload, headers=headers, timeout=timeout, stream=True)
 
     if response.status_code >= 400:
@@ -349,81 +409,6 @@ def _stream_error_type(err) -> str:
     return "rate_limit" if str(code) in ("429", "rate_limit_exceeded") else "other"
 
 
-def _chat_ollama_stream(
-    model_id, messages, tools, temperature, max_tokens, think, timeout, on_delta, cancel_event,
-) -> dict:
-    """Ollama /api/chat stream=true: NDJSON, satu objek JSON per baris."""
-    url = f"{_endpoint('ollama')}/api/chat"
-    payload = _ollama_payload(model_id, messages, tools, temperature, max_tokens, think, stream=True)
-
-    try:
-        try:
-            response = _open_stream(url, payload, timeout)
-        except requests.exceptions.HTTPError as exc:
-            body = _http_error_body(exc)
-            if payload.get("tools") and "does not support tools" in body:
-                logger.warning("Model '%s' tidak mendukung tools - mengulang tanpa tools.", model_id)
-                payload.pop("tools")
-                response = _open_stream(url, payload, timeout)
-            elif _stream_unsupported(exc, body):
-                return _stream_unsupported_result("Ollama", exc)
-            else:
-                raise
-
-        parts: list[str] = []
-        tool_calls: list = []
-        usage = None
-        done = False
-
-        with closing(response):
-            for raw in response.iter_lines(chunk_size=None):
-                if _is_cancelled(cancel_event):
-                    return _cancelled_result()
-
-                if not raw:
-                    continue
-
-                try:
-                    obj = json.loads(raw)
-                except ValueError:
-                    return {"error": "Ollama mengirim baris stream yang bukan JSON valid.", "error_type": "other"}
-
-                if not isinstance(obj, dict):
-                    continue
-
-                if obj.get("error"):
-                    return {"error": f"Ollama: {obj['error']}", "error_type": "other"}
-
-                message = obj.get("message") or {}
-
-                # 'thinking' (model reasoning) sengaja TIDAK diteruskan: sama
-                # seperti jalur non-streaming, hanya 'content' yang jadi jawaban.
-                text = message.get("content")
-                if text:
-                    parts.append(text)
-                    _safe_delta(on_delta, text)
-
-                if message.get("tool_calls"):
-                    tool_calls.extend(message["tool_calls"])
-
-                if obj.get("done"):
-                    usage = _extract_ollama_usage(obj)
-                    done = True
-                    break
-
-        if not done:
-            return {
-                "error": "Stream Ollama berakhir sebelum selesai (done=true tidak diterima).",
-                "error_type": "connection",
-            }
-
-        message = _normalize_message({"role": "assistant", "content": "".join(parts), "tool_calls": tool_calls})
-        return {"message": message, "usage": usage, "streamed": True}
-
-    except requests.exceptions.RequestException as exc:
-        return _request_error("ollama", url, exc)
-
-
 def _consume_sse(response, on_delta, cancel_event) -> dict:
     """
     Baca SSE OpenAI-compatible. Teks langsung diteruskan; tool_calls datang
@@ -432,12 +417,14 @@ def _consume_sse(response, on_delta, cancel_event) -> dict:
     dianggap error "connection" (bukan jawaban parsial yang dianggap utuh).
     """
     parts: list[str] = []
+    reasoning_parts: list[str] = []
     slots: dict = {}
     order: list = []
     last_key = None
     usage = None
     finished = False
 
+    delta_global_extra = None
     for raw in response.iter_lines(chunk_size=None):
         if _is_cancelled(cancel_event):
             return _cancelled_result()
@@ -475,10 +462,17 @@ def _consume_sse(response, on_delta, cancel_event) -> dict:
         for choice in obj.get("choices") or []:
             delta = choice.get("delta") or {}
 
+            if delta.get("extra_content"):
+                delta_global_extra = delta["extra_content"]
+
             text = delta.get("content")
             if isinstance(text, str) and text:
                 parts.append(text)
                 _safe_delta(on_delta, text)
+
+            reasoning_text = delta.get("reasoning_content")
+            if isinstance(reasoning_text, str) and reasoning_text:
+                reasoning_parts.append(reasoning_text)
 
             for fragment in delta.get("tool_calls") or []:
                 key = fragment.get("index")
@@ -488,11 +482,13 @@ def _consume_sse(response, on_delta, cancel_event) -> dict:
 
                 slot = slots.get(key)
                 if slot is None:
-                    slot = slots[key] = {"id": None, "name": "", "arguments": ""}
+                    slot = slots[key] = {"id": None, "name": "", "arguments": "", "extra_content": None}
                     order.append(key)
 
                 if fragment.get("id"):
                     slot["id"] = fragment["id"]
+                if fragment.get("extra_content"):
+                    slot["extra_content"] = fragment["extra_content"]
 
                 function = fragment.get("function") or {}
                 name = function.get("name")
@@ -513,17 +509,33 @@ def _consume_sse(response, on_delta, cancel_event) -> dict:
             "error_type": "connection",
         }
 
-    tool_calls = [
-        {
+    tool_calls = []
+    for index, key in enumerate(order):
+        if not slots[key]["name"]:
+            continue
+        entry = {
             "id": slots[key]["id"] or f"call_{index}",
             "type": "function",
             "function": {"name": slots[key]["name"], "arguments": slots[key]["arguments"]},
         }
-        for index, key in enumerate(order)
-        if slots[key]["name"]
-    ]
+        extra = slots[key].get("extra_content") or delta_global_extra
+        if extra:
+            entry["extra_content"] = extra
+        tool_calls.append(entry)
+
+    # Gemini requires thought_signature on every tool_call in multi-tool responses
+    first_extra = next((tc["extra_content"] for tc in tool_calls if tc.get("extra_content")), None) or delta_global_extra
+    if first_extra:
+        for tc in tool_calls:
+            if not tc.get("extra_content"):
+                tc["extra_content"] = first_extra
+
+    if not parts and reasoning_parts:
+        parts = reasoning_parts
 
     message = _normalize_message({"role": "assistant", "content": "".join(parts), "tool_calls": tool_calls})
+    if first_extra and "extra_content" not in message:
+        message["extra_content"] = first_extra
     return {"message": message, "usage": usage, "streamed": True}
 
 
@@ -534,7 +546,7 @@ def _chat_openai_stream(
 
     if not api_key:
         return {
-            "error": f"API key {provider} belum diset (.env {PROVIDER_ENV_KEYS[provider]}).",
+            "error": f"API key {provider} belum diset (.env {PROVIDER_ENV_KEYS.get(provider, 'API_KEY')}).",
             "error_type": "other",
         }
 
@@ -543,14 +555,16 @@ def _chat_openai_stream(
 
     if provider == "openrouter":
         headers["HTTP-Referer"] = "http://localhost"
-        headers["X-Title"] = "AIRA Ecosystem"
+        headers["X-Title"] = "VERA Platform"
 
+    clean_messages = _sanitize_messages_for_provider(provider, messages)
     payload: dict = {
-        "model": model_id, "messages": messages, "stream": True,
+        "model": model_id, "messages": clean_messages, "stream": True,
         "stream_options": {"include_usage": True},
     }
-    if tools:
-        payload["tools"] = tools
+    cleaned_tools = _sanitize_tools(tools)
+    if cleaned_tools:
+        payload["tools"] = cleaned_tools
     if temperature is not None:
         payload["temperature"] = temperature
     if max_tokens is not None:
@@ -607,7 +621,7 @@ def _chat_openai_stream(
             return _consume_sse(response, on_delta, cancel_event)
 
     except requests.exceptions.RequestException as exc:
-        return _request_error(provider, url, exc)
+        return _request_error(provider, url, exc, model_id=model_id)
     except ValueError as exc:
         return {"error": f"{url} membalas body bukan JSON valid: {exc}", "error_type": "other"}
 
@@ -626,23 +640,46 @@ class ProviderClient:
         max_tokens: Optional[int] = None,
         think: Optional[bool] = None,
         timeout: Optional[float] = None,
+        record_telemetry: bool = True,
     ) -> dict:
         """
         Return {"message":..., "usage":...} atau {"error":..., "error_type":
-        "timeout"|"connection"|"rate_limit"|"other"}. Tidak pernah raise.
+        "timeout"|"connection"|"rate_limit"|"circuit_open"|"other"}. Tidak pernah raise.
         """
         provider = (provider or "").strip().lower()
+        health_mgr = get_provider_health_manager()
+
+        if record_telemetry and not health_mgr.acquire_probe_slot(provider):
+            logger.warning("CIRCUIT BREAKER OPEN | Fast failing chat to provider '%s'", provider)
+            return {
+                "error": f"Circuit breaker OPEN untuk provider '{provider}'. Penyedia layanan sedang mengalami gangguan atau timeout berulang.",
+                "error_type": "circuit_open",
+            }
+
         think = _resolve_think(think)
+        t0 = time.time()
+        probe_settled = False
 
-        if provider == "ollama":
-            return _chat_ollama(model, messages, tools, temperature, max_tokens, think, timeout or 300)
+        try:
+            if provider in PROVIDER_ENV_KEYS:
+                result = _chat_openai_compatible(
+                    provider, model, messages, tools, temperature, max_tokens,
+                    timeout or DEFAULT_LLM_TIMEOUT, think, record_telemetry=record_telemetry,
+                )
+            else:
+                result = {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
 
-        if provider in PROVIDER_ENV_KEYS:
-            return _chat_openai_compatible(
-                provider, model, messages, tools, temperature, max_tokens, timeout or DEFAULT_LLM_TIMEOUT, think,
-            )
+            if "error" not in result and not result.get("cancelled"):
+                if record_telemetry:
+                    health_mgr.record_success(provider, time.time() - t0, model_id=model)
+                probe_settled = True
+            elif "error" in result:
+                probe_settled = True
 
-        return {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
+            return result
+        finally:
+            if not probe_settled and record_telemetry:
+                health_mgr.release_probe_slot(provider)
 
     @staticmethod
     def chat_stream(
@@ -663,45 +700,50 @@ class ProviderClient:
         Tidak pernah raise.
         """
         provider = (provider or "").strip().lower()
+        health_mgr = get_provider_health_manager()
+
+        if not health_mgr.acquire_probe_slot(provider):
+            logger.warning("CIRCUIT BREAKER OPEN | Fast failing chat_stream to provider '%s'", provider)
+            return {
+                "error": f"Circuit breaker OPEN untuk provider '{provider}'. Penyedia layanan sedang mengalami gangguan atau timeout berulang.",
+                "error_type": "circuit_open",
+            }
+
         think = _resolve_think(think)
+        t0 = time.time()
+        probe_settled = False
 
         try:
-            if provider == "ollama":
-                return _chat_ollama_stream(
-                    model, messages, tools, temperature, max_tokens, think,
-                    timeout or 300, on_delta, cancel_event,
-                )
-
             if provider in PROVIDER_ENV_KEYS:
-                return _chat_openai_stream(
+                result = _chat_openai_stream(
                     provider, model, messages, tools, temperature, max_tokens,
                     timeout or DEFAULT_LLM_TIMEOUT, on_delta, cancel_event, think,
                 )
+            else:
+                result = {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
 
-            return {"error": f"Provider '{provider}' tidak dikenal.", "error_type": "other"}
+            if "error" not in result and not result.get("cancelled"):
+                health_mgr.record_success(provider, time.time() - t0, model_id=model)
+                probe_settled = True
+            elif "error" in result:
+                probe_settled = True
+
+            return result
 
         except Exception as exc:
             logger.exception("chat_stream %s gagal tak terduga", provider)
+            health_mgr.record_failure(provider, FailureCategory.OTHER, str(exc), model_id=model)
+            probe_settled = True
             return {"error": f"Streaming gagal: {exc}", "error_type": "other"}
+        finally:
+            if not probe_settled:
+                health_mgr.release_probe_slot(provider)
         
     @staticmethod
     def health_check(provider: str, model_id: Optional[str] = None) -> dict:
         provider = (provider or "").strip().lower()
 
         try:
-            if provider == "ollama":
-                response = requests.get(f"{_endpoint('ollama')}/api/tags", timeout=5)
-                if response.status_code != 200:
-                    return {"online": False, "message": f"HTTP {response.status_code}"}
-
-                if model_id:
-                    names = {m.get("name") for m in response.json().get("models", [])}
-                    wanted = model_id if ":" in model_id else f"{model_id}:latest"
-                    if wanted not in names:
-                        return {"online": False, "message": f"Ollama aktif, tapi model '{model_id}' belum di-pull."}
-
-                return {"online": True, "message": "OK"}
-
             if provider in PROVIDER_ENV_KEYS:
                 api_key = _resolve_api_key(provider)
                 if not api_key:
@@ -774,13 +816,17 @@ def _attempt(model: SelectedModel, messages: list, tools: list, retries: int, st
         return _stream_once(model, messages, tools, stream, cancel_event)
 
     result = call()
-    attempt = 0
+    if result.get("error_type") in NON_RETRYABLE_ERROR_TYPES:
+        return result
 
+    attempt = 0
     while "error" in result and result.get("error_type") in TRANSIENT_ERROR_TYPES and attempt < retries:
         attempt += 1
         logger.info("Retry %d/%d ke '%s' (%s).", attempt, retries, model.display_name, result["error_type"])
         time.sleep(min(2 * attempt, 5))
         result = call()
+        if result.get("error_type") in NON_RETRYABLE_ERROR_TYPES:
+            return result
 
     return result
 
@@ -829,11 +875,32 @@ def call_model(
 
     _publish_model_failed(selected, result)
 
-    fallback = policy.on_provider_failure(selected, result.get("error_type", "other"))
-    if fallback is None:
-        return {"error": result["error"]}
+    error_type = result.get("error_type", "other")
+    health_mgr = get_provider_health_manager()
+    is_provider_degraded = (error_type == "circuit_open") or (not health_mgr.is_provider_available(selected.provider))
 
-    fb_result = _attempt(fallback, messages, tools, retries=0, stream=stream, cancel_event=cancel_event)
+    req_caps = ["supports_tool_calling"] if tools else None
+    fallback = policy.on_provider_failure(selected, error_type, required_capabilities=req_caps)
+    if fallback is None:
+        if is_provider_degraded:
+            return {
+                "error": f"Layanan AI tidak tersedia: Provider '{selected.provider}' sedang mengalami gangguan (circuit breaker OPEN) dan tidak ada provider alternatif independen yang aktif/terkonfigurasi.",
+                "error_type": "circuit_open",
+            }
+        return {"error": result["error"], "error_type": error_type}
+
+    # If the provider is degraded and fallback shares that same provider, skip attempting it
+    if is_provider_degraded and fallback.provider == selected.provider:
+        logger.warning(
+            "PROVIDER CIRCUIT OPEN | Fast-failing same-provider fallback '%s' (%s).",
+            fallback.display_name, fallback.provider,
+        )
+        fb_result = {
+            "error": f"Layanan AI tidak tersedia: Provider '{selected.provider}' sedang mengalami gangguan (circuit breaker OPEN) dan tidak ada provider alternatif independen yang aktif/terkonfigurasi.",
+            "error_type": "circuit_open",
+        }
+    else:
+        fb_result = _attempt(fallback, messages, tools, retries=0, stream=stream, cancel_event=cancel_event)
 
     if fb_result.get("cancelled"):
         return {"error": fb_result["error"], "error_type": "cancelled", "cancelled": True}
@@ -844,17 +911,34 @@ def call_model(
 
     _publish_model_failed(fallback, fb_result)
 
-    # Multi-provider fallback chain (NEW-01): If fallback model returns 404 / missing,
-    # recover by attempting subsequent candidates in the enabled models chain.
-    if fb_result.get("error_type") in ("not_found", "model_missing") and hasattr(policy, "fallback_candidates"):
+    # Multi-provider fallback chain: If fallback model fails with not_found, model_missing,
+    # or circuit_open, recover by attempting subsequent candidates in the enabled models chain.
+    if fb_result.get("error_type") in ("not_found", "model_missing", "circuit_open") and hasattr(policy, "fallback_candidates"):
         attempted = {selected.id, fallback.id}
         for cand_row in policy.fallback_candidates(exclude_ids=attempted):
             cand_model = SelectedModel.from_row(cand_row, fallback_from=selected.id) if isinstance(cand_row, dict) else cand_row
-            logger.warning("FALLBACK CHAIN 404 RECOVERY | %s -> %s", fallback.display_name, cand_model.display_name)
+            
+            # Fast fail check: If provider circuit is OPEN or is degraded provider, do not attempt candidates
+            if is_provider_degraded and cand_model.provider == selected.provider:
+                continue
+            if not health_mgr.is_provider_available(cand_model.provider):
+                logger.info(
+                    "CIRCUIT OPEN SKIP | Skipping candidate '%s' on degraded provider '%s'.",
+                    cand_model.display_name, cand_model.provider,
+                )
+                continue
+            if tools and not getattr(cand_model, "supports_tool_calling", True):
+                logger.info(
+                    "TOOL CAPABILITY SKIP | Skipping candidate '%s' lacking tool calling.",
+                    cand_model.display_name,
+                )
+                continue
+
+            logger.warning("FALLBACK CHAIN RECOVERY | %s -> %s", fallback.display_name, cand_model.display_name)
             try:
                 event_bus.publish(
                     "model.fallback", agent="POLICY",
-                    data={"from": selected.id, "to": cand_model.id, "reason": "fallback_404_recovery"},
+                    data={"from": selected.id, "to": cand_model.id, "reason": "fallback_chain_recovery"},
                 )
             except Exception:
                 pass

@@ -24,12 +24,24 @@ export function useSelectionContext(containerRef, { messageId, conversationId, s
     if (!container) return undefined;
 
     function isInsideToolbar(target) {
-      return Boolean(target?.closest?.("[data-selection-toolbar]"));
+      if (!target) return false;
+      return Boolean(
+        target.closest?.("[data-selection-toolbar]") ||
+        target.closest?.("[role='region'][aria-label*='Tanya VERA']") ||
+        target.closest?.(".selection-toolbar-root")
+      );
     }
 
     // 1. Sumber utama: browser 'selectionchange' — juga menangani
     //    "selection berubah menjadi collapsed" dan "selection kosong".
     function handleSelectionChange() {
+      // If the user has active focus inside the toolbar (clicking buttons, typing in prompt),
+      // DO NOT collapse the selection or unmount the toolbar!
+      const activeEl = document.activeElement;
+      if (isInsideToolbar(activeEl)) {
+        return;
+      }
+
       const sel = window.getSelection?.();
 
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) {

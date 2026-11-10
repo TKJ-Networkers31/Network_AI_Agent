@@ -31,12 +31,15 @@ from typing import Any, Callable, Optional
 from core.artifacts.generators import (
     GenerationError, generate_csv, generate_docx, generate_markdown,
     generate_pdf, generate_pptx, generate_txt, generate_xlsx,
+    generate_interactive_html,
 )
 from core.artifacts.models import (
     Artifact, ArtifactResult, ArtifactStatus, ArtifactType,
     EXTENSIONS, MIME_TYPES,
 )
-from core.artifacts.specs import CsvSpec, DocumentSpec, PresentationSpec, SpreadsheetSpec
+from core.artifacts.specs import (
+    CsvSpec, DocumentSpec, PresentationSpec, SpreadsheetSpec, VisualizationSpec,
+)
 from core.artifacts.store import ArtifactStore, get_artifact_store
 from core.artifacts.validator import validate_for_type
 
@@ -52,6 +55,7 @@ _GENERATORS: dict[str, Callable[[Any, Path], dict]] = {
     ArtifactType.MARKDOWN.value: generate_markdown,
     ArtifactType.TXT.value: generate_txt,
     ArtifactType.CSV.value: generate_csv,
+    ArtifactType.HTML.value: generate_interactive_html,
 }
 
 
@@ -128,6 +132,13 @@ class ArtifactEngine:
 
     def create_presentation(
         self, spec: PresentationSpec, artifact_type: Any = ArtifactType.PPTX,
+        *, session_id: Optional[str] = None, name: Optional[str] = None,
+        source: str = "generated", metadata: Optional[dict] = None,
+    ) -> ArtifactResult:
+        return self._create(spec, artifact_type, session_id, name, source, metadata)
+
+    def create_visualization(
+        self, spec: VisualizationSpec, artifact_type: Any = ArtifactType.HTML,
         *, session_id: Optional[str] = None, name: Optional[str] = None,
         source: str = "generated", metadata: Optional[dict] = None,
     ) -> ArtifactResult:

@@ -59,12 +59,19 @@ def recall(query: str) -> dict:
     return {"success": True, "tool": "recall", "query": query, "count": len(results), "facts": results}
 
 
+def recall_heritage(query: str) -> dict:
+    """Query historical engineering provenance and architectural heritage."""
+    from core.knowledge.heritage import get_heritage_service
+    return get_heritage_service().answer_heritage_query(query)
+
+
 REI_TOOLS = {
     "web_search": rt.web_search,
     "web_fetch": rt.web_fetch,
     "web_image_search": rt.web_image_search,
     "remember": remember_fact,
     "recall": recall,
+    "recall_heritage": recall_heritage,
     "forget": forget_fact,
     "list_workspace": fs.list_workspace,
     "read_file": fs.read_file,
@@ -86,6 +93,7 @@ REI_TOOL_CATEGORY = {
     "web_image_search": "web",
     "remember": "memory",
     "recall": "memory",
+    "recall_heritage": "heritage",
     "forget": "memory",
     "list_workspace": "filesystem",
     "read_file": "filesystem",
@@ -191,6 +199,29 @@ REI_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "recall_heritage",
+            "description": (
+                "Mencari catatan sejarah rekayasa, asal-usul platform AIRA OS, alasan "
+                "transformasi menjadi VERA, keputusan arsitektur (ADR), tahapan remediasi "
+                "(Stage 00-14), penghapusan billing/kuota token, dan evolusi jaringan VERA. "
+                "Gunakan tool ini apabila pengguna bertanya tentang sejarah, masa lalu AIRA, "
+                "kenapa sistem berganti nama, atau keputusan teknis terdahulu."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Kata kunci pertanyaan tentang sejarah atau warisan sistem (misal: 'sejarah aira', 'alasan hapus billing', 'stage 14').",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "forget",
             "description": "Hapus fakta yang tersimpan berdasarkan key-nya.",
             "parameters": {
@@ -205,7 +236,7 @@ REI_TOOL_SCHEMAS = [
         "function": {
             "name": "list_workspace",
             "description": (
-                "Melihat isi folder di dalam AIRA Workspace (folder sandbox "
+                "Melihat isi folder di dalam VERA Workspace (folder sandbox "
                 "milik pengguna, sama persis dengan yang tampil di halaman "
                 "'Workspace' pada PWA - BUKAN seluruh filesystem komputer). "
                 "WAJIB dipakai untuk permintaan seperti 'file apa saja yang "
@@ -235,7 +266,7 @@ REI_TOOL_SCHEMAS = [
         "function": {
             "name": "read_file",
             "description": (
-                "Membaca isi sebuah file teks di dalam AIRA Workspace. WAJIB "
+                "Membaca isi sebuah file teks di dalam VERA Workspace. WAJIB "
                 "dipakai kalau user minta 'baca file X', 'apa isi "
                 "catatan.txt', dsb - JANGAN mengarang isi file."
             ),
@@ -251,7 +282,7 @@ REI_TOOL_SCHEMAS = [
         "function": {
             "name": "write_file",
             "description": (
-                "Menulis/membuat/menimpa isi sebuah file teks di dalam AIRA "
+                "Menulis/membuat/menimpa isi sebuah file teks di dalam VERA "
                 "Workspace. Kalau file sudah ada, isi lama otomatis disimpan "
                 "sebagai snapshot yang bisa di-restore sebelum ditimpa - "
                 "aman dipakai untuk mengedit file yang sudah ada."
@@ -270,10 +301,10 @@ REI_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "create_folder",
-            "description": "Membuat folder baru di dalam AIRA Workspace (termasuk folder induk yang belum ada).",
+            "description": "Membuat folder baru di dalam VERA Workspace (termasuk folder induk yang belum ada).",
             "parameters": {
                 "type": "object",
-                "properties": {"path": {"type": "string", "description": "Path relatif folder baru, mis. 'Projects/aira-os'."}},
+                "properties": {"path": {"type": "string", "description": "Path relatif folder baru, mis. 'Projects/network-core'."}},
                 "required": ["path"],
             },
         },
@@ -282,7 +313,7 @@ REI_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "move_file",
-            "description": "Memindahkan file/folder dari satu path ke path lain di dalam AIRA Workspace.",
+            "description": "Memindahkan file/folder dari satu path ke path lain di dalam VERA Workspace.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -297,7 +328,7 @@ REI_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "copy_file",
-            "description": "Menyalin file/folder ke path lain di dalam AIRA Workspace (sumber tetap ada).",
+            "description": "Menyalin file/folder ke path lain di dalam VERA Workspace (sumber tetap ada).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -312,7 +343,7 @@ REI_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "rename_file",
-            "description": "Mengganti nama file/folder di dalam AIRA Workspace (tetap di folder yang sama).",
+            "description": "Mengganti nama file/folder di dalam VERA Workspace (tetap di folder yang sama).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -328,7 +359,7 @@ REI_TOOL_SCHEMAS = [
         "function": {
             "name": "delete_file",
             "description": (
-                "Menghapus file/folder di dalam AIRA Workspace. TIDAK "
+                "Menghapus file/folder di dalam VERA Workspace. TIDAK "
                 "PERNAH permanen - item dipindahkan ke Trash workspace dan "
                 "masih bisa dikembalikan lewat restore_file()."
             ),
@@ -490,3 +521,9 @@ REI_TOOL_SCHEMAS.extend(ct.CONVERSATION_TOOL_SCHEMAS)
 REI_TOOLS.update(inv.INVENTORY_TOOLS)
 REI_TOOL_CATEGORY.update(inv.INVENTORY_TOOL_CATEGORY)
 REI_TOOL_SCHEMAS.extend(inv.INVENTORY_TOOL_SCHEMAS)
+
+# Tool artifact & attachment (artifact_tools.py)
+from agents.rei import artifact_tools as art
+REI_TOOLS.update(art.ARTIFACT_TOOLS)
+REI_TOOL_CATEGORY.update(art.ARTIFACT_TOOL_CATEGORY)
+REI_TOOL_SCHEMAS.extend(art.ARTIFACT_TOOL_SCHEMAS)

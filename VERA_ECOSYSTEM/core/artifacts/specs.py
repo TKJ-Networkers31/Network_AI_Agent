@@ -296,3 +296,98 @@ class PresentationSpec:
             sections=sections,
             conclusion=_str(data.get("conclusion")) or None,
         )
+
+
+# ============================================================ VISUALIZATION
+
+@dataclass
+class VisualizationNode:
+    id: str = ""
+    label: str = ""
+    type: str = "router"
+    ip: str = ""
+    status: str = "online"
+    details: dict = field(default_factory=dict)
+    x: Optional[float] = None
+    y: Optional[float] = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "VisualizationNode":
+        data = data if isinstance(data, dict) else {}
+        x = data.get("x")
+        y = data.get("y")
+        return cls(
+            id=_str(data.get("id")),
+            label=_str(data.get("label")) or _str(data.get("id")),
+            type=_str(data.get("type"), "router") or "router",
+            ip=_str(data.get("ip")),
+            status=_str(data.get("status"), "online") or "online",
+            details=data.get("details") if isinstance(data.get("details"), dict) else {},
+            x=float(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else None,
+            y=float(y) if isinstance(y, (int, float)) and not isinstance(y, bool) else None,
+        )
+
+
+@dataclass
+class VisualizationEdge:
+    id: str = ""
+    source: str = ""
+    target: str = ""
+    label: str = ""
+    status: str = "active"
+    speed: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "VisualizationEdge":
+        data = data if isinstance(data, dict) else {}
+        source = _str(data.get("source"))
+        target = _str(data.get("target"))
+        edge_id = _str(data.get("id")) or f"e-{source}-{target}"
+        return cls(
+            id=edge_id,
+            source=source,
+            target=target,
+            label=_str(data.get("label")),
+            status=_str(data.get("status"), "active") or "active",
+            speed=_str(data.get("speed")),
+        )
+
+
+@dataclass
+class VisualizationSpec:
+    title: str = "Interactive Network Topology"
+    description: str = ""
+    nodes: list[VisualizationNode] = field(default_factory=list)
+    edges: list[VisualizationEdge] = field(default_factory=list)
+    raw_svg: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "title": self.title,
+            "description": self.description,
+            "nodes": [n.to_dict() for n in self.nodes],
+            "edges": [e.to_dict() for e in self.edges],
+            "raw_svg": self.raw_svg,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Any) -> "VisualizationSpec":
+        data = data if isinstance(data, dict) else {}
+        raw_nodes = data.get("nodes")
+        nodes = [VisualizationNode.from_dict(n) for n in raw_nodes] if isinstance(raw_nodes, list) else []
+        raw_edges = data.get("edges")
+        edges = [VisualizationEdge.from_dict(e) for e in raw_edges] if isinstance(raw_edges, list) else []
+
+        return cls(
+            title=_str(data.get("title"), "Interactive Network Topology") or "Interactive Network Topology",
+            description=_str(data.get("description")),
+            nodes=nodes,
+            edges=edges,
+            raw_svg=_str(data.get("raw_svg")) or None,
+        )

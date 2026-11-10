@@ -45,7 +45,7 @@ export default function ComposerCockpit({
 
   return (
     <section
-      aria-label="AIRA composer cockpit"
+      aria-label="VERA composer cockpit"
       style={COCKPIT_VARS}
       className={`shrink-0 -mx-3 sm:-mx-5 lg:-mx-6
         bg-[color:var(--ck-bg)] text-[color:var(--ck-text)]

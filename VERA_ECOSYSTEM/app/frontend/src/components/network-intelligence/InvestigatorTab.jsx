@@ -185,7 +185,7 @@ export default function InvestigatorTab({
             <div className="bg-gradient-to-r from-cyan-950/40 via-card to-card border border-cyan-500/40 p-5 rounded-xl space-y-3">
               <div className="flex items-center gap-2 text-cyan-300 text-xs font-bold uppercase tracking-wider">
                 <Bot size={16} />
-                <span>Analisis Terstruktur & Rekomendasi AIRA</span>
+                <span>Analisis Terstruktur & Rekomendasi VERA</span>
               </div>
               <p className="text-sm text-white/90 leading-relaxed font-sans">
                 {inv.explanation.summary}

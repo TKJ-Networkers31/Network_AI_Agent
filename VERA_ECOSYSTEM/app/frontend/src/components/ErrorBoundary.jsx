@@ -14,7 +14,7 @@ export default class ErrorBoundary extends Component {
     // Keep this visible in the browser console for debugging - this is
     // the ONLY place a runtime error should ever be swallowed silently
     // instead of blanking the whole app.
-    console.error("AIRA UI crashed:", error, info?.componentStack);
+    console.error("VERA UI crashed:", error, info?.componentStack);
   }
 
   handleReload = () => {
@@ -33,7 +33,7 @@ export default class ErrorBoundary extends Component {
         </div>
         <h1 className="text-lg font-semibold">Terjadi kesalahan pada tampilan</h1>
         <p className="text-sm text-white/50 max-w-sm">
-          AIRA mengalami error yang tidak terduga di sisi frontend. Backend tetap berjalan normal.
+          VERA mengalami error yang tidak terduga di sisi frontend. Backend tetap berjalan normal.
           Coba muat ulang halaman.
         </p>
         {this.state.error?.message && (

@@ -56,6 +56,13 @@ class ConnectionManager:
                 remaining = self._connections.get(session_id, [])
                 self._connections[session_id] = [w for w in remaining if w not in dead]
 
+    async def broadcast(self, payload: dict) -> None:
+        """Broadcasts payload to all currently connected sessions."""
+        async with self._lock:
+            all_sessions = list(self._connections.keys())
+        for s_id in all_sessions:
+            await self.send(s_id, payload)
+
     async def broadcast_tenant(self, tenant_id: str, payload: dict) -> None:
         """Broadcasts message exclusively to sessions belonging to the given tenant."""
         async with self._lock:

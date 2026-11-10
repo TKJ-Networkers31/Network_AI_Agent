@@ -5,14 +5,18 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import ActionCardBlock from "./ActionCardBlock.jsx";
-import DOMPurify from "dompurify";
 import CopyButton from "./CopyButton.jsx";
 import { copyText } from "../utils/clipboard.js";
 import { useToast } from "./Toast.jsx";
 import { api } from "../api.js";
+import { buildSafeSvg, isSvgContent } from "../platform/adaptive-experience/assets/svgBuilder.js";
+import { validateImageUrl, IMAGE_SECURITY_ATTRIBUTES } from "../platform/adaptive-experience/assets/imagePolicy.js";
+import InteractiveSvgPreview from "./InteractiveSvgPreview.jsx";
+import ArtifactViewerModal from "./artifacts/ArtifactViewerModal.jsx";
+import { ExternalLink, Sparkles } from "lucide-react";
 
-// Lazy-load heavy visual diagram blocks to optimize initial bundle size (REC-25)
+// Lazy-load heavy visual diagram and interactive blocks to optimize initial bundle size (REC-25)
+const UnifiedActionCard = lazy(() => import("../platform/adaptive-experience/interactions/UnifiedActionCard.jsx"));
 const GraphBlock = lazy(() => import("./GraphBlock.jsx"));
 const MapBlock = lazy(() => import("./MapBlock.jsx"));
 const MermaidBlock = lazy(() => import("./MermaidBlock.jsx"));
@@ -48,13 +52,6 @@ const MermaidBlock = lazy(() => import("./MermaidBlock.jsx"));
 //    kalau gambar gagal dimuat (hotlink diblokir / URL kedaluwarsa).
 
  const SVG_LANGS = new Set(["svg", "xml", "html"]);
- const SVG_START_RE = /^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i;
- const SVG_END_RE = /<\/svg>\s*$/i;
- const DEFAULT_VIEWBOX = "0 0 720 400";
-
- function looksLikeSvg(raw) {
-   return SVG_START_RE.test(raw) && SVG_END_RE.test(raw);
- }
 
 // Diagram terstruktur (node/edge) - dirender lewat layout engine sendiri di
 // GraphBlock.jsx, BUKAN dari koordinat yang ditulis manual. Aktif hanya
@@ -65,81 +62,12 @@ function looksLikeGraphJson(raw) {
   return /"nodes"\s*:/.test(trimmed) && /"edges"\s*:/.test(trimmed);
 }
 
-// Sanitasi -> normalisasi viewBox -> serialisasi XML valid -> data URI.
-// Return null kalau bukan SVG yang bisa dipakai.
-function buildSvg(code) {
-  const clean = DOMPurify.sanitize(code, {
-    USE_PROFILES: { svg: true, svgFilters: true },
-    ADD_TAGS: ["style"], // aman: dirender di <img>, terisolasi
-  });
-
-  const host = document.createElement("div");
-  host.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;pointer-events:none;";
-  host.innerHTML = clean;
-
-  const svg = host.querySelector("svg");
-  if (!svg) return null;
-
-  if (!svg.getAttribute("viewBox")) {
-    const w = parseFloat(svg.getAttribute("width"));
-    const h = parseFloat(svg.getAttribute("height"));
-    svg.setAttribute("viewBox", w > 0 && h > 0 ? `0 0 ${w} ${h}` : DEFAULT_VIEWBOX);
-  }
-
-  let viewBoxParts = svg.getAttribute("viewBox").split(/[\s,]+/).map(Number);
-
-  // FIX (text clipping): ukur bounding box RIIL konten terhadap viewBox
-  // yang dideklarasikan, lalu perbesar viewBox kalau ada yang meluber -
-  // sebelumnya teks/shape yang keluar viewBox dari LLM langsung terpotong
-  // tanpa peringatan apa pun.
-  try {
-    document.body.appendChild(host);
-    const bbox = svg.getBBox();
-    const [vx, vy, vw, vh] = viewBoxParts;
-    const pad = 8;
-
-    const minX = Math.min(vx, bbox.x - pad);
-    const minY = Math.min(vy, bbox.y - pad);
-    const maxX = Math.max(vx + vw, bbox.x + bbox.width + pad);
-    const maxY = Math.max(vy + vh, bbox.y + bbox.height + pad);
-
-    if (minX !== vx || minY !== vy || maxX !== vx + vw || maxY !== vy + vh) {
-      viewBoxParts = [minX, minY, maxX - minX, maxY - minY];
-      svg.setAttribute("viewBox", viewBoxParts.join(" "));
-    }
-  } catch {
-    // getBBox gagal/tidak didukung (mis. SVG kosong) - pakai viewBox apa adanya.
-  } finally {
-    if (host.parentNode) host.parentNode.removeChild(host);
-  }
-
-  const [, , viewBoxWidth, viewBoxHeight] = viewBoxParts;
-  const aspectRatio = viewBoxWidth / (viewBoxHeight || 1);
-
-  // Ukuran diatur CSS (responsif), bukan atribut tetap dari LLM.
-  svg.removeAttribute("width");
-  svg.removeAttribute("height");
-
-  const xml = new XMLSerializer().serializeToString(svg);
-
-  // FIX (responsive): diagram lebar-pendek (rasio besar, mis. flow
-  // horizontal) sebelumnya di-cap sama sempitnya dengan diagram biasa -
-  // teksnya jadi kekecilan waktu di-scale turun paksa ke 880px.
-  const widthCap = aspectRatio > 2 ? 1100 : 880;
-
-  return {
-    xml,
-    uri: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`,
-    maxWidth: Math.min(Math.max(viewBoxWidth || 720, 320), widthCap),
-  };
- }
-
 function downloadSvg(xml) {
   const blob = new Blob([xml], { type: "image/svg+xml" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "aira-ilustrasi.svg";
+  link.download = "vera-ilustrasi.svg";
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -173,89 +101,7 @@ function ZoomOverlay({ children, onClose }) {
 }
 
 function SvgBlock({ code }) {
-  const built = useMemo(() => {
-    try {
-      return buildSvg(code);
-    } catch {
-      return null;
-    }
-  }, [code]);
-
-  const [showCode, setShowCode] = useState(false);
-  const [zoom, setZoom] = useState(false);
-  const [broken, setBroken] = useState(false);
-    const { notify } = useToast();
-
-  // SVG hanya preview. Masuk Workspace HANYA kalau user menekan tombol ini.
-  async function handleSaveToWorkspace() {
-    if (!built) return;
-    const path = `Images/aira-ilustrasi-${Date.now()}.svg`;
-    try {
-      await api.workspace.write(path, built.xml);
-      notify({ type: "success", message: `Disimpan ke Workspace: ${path}`, duration: 3500 });
-    } catch (err) {
-      notify({ type: "error", message: `Gagal menyimpan: ${err.message || err}` });
-    }
-  }
-
-  if (!built || broken) {
-    return (
-      <BlockCode
-        lang="svg"
-        raw={code}
-        note="SVG tidak valid - ditampilkan sebagai kode"
-      />
-    );
-  }
-
-  return (
-    <div className="my-3 rounded-xl2 border border-border overflow-hidden">
-      <div className="flex items-center justify-between pl-3 pr-1.5 py-1 bg-white/5 border-b border-border">
-        <span className="text-[10px] uppercase tracking-wide text-white/40">ilustrasi</span>
-        <div className="flex items-center gap-0.5">
-          <button type="button" onClick={() => setShowCode((v) => !v)} className={HEADER_BUTTON}>
-            {showCode ? "Sembunyikan kode" : "Kode"}
-          </button>
-          <button type="button" onClick={() => downloadSvg(built.xml)} className={HEADER_BUTTON}>
-            Unduh
-          </button>
-          <button type="button" onClick={handleSaveToWorkspace} className={HEADER_BUTTON}>
-            Simpan ke Workspace
-          </button>
-          <CopyButton text={code} label="Salin" title="Salin kode SVG" />
-        </div>
-      </div>
-
-      <div className="bg-[#050814] border border-white/10 rounded-2xl p-4 flex justify-center">
-        <img
-          src={built.uri}
-          alt="Ilustrasi SVG"
-          draggable={false}
-          onError={() => setBroken(true)}
-          onClick={() => setZoom(true)}
-          className="w-full h-auto cursor-zoom-in select-none"
-          style={{ maxWidth: built.maxWidth }}
-        />
-      </div>
-
-      {showCode && (
-        <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed bg-black/30 border-t border-border">
-          <code className="font-mono text-white/85">{code}</code>
-        </pre>
-      )}
-
-      {zoom && (
-        <ZoomOverlay onClose={() => setZoom(false)}>
-          <img
-            src={built.uri}
-            alt="Ilustrasi SVG (diperbesar)"
-            className="h-auto max-h-[88vh] bg-[#050814] border border-white/10 rounded-2xl p-4"
-            style={{ width: "min(92vw, 1100px)" }}
-          />
-        </ZoomOverlay>
-      )}
-    </div>
-  );
+  return <InteractiveSvgPreview code={code} />;
 }
 
 // Gambar dari Markdown ![alt](url) - terutama hasil tool web_image_search.
@@ -265,12 +111,28 @@ function MarkdownImage({ src, alt }) {
   const [failed, setFailed] = useState(false);
   const [zoom, setZoom] = useState(false);
 
+  const securityCheck = useMemo(() => validateImageUrl(src), [src]);
+
   if (!src) return null;
+
+  if (!securityCheck.valid) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 mr-2 mb-2 px-2.5 py-1 rounded-pill bg-red-500/10 border border-red-500/20 text-xs text-red-300"
+        title={securityCheck.reason}
+      >
+        <span>⚠️</span>
+        <span className="truncate max-w-[16rem]">Gambar diblokir kebijakan keamanan</span>
+      </span>
+    );
+  }
+
+  const safeSrc = securityCheck.sanitizedUrl || src;
 
   if (failed) {
     return (
       <a
-        href={src}
+        href={safeSrc}
         target="_blank"
         rel="noreferrer"
         className="inline-flex items-center gap-1.5 mr-2 mb-2 px-2.5 py-1 rounded-pill bg-white/5 border border-border text-xs text-white/60 hover:text-white transition"
@@ -285,10 +147,9 @@ function MarkdownImage({ src, alt }) {
     <>
       <span className="inline-block align-top mr-2 mb-2 max-w-full">
         <img
-          src={src}
+          src={safeSrc}
           alt={alt || ""}
-          loading="lazy"
-          referrerPolicy="no-referrer"
+          {...IMAGE_SECURITY_ATTRIBUTES}
           onError={() => setFailed(true)}
           onClick={(e) => {
             e.preventDefault();
@@ -306,9 +167,9 @@ function MarkdownImage({ src, alt }) {
       {zoom && (
         <ZoomOverlay onClose={() => setZoom(false)}>
           <img
-            src={src}
+            src={safeSrc}
             alt={alt || ""}
-            referrerPolicy="no-referrer"
+            {...IMAGE_SECURITY_ATTRIBUTES}
             className="max-w-[92vw] max-h-[88vh] w-auto h-auto rounded-xl2"
           />
         </ZoomOverlay>
@@ -408,7 +269,11 @@ function CodeBlock({ className, children }) {
 
   // Interactive Form & Action Plan card (Workstream H)
   if (lang === "action-card" || lang === "action" || lang === "action_plan") {
-    return <ActionCardBlock code={raw} />;
+    return (
+      <Suspense fallback={<div className="p-4 rounded-xl bg-white/[0.02] border border-white/10 text-xs text-text-secondary animate-pulse">Memuat kartu aksi...</div>}>
+        <UnifiedActionCard code={raw} />
+      </Suspense>
+    );
   }
 
   // Mermaid diagrams (Workstream H)
@@ -433,7 +298,7 @@ function CodeBlock({ className, children }) {
   // SVG: ```svg, atau ```xml/```html/tanpa bahasa yang isinya <svg>...</svg> utuh.
   const svgCandidate = !lang || SVG_LANGS.has(lang);
 
-  if (svgCandidate && looksLikeSvg(raw)) {
+  if (svgCandidate && isSvgContent(raw)) {
     return <SvgBlock code={raw} />;
   }
 
@@ -442,6 +307,61 @@ function CodeBlock({ className, children }) {
   }
 
   return <BlockCode lang={lang} raw={raw} />;
+}
+
+function MarkdownLink({ children, href }) {
+  const [showModal, setShowModal] = useState(false);
+  const hrefStr = typeof href === "string" ? href : "";
+  const isArtifactView = hrefStr.includes("/api/artifacts/") && hrefStr.includes("/view");
+
+  if (isArtifactView) {
+    const downloadUrl = hrefStr.replace("/view", "/download");
+    const titleStr = typeof children === "string" ? children : "Interactive Visualization Artifact";
+    return (
+      <>
+        <span className="inline-flex items-center gap-1.5 my-1 px-2.5 py-1 rounded-xl bg-slate-900/90 border border-cyan-500/30 text-white shadow-sm hover:border-cyan-400 transition-all">
+          <Sparkles className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+          <button
+            type="button"
+            onClick={() => setShowModal(true)}
+            className="text-xs font-semibold text-cyan-300 hover:text-white underline decoration-cyan-400/40 hover:decoration-cyan-300 transition-colors"
+          >
+            {children}
+          </button>
+          <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-500/30">
+            Interactive
+          </span>
+          <a
+            href={hrefStr}
+            target="_blank"
+            rel="noreferrer"
+            className="p-1 text-slate-400 hover:text-white transition-colors"
+            title="Buka di Tab Baru"
+          >
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        </span>
+        <ArtifactViewerModal
+          isOpen={showModal}
+          onClose={() => setShowModal(false)}
+          artifactUrl={hrefStr}
+          artifactTitle={titleStr}
+          downloadUrl={downloadUrl}
+        />
+      </>
+    );
+  }
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-accent-light underline decoration-accent-light/30 hover:decoration-accent-light"
+    >
+      {children}
+    </a>
+  );
 }
 
 const components = {
@@ -459,16 +379,7 @@ const components = {
   ),
   strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
   em: ({ children }) => <em className="italic text-white/80">{children}</em>,
-  a: ({ children, href }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="text-accent-light underline decoration-accent-light/30 hover:decoration-accent-light"
-    >
-      {children}
-    </a>
-  ),
+  a: MarkdownLink,
   img: MarkdownImage,
   ul: ({ children }) => (
     <ul className="list-disc pl-5 space-y-1 text-sm text-white/90 mb-2.5">{children}</ul>

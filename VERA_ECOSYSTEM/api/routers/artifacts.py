@@ -19,9 +19,11 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from core.artifacts import ArtifactType, DocumentSpec, PresentationSpec, SpreadsheetSpec, CsvSpec
+from core.artifacts import (
+    ArtifactType, DocumentSpec, PresentationSpec, SpreadsheetSpec, CsvSpec, VisualizationSpec,
+)
 from core.artifacts.engine import get_artifact_engine
-from core.artifacts.models import DOCUMENT_TYPES, PRESENTATION_TYPES, SPREADSHEET_TYPES
+from core.artifacts.models import DOCUMENT_TYPES, PRESENTATION_TYPES, SPREADSHEET_TYPES, VISUALIZATION_TYPES
 
 router = APIRouter(prefix="/api/artifacts", tags=["artifacts"])
 
@@ -65,6 +67,12 @@ def create_artifact(payload: CreateArtifactRequest):
             spec, artifact_type, session_id=payload.session_id,
             name=payload.name, source=payload.source, metadata=payload.metadata,
         )
+    elif artifact_type in VISUALIZATION_TYPES:
+        spec = VisualizationSpec.from_dict(payload.spec)
+        result = engine.create_visualization(
+            spec, artifact_type, session_id=payload.session_id,
+            name=payload.name, source=payload.source, metadata=payload.metadata,
+        )
     else:
         raise HTTPException(status_code=400, detail=f"artifact_type '{artifact_type}' tidak didukung.")
 
@@ -105,6 +113,30 @@ def download_artifact(artifact_id: str):
         raise HTTPException(status_code=404, detail="File artifact tidak ditemukan di disk.")
 
     return FileResponse(path=str(absolute_path), filename=artifact.name, media_type=artifact.mime_type)
+
+
+@router.get("/{artifact_id}/view")
+def view_artifact(artifact_id: str):
+    from fastapi.responses import FileResponse
+    from core.filesystem import get_workspace_manager
+
+    artifact = get_artifact_engine().get(artifact_id)
+    if artifact is None or not artifact.storage_reference:
+        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' tidak ditemukan atau belum siap.")
+
+    try:
+        absolute_path = get_workspace_manager().resolve(artifact.storage_reference)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"File artifact tidak dapat diakses: {exc}")
+
+    if not absolute_path.exists():
+        raise HTTPException(status_code=404, detail="File artifact tidak ditemukan di disk.")
+
+    return FileResponse(
+        path=str(absolute_path),
+        media_type=artifact.mime_type or "text/html",
+        content_disposition_type="inline",
+    )
 
 
 @router.delete("/{artifact_id}")

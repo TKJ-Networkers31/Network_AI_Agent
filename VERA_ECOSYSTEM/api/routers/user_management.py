@@ -75,7 +75,7 @@ class PermissionsPreviewRequest(BaseModel):
 
 
 class UserSimulationRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None
     resource: str
     action: str
     site_id: Optional[str] = None
@@ -373,8 +373,32 @@ def simulate_permissions(
     """Simulates permission evaluation across Org -> UserGroup -> Site -> Subtab -> Resource -> Action."""
     from core.tenant.permission_simulation import get_permission_simulation_service
     svc = get_permission_simulation_service()
+
+    # Authoritative principal derivation: default to authenticated caller
+    effective_user_id = ctx.user_id
+
+    # If simulating another user, enforce administrative privilege & tenant isolation
+    if payload.user_id and payload.user_id != ctx.user_id:
+        has_admin_perm = bool(ctx.permissions.intersection({"permissions.manage", "users.manage", "tenant.admin", "security.admin"}))
+        is_admin_group = any(g in ("SUPER_ADMIN", "ADMIN", "TENANT_ADMIN") for g in ctx.groups)
+        if not ctx.is_internal and not has_admin_perm and not is_admin_group:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Hanya administrator yang diizinkan melakukan simulasi izin untuk pengguna lain.",
+            )
+        if not ctx.is_internal and ctx.tenant_id:
+            from core.tenant.rbac_service import get_rbac_service
+            rbac_svc = get_rbac_service()
+            target_user = rbac_svc.get_user(payload.user_id)
+            if not target_user or target_user.get("tenant_id") != ctx.tenant_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Akses lintas tenant ditolak. Pengguna target tidak berada dalam organisasi Anda.",
+                )
+        effective_user_id = payload.user_id
+
     result = svc.simulate_permission(
-        user_id=payload.user_id,
+        user_id=effective_user_id,
         resource=payload.resource,
         action=payload.action,
         site_id=payload.site_id,

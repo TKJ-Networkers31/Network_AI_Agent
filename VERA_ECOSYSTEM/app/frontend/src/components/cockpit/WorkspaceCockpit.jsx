@@ -72,7 +72,7 @@ export default function WorkspaceCockpit({
 
   return (
     <section
-      aria-label="AIRA cockpit"
+      aria-label="VERA cockpit"
       style={COCKPIT_VARS}
       className={`shrink-0 ${bleed ? "-mx-3 sm:-mx-5 lg:-mx-6" : ""} mb-2 sm:mb-3
         bg-[color:var(--ck-bg)] text-[color:var(--ck-text)] border-b border-[color:var(--ck-border)] ${className}`}

@@ -10,11 +10,27 @@ export const LABEL_OPTIONS = [
   { value: "automation", label: "Automation" },
 ];
 
+export const CAPABILITY_OPTIONS = [
+  { value: "all", label: "All Capabilities" },
+  { value: "tool_calling", label: "Tool Calling" },
+  { value: "streaming", label: "Streaming" },
+  { value: "vision", label: "Vision / Multimodal" },
+  { value: "structured_output", label: "Structured Output (JSON)" },
+  { value: "audio", label: "Audio / Voice" },
+];
+
+export const LIFECYCLE_OPTIONS = [
+  { value: "all", label: "All Lifecycles" },
+  { value: "ACTIVE", label: "Active" },
+  { value: "EXPERIMENTAL", label: "Experimental" },
+  { value: "DEPRECATED_PENDING", label: "Deprecated (Pending)" },
+  { value: "DEPRECATED", label: "Deprecated" },
+];
+
 export const PROVIDER_OPTIONS = [
-  { value: "ollama", label: "Ollama (Lokal)" },
-  { value: "openrouter", label: "OpenRouter" },
-  { value: "gemini", label: "Google Gemini" },
-  { value: "nvidia", label: "NVIDIA NIM" },
+  { value: "nvidia", label: "NVIDIA NIM (integrate.api.nvidia.com)" },
+  { value: "openrouter", label: "OpenRouter (openrouter.ai)" },
+  { value: "gemini", label: "Google Gemini (generativelanguage.googleapis.com)" },
 ];
 
 export function formatContext(tokens) {

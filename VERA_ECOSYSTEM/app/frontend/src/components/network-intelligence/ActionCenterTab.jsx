@@ -357,7 +357,7 @@ export default function ActionCenterTab({
                 ? `Anda akan menyetujui tindakan [${selectedAction.risk_level}] pada perangkat ${(selectedAction.target_devices || []).join(", ")}. Tindakan ini akan diberi izin untuk dieksekusi.`
                 : confirmType === "REJECT"
                 ? "Tindakan ini akan ditolak dan dibatalkan dari antrean operasional."
-                : `AIRA akan menjalankan perubahan konfigurasi pada ${(selectedAction.target_devices || []).join(", ")} dan langsung memverifikasi hasilnya.`}
+                : `VERA akan menjalankan perubahan konfigurasi pada ${(selectedAction.target_devices || []).join(", ")} dan langsung memverifikasi hasilnya.`}
             </p>
 
             {confirmType !== "EXECUTE" && (

@@ -21,8 +21,11 @@ from pathlib import Path
 import sqlite3
 import threading
 import time
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set, Tuple
 import uuid
+
+if TYPE_CHECKING:
+    from core.routing.route_collector import MultiDeviceRouteCollector
 
 from core.canonical_network import CanonicalDevice, CanonicalNetworkRegistry, get_canonical_registry
 from core.network_intelligence.evidence import COMMAND_MAP_V7
@@ -37,7 +40,6 @@ from core.network_intelligence.intelligence_models import (
 )
 from core.network_intelligence.multi_device_collector import MultiDeviceEvidenceOrchestrator
 from core.network_intelligence.security import redact_sensitive_values
-from core.routing.route_collector import MultiDeviceRouteCollector, get_route_collector
 from core.routing.unified_route_parser import NormalizedRoute, RouteType
 from core.topology_db import DEFAULT_TOPOLOGY_DB_PATH, get_topology_connection
 
@@ -198,7 +200,11 @@ class UnifiedEvidenceService:
     ) -> None:
         self.db_path = (Path(topology_db_path) if topology_db_path else DEFAULT_TOPOLOGY_DB_PATH).resolve()
         self.registry = registry or get_canonical_registry()
-        self.route_collector = route_collector or get_route_collector()
+        if route_collector is not None:
+            self.route_collector = route_collector
+        else:
+            from core.routing.route_collector import get_route_collector
+            self.route_collector = get_route_collector()
         self.ssh_orchestrator = ssh_orchestrator or MultiDeviceEvidenceOrchestrator(registry=self.registry)
 
         self._lock = threading.RLock()

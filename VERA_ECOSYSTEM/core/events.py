@@ -161,6 +161,14 @@ class EventNames:
     MODEL_SWITCHED = "model.switched"
     MODEL_SELECTED = "model.selected"
     MODEL_FALLBACK = "model.fallback"
+    MODEL_REGISTRY_UPDATED = "model.registry.updated"
+    MODEL_STATUS_CHANGED = "model.status.changed"
+    PROVIDER_HEALTH_CHANGED = "provider.health.changed"
+    MODEL_AVAILABILITY_CHANGED = "model.availability.changed"
+    MODEL_PRIORITY_CHANGED = "model.priority.changed"
+    MODEL_DISCOVERY_COMPLETED = "model.discovery.completed"
+    MODEL_SYNC_FAILED = "model.sync.failed"
+    ACTIVE_MODEL_CHANGED = "active.model.changed"
 
     # TASK
     TASK_CLASSIFIED = "task.classified"

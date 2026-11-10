@@ -31,7 +31,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 
 const GROUPS_KEY = "vera_sidebar_groups";
 const LEGACY_GROUPS_KEY = "aira_sidebar_groups";
-const DEFAULT_OPEN = { main: true, admin: true, sessions: true };
+const DEFAULT_OPEN = { observability: true, engineering: true, admin: true, main: true, sessions: true };
 
 function loadOpenGroups() {
   try {

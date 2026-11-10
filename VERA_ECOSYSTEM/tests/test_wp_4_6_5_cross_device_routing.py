@@ -436,7 +436,8 @@ def test_cross_device_api_and_non_destructive_topology_overlay(tmp_path, monkeyp
     app.dependency_overrides[require_topology_admin] = lambda: "admin_tester"
 
     try:
-        client = TestClient(app)
+        from tests.auth_helper import get_test_auth_headers
+        client = TestClient(app, headers=get_test_auth_headers())
         edges_before = len(topo_eng.get_topology().get("edges", []))
 
         r1 = client.post(

@@ -11,9 +11,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-from core.artifacts.models import ArtifactType, DOCUMENT_TYPES, SPREADSHEET_TYPES, PRESENTATION_TYPES
+from core.artifacts.models import (
+    ArtifactType, DOCUMENT_TYPES, SPREADSHEET_TYPES, PRESENTATION_TYPES, VISUALIZATION_TYPES,
+)
 from core.artifacts.specs import (
-    CsvSpec, DocumentSpec, PresentationSpec, SpreadsheetSpec, VALID_COLUMN_FORMATS,
+    CsvSpec, DocumentSpec, PresentationSpec, SpreadsheetSpec, VisualizationSpec, VALID_COLUMN_FORMATS,
 )
 
 
@@ -198,6 +200,40 @@ def validate_presentation_spec(spec: PresentationSpec) -> ValidationResult:
     return _result(issues)
 
 
+# ------------------------------------------------------------ visualization
+
+def validate_visualization_spec(spec: VisualizationSpec) -> ValidationResult:
+    issues: list[ValidationIssue] = []
+
+    if not isinstance(spec, VisualizationSpec):
+        return ValidationResult(False, [ValidationIssue("spec", "harus berupa VisualizationSpec.")])
+
+    if not spec.title or not spec.title.strip():
+        issues.append(ValidationIssue("title", "title wajib diisi."))
+
+    if not spec.nodes and not spec.raw_svg:
+        issues.append(ValidationIssue("nodes", "visualisasi butuh minimal satu node atau raw_svg."))
+
+    node_ids = set()
+    for index, node in enumerate(spec.nodes):
+        prefix = f"nodes[{index}]"
+        if not node.id or not node.id.strip():
+            issues.append(ValidationIssue(f"{prefix}.id", "node butuh id."))
+        elif node.id in node_ids:
+            issues.append(ValidationIssue(f"{prefix}.id", f"node id '{node.id}' duplikat."))
+        else:
+            node_ids.add(node.id)
+
+    for index, edge in enumerate(spec.edges):
+        prefix = f"edges[{index}]"
+        if not edge.source:
+            issues.append(ValidationIssue(f"{prefix}.source", "edge butuh source."))
+        if not edge.target:
+            issues.append(ValidationIssue(f"{prefix}.target", "edge butuh target."))
+
+    return _result(issues)
+
+
 def validate_for_type(spec, artifact_type: str) -> ValidationResult:
     """Dispatch by artifact_type family - used by ArtifactEngine before it
     ever calls a generator."""
@@ -214,6 +250,8 @@ def validate_for_type(spec, artifact_type: str) -> ValidationResult:
         return validate_presentation_spec(spec)
     if artifact_type in DOCUMENT_TYPES:
         return validate_document_spec(spec)
+    if artifact_type in VISUALIZATION_TYPES:
+        return validate_visualization_spec(spec)
 
     return ValidationResult(False, [ValidationIssue(
         "artifact_type", f"'{artifact_type}' tidak dikenal oleh validator.",

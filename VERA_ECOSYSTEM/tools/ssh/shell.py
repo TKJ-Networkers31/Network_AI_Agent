@@ -207,7 +207,7 @@ class PersistentShell:
 
         self.channel.send(command.strip() + "\r\n")
 
-        raw, prompt_matched = self._read_until_prompt(timeout=timeout)
+        raw, prompt_matched = self._read_until_prompt(timeout=timeout, command=command)
         cleaned = self._clean_output(raw, command)
 
         return {"output": cleaned, "prompt_matched": prompt_matched}
@@ -305,11 +305,12 @@ class PersistentShell:
 
         return buffer
 
-    def _read_until_prompt(self, timeout: float) -> "tuple[str, bool]":
+    def _read_until_prompt(self, timeout: float, command: str = "") -> "tuple[str, bool]":
         buffer = ""
         start = time.time()
         last_data = time.time()
         prompt_matched = False
+        is_delayed_cmd = bool(command and (":delay" in command.lower() or "ping" in command.lower() or "traceroute" in command.lower()))
 
         while True:
             if self.channel.recv_ready():
@@ -355,11 +356,15 @@ class PersistentShell:
                     )
                     break
 
-                # Tidak ada prompt match tapi sudah lama tidak ada data
-                # baru -> anggap output sudah selesai (bukan timeout,
-                # tapi tetap tidak match - prompt_matched tetap False).
-                if buffer and (time.time() - last_data) > 1.5:
-                    break
+                # If the command has delay or only command echo has arrived, do NOT break early
+                probe = ANSI_ESCAPE_RE.sub("", buffer)
+                probe_clean = CONTROL_CHARS_RE.sub("", probe).strip()
+                cmd_stripped = command.strip() if command else ""
+                only_echo_received = bool(probe_clean and cmd_stripped and probe_clean == cmd_stripped)
+
+                if not is_delayed_cmd and not only_echo_received:
+                    if buffer and (time.time() - last_data) > 3.0:
+                        break
 
                 time.sleep(0.05)
 

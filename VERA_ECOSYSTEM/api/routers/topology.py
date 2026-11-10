@@ -58,17 +58,23 @@ def _probe_tcp_port(host: str, port: int, timeout_sec: float = 3.0) -> tuple[boo
 def require_topology_admin(request: Request) -> str:
     """
     Authorization guard for state-mutating and administrative topology actions.
-    - When `AIRA_TOPOLOGY_ADMIN_TOKEN` or `AIRA_ADMIN_TOKEN` is configured, requires a matching
-      token via `X-AIRA-Admin-Token` or `Authorization: Bearer <token>`.
+    - When `VERA_TOPOLOGY_ADMIN_TOKEN` / `AIRA_TOPOLOGY_ADMIN_TOKEN` is configured, requires a matching
+      token via `X-VERA-Admin-Token` / `X-AIRA-Admin-Token` or `Authorization: Bearer <token>`.
     - Otherwise (default local workstation deployment), restricts mutations to loopback/local clients.
     """
     expected_token = (
-        os.environ.get("AIRA_TOPOLOGY_ADMIN_TOKEN")
+        os.environ.get("VERA_TOPOLOGY_ADMIN_TOKEN")
+        or os.environ.get("AIRA_TOPOLOGY_ADMIN_TOKEN")
+        or os.environ.get("VERA_ADMIN_TOKEN")
         or os.environ.get("AIRA_ADMIN_TOKEN")
         or ""
     ).strip()
 
-    header_token = (request.headers.get("X-AIRA-Admin-Token") or "").strip()
+    header_token = (
+        request.headers.get("X-VERA-Admin-Token")
+        or request.headers.get("X-AIRA-Admin-Token")
+        or ""
+    ).strip()
     if not header_token:
         auth_hdr = (request.headers.get("Authorization") or "").strip()
         if auth_hdr.lower().startswith("bearer "):
@@ -85,10 +91,15 @@ def require_topology_admin(request: Request) -> str:
         if client_host and client_host not in _LOCAL_HOSTS:
             raise HTTPException(
                 status_code=403,
-                detail="Forbidden: remote topology modifications require AIRA_TOPOLOGY_ADMIN_TOKEN.",
+                detail="Forbidden: remote topology modifications require VERA_TOPOLOGY_ADMIN_TOKEN.",
             )
 
-    actor = sanitize_untrusted_text(request.headers.get("X-AIRA-Actor") or "admin", 64)
+    actor = sanitize_untrusted_text(
+        request.headers.get("X-VERA-Actor")
+        or request.headers.get("X-AIRA-Actor")
+        or "admin",
+        64,
+    )
     return actor or "admin"
 
 

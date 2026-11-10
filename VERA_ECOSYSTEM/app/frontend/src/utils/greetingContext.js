@@ -61,7 +61,7 @@ export const ACTIVITY_STATE = Object.freeze({
 });
 
 export const DEFAULT_GREETING_SETTINGS = Object.freeze({
-  assistant_name: "AIRA",
+  assistant_name: "VERA",
   timezone: "Asia/Jakarta",
   language: "id",
 });
